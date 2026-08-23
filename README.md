@@ -28,7 +28,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 各平台支持声明以目标主机最近一次显式门禁记录为准。绑定时会检查文件系统能力；NFS、SMB、FAT/exFAT、Windows 网络映射盘、可移动 NTFS 卷，以及无法确认所需原子性和路径安全能力的文件系统会被拒绝。
 
-当前版本只有 `filecloud` 命令行程序，服务端和客户端使用同一个二进制。以下能力暂不提供：
+正式发布包提供两个命令入口：`filecloud-server` 用于服务端初始化、运行和本地维护，`filecloud` 用于登录、资料库管理和同步。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署和自动化必须使用 `filecloud-server`。以下能力暂不提供：
 
 - Docker 镜像、Web 管理界面、桌面 GUI 和移动客户端
 - WebDAV、虚拟盘、S3 或其他对象存储后端
@@ -40,7 +40,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 ## 获取与构建
 
-正式版本可从 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。每个归档都包含二进制、项目许可证、部署说明和对应目标平台的第三方依赖许可材料。
+正式版本可从 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。每个归档都包含 `filecloud` 和 `filecloud-server` 两个二进制、项目许可证、部署说明和对应目标平台的第三方依赖许可材料。
 
 从源码构建需要 Go 1.26.6：
 
@@ -48,7 +48,9 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
+CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
 ./filecloud version
+./filecloud-server version
 ```
 
 源码构建的版本号为 `dev`。正式发布包会显示 tag、commit 和构建日期。
@@ -62,18 +64,18 @@ CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
 ```bash
 DATA_DIR="$HOME/.local/share/filecloud-server"
 
-./filecloud init --data-dir "$DATA_DIR"
+./filecloud-server init --data-dir "$DATA_DIR"
 
 read -r -s PASSWORD
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  ./filecloud user add \
+  ./filecloud-server user add \
     --data-dir "$DATA_DIR" \
     --username alice \
     --password-stdin
 unset PASSWORD
 
-./filecloud serve \
+./filecloud-server serve \
   --data-dir "$DATA_DIR" \
   --listen 127.0.0.1:8080
 ```
@@ -147,14 +149,14 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 
 | 用途 | 命令 |
 |---|---|
-| 初始化和启动服务 | `filecloud init`、`filecloud serve` |
-| 管理用户 | `filecloud user add`、`filecloud user reset-password` |
+| 初始化和启动服务 | `filecloud-server init`、`filecloud-server serve` |
+| 管理用户 | `filecloud-server user add`、`filecloud-server user reset-password` |
 | 管理会话 | `filecloud login`、`filecloud logout` |
 | 管理资料库 | `filecloud library create/list/inspect/bind/unbind` |
 | 同步 | `filecloud library sync/watch` |
 | 浏览与恢复历史 | `filecloud library history list/inspect`、`filecloud library restore` |
-| 服务端维护 | `filecloud integrity check`、`filecloud gc` |
-| 查看构建信息 | `filecloud version` |
+| 服务端维护 | `filecloud-server integrity check`、`filecloud-server gc` |
+| 查看构建信息 | `filecloud version`、`filecloud-server version` |
 
 `integrity check` 和 `gc` 会取得数据目录独占锁，必须停止 `serve` 后离线运行。完整参数、首次导入、多设备绑定、冲突处理、删除确认、历史恢复和生产部署示例见[部署与客户端使用](./docs/operations/deployment-and-client.md)。
 
@@ -207,6 +209,6 @@ go test ./cmd/filecloud -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -tim
 
 ## 版本与许可
 
-正式 `vMAJOR.MINOR.PATCH` tag 通过 1B/1C 门禁后，会生成 Linux amd64、macOS arm64 和 Windows amd64 归档。每个平台的成品二进制还会执行初始化、登录、资料库创建、绑定和同步冒烟测试，并随附 SHA-256 校验文件。
+正式 `vMAJOR.MINOR.PATCH` tag 通过 1B/1C 门禁后，会生成 Linux amd64、macOS arm64 和 Windows amd64 归档。每个平台的 `filecloud-server` 与 `filecloud` 会共同执行初始化、登录、资料库创建、绑定和同步冒烟测试，并随附 SHA-256 校验文件。
 
 项目采用 [MIT License](./LICENSE)。正式归档同时提供由目标平台实际编译依赖生成的第三方模块清单和原始许可文本。

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -98,12 +97,6 @@ func TestRunLogsStructuredCommandLifecycleWithoutSensitivePaths(t *testing.T) {
 	}
 }
 
-func TestDefaultListenIsLoopback(t *testing.T) {
-	if _defaultListen != "127.0.0.1:8080" {
-		t.Fatalf("default listen = %q, want loopback", _defaultListen)
-	}
-}
-
 func TestServeResourceLimitFlags(t *testing.T) {
 	var help bytes.Buffer
 	err := run(t.Context(), []string{"serve", "--help"}, strings.NewReader(""), io.Discard, &help)
@@ -179,52 +172,6 @@ func TestServeResourceLimitFlags(t *testing.T) {
 		command.stop()
 		t.Fatal("timed out waiting for serve with custom KDF capacities")
 	}
-}
-
-func TestRequestTrackerStopsNewWorkAndDrainsActiveRequest(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	requestDone := make(chan struct{})
-	tracker := newRequestTracker(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(started)
-		<-release
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	go func() {
-		defer close(requestDone)
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				t.Errorf("request panic: %v", recovered)
-			}
-		}()
-		tracker.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	}()
-	<-started
-
-	tracker.stop()
-	rejected := httptest.NewRecorder()
-	tracker.ServeHTTP(rejected, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rejected.Code != http.StatusServiceUnavailable {
-		t.Fatalf("request after stop status = %d, want %d", rejected.Code, http.StatusServiceUnavailable)
-	}
-	waitDone := make(chan struct{})
-	go func() {
-		defer close(waitDone)
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				t.Errorf("wait panic: %v", recovered)
-			}
-		}()
-		tracker.wait()
-	}()
-	select {
-	case <-waitDone:
-		t.Fatal("tracker drained before active request completed")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	<-requestDone
-	<-waitDone
 }
 
 func TestServeHealthLockConflictAndShutdown(t *testing.T) {

@@ -58,17 +58,20 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            executable: filecloud
+            client_executable: filecloud
+            server_executable: filecloud-server
             archive: tar.gz
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            executable: filecloud
+            client_executable: filecloud
+            server_executable: filecloud-server
             archive: tar.gz
           - os: windows-latest
             goos: windows
             goarch: amd64
-            executable: filecloud.exe
+            client_executable: filecloud.exe
+            server_executable: filecloud-server.exe
             archive: zip
     runs-on: ${{ matrix.os }}
     steps:
@@ -88,13 +91,14 @@ jobs:
             echo "runner host $host does not match release target $TARGET" >&2
             exit 1
           fi
-      - name: Build versioned binary
+      - name: Build versioned binaries
         shell: bash
         env:
           VERSION: ${{ github.ref_name }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          EXECUTABLE: ${{ matrix.executable }}
+          CLIENT_EXECUTABLE: ${{ matrix.client_executable }}
+          SERVER_EXECUTABLE: ${{ matrix.server_executable }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -103,32 +107,43 @@ jobs:
           fi
           commit=$(git rev-parse HEAD)
           build_date=$(git show -s --format=%cI HEAD)
+          ldflags="-s -w -X main._version=$VERSION -X main._commit=$commit -X main._buildDate=$build_date"
           mkdir -p dist/bin
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags "-s -w -X main._version=$VERSION -X main._commit=$commit -X main._buildDate=$build_date" \
-            -o "dist/bin/$EXECUTABLE" ./cmd/filecloud
-      - name: Smoke test released binary
+          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" \
+            -o "dist/bin/$CLIENT_EXECUTABLE" ./cmd/filecloud
+          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" \
+            -o "dist/bin/$SERVER_EXECUTABLE" ./cmd/filecloud-server
+      - name: Smoke test released binaries
         shell: bash
         env:
           VERSION: ${{ github.ref_name }}
-          EXECUTABLE: ${{ matrix.executable }}
-        run: go run ./tools/release-smoke --binary "dist/bin/$EXECUTABLE" --version "$VERSION"
+          CLIENT_EXECUTABLE: ${{ matrix.client_executable }}
+          SERVER_EXECUTABLE: ${{ matrix.server_executable }}
+        run: >-
+          go run ./tools/release-smoke
+          --client-binary "dist/bin/$CLIENT_EXECUTABLE"
+          --server-binary "dist/bin/$SERVER_EXECUTABLE"
+          --version "$VERSION"
       - name: Generate native third-party license material
         shell: bash
         env:
           TARGET: ${{ matrix.goos }}/${{ matrix.goarch }}
         run: go run ./tools/notices --target "$TARGET" --output dist/licenses
-      - name: Assemble binary and legal material
+      - name: Assemble binaries and legal material
         shell: bash
         env:
           PACKAGE: filecloud-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          EXECUTABLE: ${{ matrix.executable }}
+          CLIENT_EXECUTABLE: ${{ matrix.client_executable }}
+          SERVER_EXECUTABLE: ${{ matrix.server_executable }}
         run: |
           set -euo pipefail
           mkdir -p "dist/$PACKAGE"
-          cp "dist/bin/$EXECUTABLE" "dist/$PACKAGE/"
-          cp LICENSE README.md docs/distribution.md "dist/$PACKAGE/"
-          cp docs/operations/deployment-and-client.md "dist/$PACKAGE/DEPLOYMENT.md"
+          cp "dist/bin/$CLIENT_EXECUTABLE" "dist/$PACKAGE/"
+          cp "dist/bin/$SERVER_EXECUTABLE" "dist/$PACKAGE/"
+          cp LICENSE README.md CONTEXT.md "dist/$PACKAGE/"
+          cp -R docs "dist/$PACKAGE/"
+          printf '%s\n' '# Filecloud Deployment' '' 'See [deployment and client usage](docs/operations/deployment-and-client.md).' \
+            > "dist/$PACKAGE/DEPLOYMENT.md"
           cp dist/licenses/THIRD_PARTY_NOTICES.md "dist/$PACKAGE/"
           cp -R dist/licenses/third_party_licenses "dist/$PACKAGE/"
       - name: Create and inspect tar archive
@@ -136,16 +151,22 @@ jobs:
         shell: bash
         env:
           PACKAGE: filecloud-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          EXECUTABLE: ${{ matrix.executable }}
+          CLIENT_EXECUTABLE: ${{ matrix.client_executable }}
+          SERVER_EXECUTABLE: ${{ matrix.server_executable }}
         run: |
           set -euo pipefail
           tar -C dist -czf "dist/$PACKAGE.tar.gz" "$PACKAGE"
           mkdir -p dist/archive-check
           tar -C dist/archive-check -xzf "dist/$PACKAGE.tar.gz"
-          test -x "dist/archive-check/$PACKAGE/$EXECUTABLE"
+          test -x "dist/archive-check/$PACKAGE/$CLIENT_EXECUTABLE"
+          test -x "dist/archive-check/$PACKAGE/$SERVER_EXECUTABLE"
           test -s "dist/archive-check/$PACKAGE/LICENSE"
           test -s "dist/archive-check/$PACKAGE/README.md"
           test -s "dist/archive-check/$PACKAGE/DEPLOYMENT.md"
+          test -s "dist/archive-check/$PACKAGE/CONTEXT.md"
+          test -s "dist/archive-check/$PACKAGE/docs/operations/deployment-and-client.md"
+          test -s "dist/archive-check/$PACKAGE/docs/design/architecture.md"
+          test -s "dist/archive-check/$PACKAGE/docs/distribution.md"
           test -s "dist/archive-check/$PACKAGE/THIRD_PARTY_NOTICES.md"
           test -d "dist/archive-check/$PACKAGE/third_party_licenses"
           test -n "$(find "dist/archive-check/$PACKAGE/third_party_licenses" -type f -size +0c -print -quit)"
@@ -154,16 +175,22 @@ jobs:
         shell: pwsh
         env:
           PACKAGE: filecloud-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          EXECUTABLE: ${{ matrix.executable }}
+          CLIENT_EXECUTABLE: ${{ matrix.client_executable }}
+          SERVER_EXECUTABLE: ${{ matrix.server_executable }}
         run: |
           $ErrorActionPreference = "Stop"
           Compress-Archive -Path "dist/$env:PACKAGE" -DestinationPath "dist/$env:PACKAGE.zip"
           Expand-Archive -Path "dist/$env:PACKAGE.zip" -DestinationPath "dist/archive-check"
           foreach ($path in @(
-            "dist/archive-check/$env:PACKAGE/$env:EXECUTABLE",
+            "dist/archive-check/$env:PACKAGE/$env:CLIENT_EXECUTABLE",
+            "dist/archive-check/$env:PACKAGE/$env:SERVER_EXECUTABLE",
             "dist/archive-check/$env:PACKAGE/LICENSE",
             "dist/archive-check/$env:PACKAGE/README.md",
             "dist/archive-check/$env:PACKAGE/DEPLOYMENT.md",
+            "dist/archive-check/$env:PACKAGE/CONTEXT.md",
+            "dist/archive-check/$env:PACKAGE/docs/operations/deployment-and-client.md",
+            "dist/archive-check/$env:PACKAGE/docs/design/architecture.md",
+            "dist/archive-check/$env:PACKAGE/docs/distribution.md",
             "dist/archive-check/$env:PACKAGE/THIRD_PARTY_NOTICES.md"
           )) {
             if (-not (Test-Path -Path $path -PathType Leaf)) {

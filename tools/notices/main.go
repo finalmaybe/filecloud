@@ -148,7 +148,7 @@ func moduleRoot() (string, error) {
 
 func collectTarget(target releaseTarget, root string, modules map[string]noticeModule) error {
 	name := target.goos + "/" + target.goarch
-	command := exec.Command("go", "list", "-deps", "-json", "./cmd/filecloud")
+	command := exec.Command("go", "list", "-deps", "-json", "./cmd/filecloud", "./cmd/filecloud-server")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOOS="+target.goos, "GOARCH="+target.goarch, "CGO_ENABLED=0")
 	stdout, err := command.StdoutPipe()

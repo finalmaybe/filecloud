@@ -141,10 +141,8 @@ func TestPerformanceBaselineKDF(t *testing.T) {
 
 func TestSafetyDefaultsMatch1CBaseline(t *testing.T) {
 	params := auth.DefaultParams()
-	if params.Memory != 64*1024 || params.Iterations != 3 || params.Parallelism != 2 ||
-		_defaultGlobalKDFCapacity != 2 || _defaultSourceIPKDFCapacity != 1 || _defaultUsernameKDFCapacity != 1 {
-		t.Fatalf("KDF defaults = %+v concurrency = %d/%d/%d", params,
-			_defaultGlobalKDFCapacity, _defaultSourceIPKDFCapacity, _defaultUsernameKDFCapacity)
+	if params.Memory != 64*1024 || params.Iterations != 3 || params.Parallelism != 2 {
+		t.Fatalf("KDF defaults = %+v", params)
 	}
 	upload := storage.DefaultUploadConfig()
 	if upload.GlobalConcurrency != 8 || upload.UserConcurrency != 2 || upload.RequestTimeout != time.Minute ||
@@ -157,8 +155,8 @@ func TestSafetyDefaultsMatch1CBaseline(t *testing.T) {
 		head.MaxValidatedObjects != 2000000 {
 		t.Fatalf("Head validation defaults = %+v", head)
 	}
-	if _requestReadPeriod != 30*time.Second || _shutdownPeriod != 5*time.Second || _clientRequestPeriod != 3*time.Minute {
-		t.Fatalf("request/shutdown/client defaults = %s/%s/%s", _requestReadPeriod, _shutdownPeriod, _clientRequestPeriod)
+	if _clientRequestPeriod != 3*time.Minute {
+		t.Fatalf("client request default = %s, want 3m", _clientRequestPeriod)
 	}
 }
 

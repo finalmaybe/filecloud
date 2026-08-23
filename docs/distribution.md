@@ -1,10 +1,10 @@
 # Filecloud 分发说明
 
-Filecloud 采用 [MIT License](../LICENSE) 发布。每个正式归档均包含 `README.md`、`DEPLOYMENT.md`、项目 `LICENSE`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建实际使用的第三方 Go 模块原始许可文件。
+Filecloud 采用 [MIT License](../LICENSE) 发布。每个正式归档均包含客户端 `filecloud`、服务端 `filecloud-server`、`README.md`、`DEPLOYMENT.md`、`CONTEXT.md`、完整 `docs/`、项目 `LICENSE`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建两个二进制实际使用的第三方 Go 模块原始许可文件。Windows 下两个命令分别带 `.exe` 后缀。
 
 ## 支持范围
 
-正式二进制支持以下本地文件系统：
+正式发布的客户端和服务端二进制支持以下平台；下列文件系统限制适用于客户端状态目录和工作目录：
 
 - Linux：本地 ext4。
 - macOS：具备所需原子 rename 和文件锁能力的本地 APFS。
@@ -18,8 +18,8 @@ NFS、SMB、FAT、exFAT、Windows 网络映射盘、可移动 NTFS 卷，以及�
 
 1. Linux/ext4、macOS/APFS 和 Windows/NTFS 上的统一 1B 验收，包括历史浏览、安全恢复、故障收敛和固定跨平台对象向量。
 2. 完整 1C 运维正确性测试和部署性能基线。
-3. 每个平台已注入同一 tag、commit 和构建日期的二进制构建。
-4. 每个平台二进制的初始化、用户创建、登录、资料库创建、绑定和同步冒烟测试。
-5. 每个原生目标平台在二进制构建和冒烟后，根据该目标实际编译依赖生成并打包第三方许可材料。
+3. 每个平台的 `filecloud` 和 `filecloud-server` 均注入同一 tag、commit 和构建日期。
+4. 双二进制冒烟测试只用 `filecloud-server` 执行初始化、用户创建和服务启动，只用 `filecloud` 执行登录、资料库创建、绑定和同步。
+5. 每个原生目标平台在双二进制构建和冒烟后，根据两个目标实际编译依赖的并集生成并打包第三方许可材料。
 
-门禁证明进程崩溃恢复，不声明物理断电、存储控制器缓存或硬件故障下的绝对持久性。
+本版本为命令拆分过渡期：`filecloud` 仍接受旧的服务端子命令，但该兼容入口不属于新部署和自动化契约；新调用必须使用 `filecloud-server`。门禁证明进程崩溃恢复，不声明物理断电、存储控制器缓存或硬件故障下的绝对持久性。

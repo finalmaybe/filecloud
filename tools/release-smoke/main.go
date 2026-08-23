@@ -1,4 +1,4 @@
-// Command release-smoke verifies a packaged Filecloud binary through its public interfaces.
+// Command release-smoke verifies packaged Filecloud client and server binaries through their public interfaces.
 package main
 
 import (
@@ -44,37 +44,37 @@ type headEnvelope struct {
 }
 
 func main() {
-	binary := flag.String("binary", "", "path to the Filecloud binary")
+	clientBinary := flag.String("client-binary", "", "path to the Filecloud client binary")
+	serverBinary := flag.String("server-binary", "", "path to the Filecloud server binary")
 	version := flag.String("version", "", "expected release version")
 	flag.Parse()
-	if *binary == "" || *version == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./tools/release-smoke --binary path --version version")
+	if *clientBinary == "" || *serverBinary == "" || *version == "" || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./tools/release-smoke --client-binary path --server-binary path --version version")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := smoke(ctx, *binary, *version); err != nil {
+	if err := smoke(ctx, *clientBinary, *serverBinary, *version); err != nil {
 		fmt.Fprintln(os.Stderr, "release smoke:", err)
 		os.Exit(1)
 	}
 	fmt.Println("release smoke passed")
 }
 
-func smoke(ctx context.Context, binary, expectedVersion string) error {
-	absoluteBinary, err := filepath.Abs(binary)
+func smoke(ctx context.Context, clientBinary, serverBinary, expectedVersion string) error {
+	absoluteClient, err := filepath.Abs(clientBinary)
 	if err != nil {
-		return fmt.Errorf("resolve binary: %w", err)
+		return fmt.Errorf("resolve client binary: %w", err)
 	}
-	versionOutput, err := runBinary(ctx, absoluteBinary, nil, "version")
+	absoluteServer, err := filepath.Abs(serverBinary)
 	if err != nil {
+		return fmt.Errorf("resolve server binary: %w", err)
+	}
+	if err := verifyVersion(ctx, "client", absoluteClient, expectedVersion); err != nil {
 		return err
 	}
-	var version versionInfo
-	if err := json.Unmarshal(versionOutput, &version); err != nil {
-		return fmt.Errorf("decode version output: %w", err)
-	}
-	if version.Version != expectedVersion || version.Commit == "" || version.Commit == "unknown" || version.BuildDate == "" || version.BuildDate == "unknown" {
-		return fmt.Errorf("unexpected version metadata: %+v", version)
+	if err := verifyVersion(ctx, "server", absoluteServer, expectedVersion); err != nil {
+		return err
 	}
 
 	temporaryRoot, err := os.MkdirTemp(".", ".filecloud-release-smoke-")
@@ -92,7 +92,7 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	if err := os.Mkdir(worktree, 0o755); err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
-	if _, err := runBinary(ctx, absoluteBinary, nil, "init", "--data-dir", dataDir); err != nil {
+	if _, err := runBinary(ctx, absoluteServer, nil, "init", "--data-dir", dataDir); err != nil {
 		return err
 	}
 	password, err := randomPassword()
@@ -102,17 +102,17 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	defer clear(password)
 	passwordInput := append(bytes.Clone(password), '\n')
 	defer clear(passwordInput)
-	if _, err := runBinary(ctx, absoluteBinary, passwordInput, "user", "add", "--data-dir", dataDir, "--username", "release-smoke", "--password-stdin"); err != nil {
+	if _, err := runBinary(ctx, absoluteServer, passwordInput, "user", "add", "--data-dir", dataDir, "--username", "release-smoke", "--password-stdin"); err != nil {
 		return err
 	}
 
-	server, err := startServer(ctx, absoluteBinary, dataDir)
+	server, err := startServer(ctx, absoluteServer, dataDir)
 	if err != nil {
 		return err
 	}
 	defer server.stop()
 
-	loginOutput, err := runBinary(ctx, absoluteBinary, passwordInput, "login", "--server", server.url, "--username", "release-smoke", "--device-name", "release-smoke", "--password-stdin")
+	loginOutput, err := runBinary(ctx, absoluteClient, passwordInput, "login", "--server", server.url, "--username", "release-smoke", "--device-name", "release-smoke", "--password-stdin")
 	if err != nil {
 		return err
 	}
@@ -122,11 +122,11 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	}
 	tokenInput := []byte(login.Session.AccessToken + "\n")
 	defer clear(tokenInput)
-	if _, err := runBinary(ctx, absoluteBinary, tokenInput, "library", "create", "--server", server.url,
+	if _, err := runBinary(ctx, absoluteClient, tokenInput, "library", "create", "--server", server.url,
 		"--library-id", _libraryID, "--name", "Release Smoke", "--token-stdin"); err != nil {
 		return err
 	}
-	inspectOutput, err := runBinary(ctx, absoluteBinary, tokenInput, "library", "inspect", "--server", server.url,
+	inspectOutput, err := runBinary(ctx, absoluteClient, tokenInput, "library", "inspect", "--server", server.url,
 		"--library-id", _libraryID, "--token-stdin")
 	if err != nil {
 		return err
@@ -134,14 +134,14 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	if !bytes.Contains(inspectOutput, []byte(_libraryID)) {
 		return errors.New("inspect response has no created library")
 	}
-	listOutput, err := runBinary(ctx, absoluteBinary, tokenInput, "library", "list", "--server", server.url, "--token-stdin")
+	listOutput, err := runBinary(ctx, absoluteClient, tokenInput, "library", "list", "--server", server.url, "--token-stdin")
 	if err != nil {
 		return err
 	}
 	if !bytes.Contains(listOutput, []byte(_libraryID)) {
 		return errors.New("list response has no created library")
 	}
-	if _, err := runBinary(ctx, absoluteBinary, tokenInput, "library", "bind", "--client-dir", clientDir,
+	if _, err := runBinary(ctx, absoluteClient, tokenInput, "library", "bind", "--client-dir", clientDir,
 		"--server", server.url, "--library-id", _libraryID, "--worktree", worktree, "--device-id", _deviceID, "--token-stdin"); err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	if err := os.WriteFile(filepath.Join(worktree, "smoke.txt"), []byte("filecloud release smoke\n"), 0o644); err != nil {
 		return fmt.Errorf("write smoke file: %w", err)
 	}
-	if _, err := runBinary(ctx, absoluteBinary, nil, "library", "sync", "--client-dir", clientDir, "--worktree", worktree); err != nil {
+	if _, err := runBinary(ctx, absoluteClient, nil, "library", "sync", "--client-dir", clientDir, "--worktree", worktree); err != nil {
 		return err
 	}
 	updatedHead, err := getHead(ctx, server.url, login.Session.AccessToken)
@@ -161,6 +161,25 @@ func smoke(ctx context.Context, binary, expectedVersion string) error {
 	}
 	if initialHead == "" || updatedHead == "" || initialHead == updatedHead {
 		return fmt.Errorf("sync did not advance Head: initial=%q updated=%q", initialHead, updatedHead)
+	}
+	return nil
+}
+
+func verifyVersion(ctx context.Context, name, binary, expected string) error {
+	output, err := runBinary(ctx, binary, nil, "version")
+	if err != nil {
+		return err
+	}
+	return validateVersionOutput(name, output, expected)
+}
+
+func validateVersionOutput(name string, output []byte, expected string) error {
+	var version versionInfo
+	if err := json.Unmarshal(output, &version); err != nil {
+		return fmt.Errorf("decode %s version output: %w", name, err)
+	}
+	if version.Version != expected || version.Commit == "" || version.Commit == "unknown" || version.BuildDate == "" || version.BuildDate == "unknown" {
+		return fmt.Errorf("unexpected %s version metadata: %+v", name, version)
 	}
 	return nil
 }

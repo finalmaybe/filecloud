@@ -1,6 +1,6 @@
 # Filecloud 服务端部署与客户端使用
 
-本文对应当前实现。Filecloud 只有一个命令行程序 `filecloud`：服务端和客户端使用同一个二进制。项目暂不提供 Docker 镜像、Web 管理界面、桌面 GUI、移动客户端或 WebDAV。
+本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。项目暂不提供 Docker 镜像、Web 管理界面、桌面 GUI、移动客户端或 WebDAV。
 
 ## 1. 支持范围
 
@@ -29,13 +29,16 @@
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
+CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
 ./filecloud version
+./filecloud-server version
 ```
 
 安装到系统路径：
 
 ```bash
 sudo install -m 0755 ./filecloud /usr/local/bin/filecloud
+sudo install -m 0755 ./filecloud-server /usr/local/bin/filecloud-server
 ```
 
 开发构建的版本信息会显示为 `dev`。正式发布包会显示 tag、commit 和构建日期。
@@ -47,7 +50,7 @@ sudo install -m 0755 ./filecloud /usr/local/bin/filecloud
 ```bash
 DATA_DIR="$HOME/Documents/filecloud/data"
 
-./filecloud init --data-dir "$DATA_DIR"
+./filecloud-server init --data-dir "$DATA_DIR"
 ```
 
 初始化会创建：
@@ -68,7 +71,7 @@ zsh：
 read -rs 'PASSWORD?Password: '
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  ./filecloud user add \
+  ./filecloud-server user add \
     --data-dir "$DATA_DIR" \
     --username ming \
     --password-stdin
@@ -81,7 +84,7 @@ Bash：
 read -rsp "Password: " PASSWORD
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  ./filecloud user add \
+  ./filecloud-server user add \
     --data-dir "$DATA_DIR" \
     --username ming \
     --password-stdin
@@ -91,7 +94,7 @@ unset PASSWORD
 启动服务：
 
 ```bash
-./filecloud serve \
+./filecloud-server serve \
   --data-dir "$DATA_DIR" \
   --listen 127.0.0.1:8080
 ```
@@ -122,7 +125,8 @@ curl -fsS http://127.0.0.1:8080/readyz
 以下示例使用：
 
 ```text
-程序：/usr/local/bin/filecloud
+服务端程序：/usr/local/bin/filecloud-server
+客户端程序：/usr/local/bin/filecloud
 数据：/var/lib/filecloud
 监听：127.0.0.1:8080
 用户：filecloud
@@ -138,7 +142,7 @@ sudo useradd \
   filecloud
 
 sudo install -d -o filecloud -g filecloud -m 0700 /var/lib/filecloud
-sudo -u filecloud /usr/local/bin/filecloud init --data-dir /var/lib/filecloud
+sudo -u filecloud /usr/local/bin/filecloud-server init --data-dir /var/lib/filecloud
 ```
 
 创建第一个用户。`user add` 和 `user reset-password` 会取得数据目录管理锁，应在服务停止时执行。
@@ -149,7 +153,7 @@ zsh：
 read -rs 'PASSWORD?Password: '
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  sudo -u filecloud /usr/local/bin/filecloud user add \
+  sudo -u filecloud /usr/local/bin/filecloud-server user add \
     --data-dir /var/lib/filecloud \
     --username alice \
     --password-stdin
@@ -162,7 +166,7 @@ Bash：
 read -rsp "Password: " PASSWORD
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  sudo -u filecloud /usr/local/bin/filecloud user add \
+  sudo -u filecloud /usr/local/bin/filecloud-server user add \
     --data-dir /var/lib/filecloud \
     --username alice \
     --password-stdin
@@ -181,7 +185,7 @@ Type=simple
 User=filecloud
 Group=filecloud
 UMask=0077
-ExecStart=/usr/local/bin/filecloud serve --data-dir /var/lib/filecloud --listen 127.0.0.1:8080
+ExecStart=/usr/local/bin/filecloud-server serve --data-dir /var/lib/filecloud --listen 127.0.0.1:8080
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=10s
@@ -219,7 +223,7 @@ sudo systemctl stop filecloud
 ```bash
 printf '\n'
 printf '%s\n' "$PASSWORD" |
-  sudo -u filecloud /usr/local/bin/filecloud user reset-password \
+  sudo -u filecloud /usr/local/bin/filecloud-server user reset-password \
     --data-dir /var/lib/filecloud \
     --username alice \
     --password-stdin
@@ -239,7 +243,7 @@ sudo systemctl start filecloud
 - 回环地址可以使用 HTTP，例如 `http://127.0.0.1:8080`。
 - 非回环地址必须使用 HTTPS，例如 `https://cloud.example.com`。
 
-因此不要把 `filecloud serve --listen 0.0.0.0:8080` 直接暴露到公网。下面是 Nginx 配置的核心部分：
+因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。下面是 Nginx 配置的核心部分：
 
 ```nginx
 server {
@@ -566,14 +570,14 @@ sudo systemctl stop filecloud
 完整性检查：
 
 ```bash
-sudo -u filecloud /usr/local/bin/filecloud integrity check \
+sudo -u filecloud /usr/local/bin/filecloud-server integrity check \
   --data-dir /var/lib/filecloud
 ```
 
 预览垃圾回收：
 
 ```bash
-sudo -u filecloud /usr/local/bin/filecloud gc \
+sudo -u filecloud /usr/local/bin/filecloud-server gc \
   --data-dir /var/lib/filecloud \
   --dry-run
 ```
@@ -581,7 +585,7 @@ sudo -u filecloud /usr/local/bin/filecloud gc \
 执行垃圾回收：
 
 ```bash
-sudo -u filecloud /usr/local/bin/filecloud gc \
+sudo -u filecloud /usr/local/bin/filecloud-server gc \
   --data-dir /var/lib/filecloud
 ```
 
@@ -610,7 +614,7 @@ sudo systemctl start filecloud
 ```bash
 sudo chown -R filecloud:filecloud /var/lib/filecloud
 sudo chmod 0700 /var/lib/filecloud
-sudo -u filecloud /usr/local/bin/filecloud integrity check --data-dir /var/lib/filecloud
+sudo -u filecloud /usr/local/bin/filecloud-server integrity check --data-dir /var/lib/filecloud
 sudo systemctl start filecloud
 ```
 
@@ -620,12 +624,12 @@ sudo systemctl start filecloud
 
 ### `open data-directory lock ... no such file or directory`
 
-原因：数据目录存在，但没有执行过 `filecloud init`，所以缺少 `.filecloud.lock`。
+原因：数据目录存在，但没有执行过 `filecloud-server init`，所以缺少 `.filecloud.lock`。
 
 处理：
 
 ```bash
-filecloud init --data-dir /path/to/data
+filecloud-server init --data-dir /path/to/data
 ```
 
 初始化成功后再创建用户并启动服务。已有正式数据的目录不要删除后重新初始化。
@@ -669,11 +673,12 @@ read -rsp "Password: " PASSWORD
 ## 14. 命令速查
 
 ```text
+filecloud-server version
+filecloud-server init --data-dir PATH
+filecloud-server serve --data-dir PATH [--listen ADDRESS]
+filecloud-server user add --data-dir PATH --username NAME --password-stdin
+filecloud-server user reset-password --data-dir PATH --username NAME --password-stdin
 filecloud version
-filecloud init --data-dir PATH
-filecloud serve --data-dir PATH [--listen ADDRESS]
-filecloud user add --data-dir PATH --username NAME --password-stdin
-filecloud user reset-password --data-dir PATH --username NAME --password-stdin
 filecloud login --server URL --username NAME --device-name NAME --password-stdin
 filecloud logout --server URL --token-stdin
 filecloud library create --server URL --library-id UUID --name NAME --token-stdin
@@ -687,8 +692,8 @@ filecloud library history inspect --client-dir PATH --worktree PATH --commit 64_
 filecloud library restore --client-dir PATH --worktree PATH --commit 64_HEX --path PATH_OR_DOT
 filecloud library restore --client-dir PATH --worktree PATH --confirm 12_HEX
 filecloud library unbind --client-dir PATH --worktree PATH
-filecloud integrity check --data-dir PATH
-filecloud gc --data-dir PATH [--dry-run] [--grace-period DURATION]
+filecloud-server integrity check --data-dir PATH
+filecloud-server gc --data-dir PATH [--dry-run] [--grace-period DURATION]
 ```
 
 协议、冲突处理和崩溃恢复边界见 [同步架构](../design/architecture.md)，接口细节见 [HTTP API 契约](../design/http-api.md)。
