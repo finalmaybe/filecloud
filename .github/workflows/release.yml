@@ -30,7 +30,7 @@ jobs:
           cache: true
       - name: Run native filesystem and cross-platform object acceptance
         shell: bash
-        run: FILECLOUD_RUN_1B=1 go test ./cmd/filecloud -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
+        run: FILECLOUD_RUN_1B=1 go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 
   acceptance-1c:
     name: 1C operations and performance acceptance

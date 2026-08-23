@@ -39,7 +39,7 @@
 运行命令：
 
 ```bash
-FILECLOUD_RUN_1B=1 go test ./cmd/filecloud \
+FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
   -run '^TestCrossPlatformAcceptanceMatrix$' \
   -count=1 -timeout=30m -v
 ```

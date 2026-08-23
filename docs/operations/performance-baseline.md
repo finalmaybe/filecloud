@@ -71,7 +71,7 @@
 只重复性能场景：
 
 ```bash
-FILECLOUD_RUN_1C=1 go test ./cmd/filecloud \
+FILECLOUD_RUN_1C=1 go test ./internal/clientapp \
   -run '^TestPerformanceBaseline(SmallFiles|LargeFile|KDF)$' \
   -count=3 -timeout=90m -v
 FILECLOUD_RUN_1C=1 go test ./internal/object \

@@ -171,7 +171,7 @@ go test ./...
 1B 跨平台门禁必须在对应平台的本地 ext4、APFS 或固定 NTFS checkout 中显式运行。交叉编译不能代替实机门禁：
 
 ```bash
-FILECLOUD_RUN_1B=1 go test ./cmd/filecloud \
+FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
   -run '^TestCrossPlatformAcceptanceMatrix$' \
   -count=1 -timeout=30m -v
 ```
@@ -180,7 +180,7 @@ PowerShell 使用同一入口：
 
 ```powershell
 $env:FILECLOUD_RUN_1B=1
-go test ./cmd/filecloud -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
+go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```
 
 完整 1C 运维正确性门禁与部署性能基线：

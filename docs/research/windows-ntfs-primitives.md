@@ -36,7 +36,7 @@ The gate is run only with:
 
 ```powershell
 $env:FILECLOUD_RUN_1B=1
-go test ./cmd/filecloud -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
+go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```
 
 Acceptance record from 2026-08-15: the unified gate passed on a local fixed NTFS
