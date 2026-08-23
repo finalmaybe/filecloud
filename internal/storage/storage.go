@@ -336,17 +336,52 @@ func migrateWithEnvironment(ctx context.Context, db *sql.DB, migrations []migrat
 		}
 	}()
 
-	if _, err := tx.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
+	var migrationTableExists bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM sqlite_schema
+			WHERE type = 'table' AND name = 'schema_migrations'
+		)`).Scan(&migrationTableExists); err != nil {
+		return fmt.Errorf("inspect metadata migration table: %w", err)
+	}
+	if migrationTableExists {
+		var newest int
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&newest); err != nil {
+			return fmt.Errorf("read newest metadata migration: %w", err)
+		}
+		if newest > latest {
+			return fmt.Errorf("metadata schema version %d is newer than supported version %d", newest, latest)
+		}
+	} else if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
 			version INTEGER PRIMARY KEY NOT NULL,
 			applied_at TEXT NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
 
+	rows, err := tx.QueryContext(ctx, "SELECT version FROM schema_migrations ORDER BY version")
+	if err != nil {
+		return fmt.Errorf("read metadata migration history: %w", err)
+	}
 	var current int
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&current); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
+	index := 0
+	for rows.Next() {
+		var version int
+		if err := rows.Scan(&version); err != nil {
+			return errors.Join(fmt.Errorf("scan metadata migration history: %w", err), rows.Close())
+		}
+		if index >= len(migrations) || version != migrations[index].version {
+			return errors.Join(fmt.Errorf("metadata migration history has unexpected version %d", version), rows.Close())
+		}
+		current = version
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return errors.Join(fmt.Errorf("iterate metadata migration history: %w", err), rows.Close())
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close metadata migration history: %w", err)
 	}
 	for _, migration := range migrations {
 		if migration.version <= current {
@@ -367,9 +402,6 @@ func migrateWithEnvironment(ctx context.Context, db *sql.DB, migrations []migrat
 			migration.version, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return fmt.Errorf("record metadata migration %d: %w", migration.version, err)
 		}
-	}
-	if current > latest {
-		return fmt.Errorf("metadata schema version %d is newer than supported version %d", current, latest)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit metadata migration: %w", err)

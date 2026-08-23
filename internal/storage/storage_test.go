@@ -337,6 +337,61 @@ func TestMigrateRejectsUnorderedVersions(t *testing.T) {
 	}
 }
 
+func TestMigrateRejectsIncompleteHistoryWithoutMutation(t *testing.T) {
+	ctx := t.Context()
+	db, err := openDB(filepath.Join(t.TempDir(), "metadata.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer closeDB(t, db)
+
+	if err := migrate(ctx, db, metadataMigrations()); err != nil {
+		t.Fatalf("apply supported migrations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM schema_migrations WHERE version = 2"); err != nil {
+		t.Fatalf("remove migration record: %v", err)
+	}
+	before := schemaSnapshot(t, db)
+	if _, err := db.ExecContext(ctx, "PRAGMA query_only = ON"); err != nil {
+		t.Fatalf("make database read-only: %v", err)
+	}
+
+	err = migrate(ctx, db, metadataMigrations())
+	if err == nil || !strings.Contains(err.Error(), "migration history") {
+		t.Fatalf("migrate incomplete history error = %v, want migration history error before schema DDL", err)
+	}
+	if after := schemaSnapshot(t, db); after != before {
+		t.Fatalf("schema changed after incomplete history rejection:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+func TestMigrateRejectsNewerSchemaBeforeIncompleteHistory(t *testing.T) {
+	ctx := t.Context()
+	db, err := openDB(filepath.Join(t.TempDir(), "metadata.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer closeDB(t, db)
+
+	if err := migrate(ctx, db, metadataMigrations()); err != nil {
+		t.Fatalf("apply supported migrations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM schema_migrations WHERE version = 2;
+		INSERT INTO schema_migrations(version, applied_at) VALUES (7, 'test')`); err != nil {
+		t.Fatalf("create incomplete future history: %v", err)
+	}
+	before := schemaSnapshot(t, db)
+
+	err = migrate(ctx, db, metadataMigrations())
+	if err == nil || !strings.Contains(err.Error(), "newer than supported") {
+		t.Fatalf("migrate incomplete future history error = %v, want unsupported version error", err)
+	}
+	if after := schemaSnapshot(t, db); after != before {
+		t.Fatalf("schema changed after future history rejection:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
 func TestMigrateRejectsNewerSchemaWithoutMutation(t *testing.T) {
 	ctx := t.Context()
 	db, err := openDB(filepath.Join(t.TempDir(), "metadata.db"))
