@@ -147,6 +147,8 @@ jobs:
           test -s "dist/archive-check/$PACKAGE/README.md"
           test -s "dist/archive-check/$PACKAGE/DEPLOYMENT.md"
           test -s "dist/archive-check/$PACKAGE/THIRD_PARTY_NOTICES.md"
+          test -d "dist/archive-check/$PACKAGE/third_party_licenses"
+          test -n "$(find "dist/archive-check/$PACKAGE/third_party_licenses" -type f -size +0c -print -quit)"
       - name: Create and inspect zip archive
         if: matrix.archive == 'zip'
         shell: pwsh
@@ -167,6 +169,16 @@ jobs:
             if (-not (Test-Path -Path $path -PathType Leaf)) {
               throw "archive is missing $path"
             }
+          }
+          $licenseRoot = "dist/archive-check/$env:PACKAGE/third_party_licenses"
+          if (-not (Test-Path -Path $licenseRoot -PathType Container)) {
+            throw "archive is missing $licenseRoot"
+          }
+          $license = Get-ChildItem -Path $licenseRoot -File -Recurse |
+            Where-Object Length -GT 0 |
+            Select-Object -First 1
+          if (-not $license) {
+            throw "archive contains no non-empty third-party license files"
           }
       - name: Upload release archive
         uses: actions/upload-artifact@v4
