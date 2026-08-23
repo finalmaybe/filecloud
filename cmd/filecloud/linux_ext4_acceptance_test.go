@@ -478,6 +478,18 @@ func (c *platformAttestationCollector) close() error {
 	return nil
 }
 
+const (
+	_platformMatrixSuiteTimeout        = 20 * time.Minute
+	_windowsPlatformMatrixSuiteTimeout = 28 * time.Minute
+)
+
+func platformMatrixTimeout(platform string) time.Duration {
+	if platform == "windows" {
+		return _windowsPlatformMatrixSuiteTimeout
+	}
+	return _platformMatrixSuiteTimeout
+}
+
 func platformMatrixEnvironment() []string {
 	return []string{
 		"FILECLOUD_RUN_1B=1",
@@ -491,6 +503,23 @@ func platformMatrixEnvironment() []string {
 func TestPlatformMatrixEnvironmentDisables1C(t *testing.T) {
 	if !slices.Contains(platformMatrixEnvironment(), "FILECLOUD_RUN_1C=") {
 		t.Fatal("platform matrix environment does not disable FILECLOUD_RUN_1C")
+	}
+}
+
+func TestPlatformMatrixTimeout(t *testing.T) {
+	for _, test := range []struct {
+		platform string
+		want     time.Duration
+	}{
+		{platform: "linux", want: 20 * time.Minute},
+		{platform: "darwin", want: 20 * time.Minute},
+		{platform: "windows", want: 28 * time.Minute},
+	} {
+		t.Run(test.platform, func(t *testing.T) {
+			if got := platformMatrixTimeout(test.platform); got != test.want {
+				t.Fatalf("platformMatrixTimeout(%q)=%s, want %s", test.platform, got, test.want)
+			}
+		})
 	}
 }
 
@@ -536,7 +565,7 @@ func runPlatformMatrix(t *testing.T, filesystemRoot string, scenarios []platform
 	platform, filesystem string, environment []string,
 ) {
 	t.Helper()
-	command := exec.CommandContext(t.Context(), "go", "test", "-json", "./...", "-count=1", "-timeout=20m")
+	command := exec.CommandContext(t.Context(), "go", "test", "-json", "./...", "-count=1", "-timeout="+platformMatrixTimeout(platform).String())
 	command.Dir = filepath.Join("..", "..")
 	command.Env = append(os.Environ(),
 		append([]string{
