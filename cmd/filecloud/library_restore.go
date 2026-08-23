@@ -197,7 +197,7 @@ func restorePendingState(ctx context.Context, state *restoreClientState) (*pendi
 		return nil, err
 	}
 	if checkout != nil {
-		return nil, errors.New("restore cannot start while a checkout is pending")
+		return nil, errors.New("restore cannot continue while a checkout is pending; run sync first")
 	}
 	pending, err := loadPendingPublication(ctx, state.db, state.binding.Worktree)
 	if err != nil {
@@ -218,7 +218,21 @@ func runLibraryRestorePreview(ctx context.Context, clientDir, worktree, sourceCo
 		return err
 	}
 	if pending != nil {
-		return errors.New("restore cannot start while a publication is pending")
+		switch pending.Kind {
+		case PublicationKindSync:
+			return errors.New("restore cannot start while a sync publication is pending; run sync first")
+		case PublicationKindRestore:
+			if err := verifyRestorePublication(*pending, state.binding); err != nil {
+				return fmt.Errorf("verify pending restore preview: %w", err)
+			}
+			if pending.RestoreConfirmed || pending.SourceCommit != sourceCommit || pending.SourcePath != sourcePath {
+				prefix := pending.CandidateCommit[:deleteCandidatePrefixLen]
+				return fmt.Errorf("restore candidate is already pending; rerun restore --confirm %s", prefix)
+			}
+			return writeRestorePreview(stdout, clientDir, worktree, *pending)
+		default:
+			return fmt.Errorf("restore cannot start with unsupported pending publication kind %q", pending.Kind)
+		}
 	}
 	snapshot, err := scanWorktreeWithConfig(state.root, state.options.scanConfig)
 	if err != nil {
@@ -298,8 +312,14 @@ func runLibraryRestoreConfirm(ctx context.Context, clientDir, worktree, prefix s
 	if err != nil {
 		return err
 	}
-	if pending == nil || pending.Kind != PublicationKindRestore {
+	if pending == nil {
 		return errors.New("restore confirmation requires a pending restore candidate")
+	}
+	if pending.Kind == PublicationKindSync {
+		return errors.New("restore cannot continue while a sync publication is pending; run sync first")
+	}
+	if pending.Kind != PublicationKindRestore {
+		return fmt.Errorf("restore cannot continue with unsupported pending publication kind %q", pending.Kind)
 	}
 	if len(pending.CandidateCommit) < deleteCandidatePrefixLen || prefix != pending.CandidateCommit[:deleteCandidatePrefixLen] {
 		return errors.New("restore --confirm must exactly match this worktree's pending restore candidate")
@@ -318,17 +338,20 @@ func runLibraryRestoreConfirm(ctx context.Context, clientDir, worktree, prefix s
 	if head.CommitID == nil {
 		return discardStaleRestore(ctx, state, *pending)
 	}
-	published, err := restoreCandidatePublished(ctx, state.options, *head.CommitID, pending.CandidateCommit,
-		state.binding.UserID, _newReplayBudget())
-	if err != nil {
-		return handleRestoreRevalidationFailure(ctx, state, *pending, err)
+	if *head.CommitID != pending.ExpectedHead {
+		published, err := restoreCandidatePublished(ctx, state.options, *head.CommitID, pending.CandidateCommit,
+			state.binding.UserID, _newReplayBudget())
+		if err != nil {
+			return handleRestoreRevalidationFailure(ctx, state, *pending, err)
+		}
+		if published {
+			return dispatchPendingPublication(ctx, state.db, state.options, state.binding, snapshot, head, *pending,
+				stdout, state.config, _newReplayBudget(), _publicationDispatchResume)
+		}
+		return discardStaleRestore(ctx, state, *pending)
 	}
-	if published {
-		return dispatchPendingPublication(ctx, state.db, state.options, state.binding, snapshot, head, *pending,
-			stdout, state.config, _newReplayBudget(), _publicationDispatchResume)
-	}
-	if *head.CommitID != pending.ExpectedHead || head.ETag != pending.ExpectedETag ||
-		snapshot.root != pending.CapturedRoot || state.binding.SyncBase != pending.BaseCommit || state.binding.SyncBaseRoot != pending.BaseRoot {
+	if head.ETag != pending.ExpectedETag || snapshot.root != pending.CapturedRoot ||
+		state.binding.SyncBase != pending.BaseCommit || state.binding.SyncBaseRoot != pending.BaseRoot {
 		return discardStaleRestore(ctx, state, *pending)
 	}
 	source, err := fetchRestoreSource(ctx, state, pending.SourceCommit)

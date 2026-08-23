@@ -2923,6 +2923,15 @@ func putBlock(ctx context.Context, base *url.URL, libraryID string, token []byte
 }
 
 func updateRemoteHead(ctx context.Context, base *url.URL, libraryID string, token []byte, etag, commitID string) (remoteHead, bool, error) {
+	return updateRemoteHeadWithAttempts(ctx, base, libraryID, token, etag, commitID, _headUpdateAttempts)
+}
+
+func updateRemoteHeadOnce(ctx context.Context, base *url.URL, libraryID string, token []byte, etag, commitID string) (remoteHead, bool, error) {
+	return updateRemoteHeadWithAttempts(ctx, base, libraryID, token, etag, commitID, 1)
+}
+
+func updateRemoteHeadWithAttempts(ctx context.Context, base *url.URL, libraryID string, token []byte, etag, commitID string,
+	attempts int) (remoteHead, bool, error) {
 	body, err := json.Marshal(struct {
 		CommitID string `json:"CommitId"`
 	}{commitID})
@@ -2930,7 +2939,7 @@ func updateRemoteHead(ctx context.Context, base *url.URL, libraryID string, toke
 		return remoteHead{}, false, err
 	}
 	target := base.JoinPath("v1/libraries", libraryID, "head").String()
-	for attempt := 0; attempt < _headUpdateAttempts; attempt++ {
+	for attempt := range attempts {
 		request, err := authenticatedRequest(ctx, http.MethodPut, target, token, body)
 		if err != nil {
 			return remoteHead{}, false, err
@@ -2942,9 +2951,9 @@ func updateRemoteHead(ctx context.Context, base *url.URL, libraryID string, toke
 			return remoteHead{}, false, fmt.Errorf("publish library Head: %w", err)
 		}
 		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
-			if attempt+1 == _headUpdateAttempts {
+			if attempt+1 == attempts {
 				return remoteHead{}, false, fmt.Errorf("publish library Head failed after %d attempts: server returned %s",
-					_headUpdateAttempts, http.StatusText(status))
+					attempts, http.StatusText(status))
 			}
 			if err := waitTransientRetry(ctx, headers.Get("Retry-After"), time.Now()); err != nil {
 				return remoteHead{}, false, fmt.Errorf("wait to retry library Head: %w", err)

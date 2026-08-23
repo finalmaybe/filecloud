@@ -1034,7 +1034,23 @@ func publishPending(ctx context.Context, db *sql.DB, options bindOptions, bindin
 	if err := _assertPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
 		return err
 	}
-	_, _, publishErr := updateRemoteHead(ctx, options.base, options.libraryID, options.token, pending.ExpectedETag, pending.CandidateCommit)
+	var publishErr error
+	if pending.Kind == PublicationKindRestore {
+		conflictingHead, conflict, err := updateRemoteHeadOnce(ctx, options.base, options.libraryID, options.token,
+			pending.ExpectedETag, pending.CandidateCommit)
+		publishErr = err
+		if conflict {
+			observed, scanErr := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+			if scanErr != nil {
+				return fmt.Errorf("rescan worktree after Head conflict: %w", scanErr)
+			}
+			return dispatchPendingPublication(ctx, db, options, binding, observed, conflictingHead, pending,
+				stdout, config, budget, _publicationDispatchResume)
+		}
+	} else {
+		_, _, publishErr = updateRemoteHead(ctx, options.base, options.libraryID, options.token,
+			pending.ExpectedETag, pending.CandidateCommit)
+	}
 	published, getErr := getRemoteHead(ctx, options.base, options.libraryID, options.token)
 	if getErr != nil {
 		return errors.Join(publishErr, fmt.Errorf("resolve library Head after publish: %w", getErr))

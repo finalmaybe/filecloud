@@ -203,7 +203,14 @@ func resumeRestorePublication(ctx context.Context, db *sql.DB, options bindOptio
 			return discardRestorePublication(ctx, db, binding.Worktree, pending,
 				"restore candidate is published but the worktree changed; rerun sync")
 		}
-		return transitionPublishedRestore(ctx, db, options, binding, snapshot, head, pending, stdout, config)
+		return transitionPublishedRestore(ctx, db, options, binding, head, pending, stdout, config)
+	}
+	if *head.CommitID == pending.ExpectedHead {
+		if head.ETag != pending.ExpectedETag || snapshot.root != pending.CapturedRoot {
+			return discardRestorePublication(ctx, db, binding.Worktree, pending,
+				"restore candidate became stale; rerun restore preview")
+		}
+		return uploadAndPublishRestore(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
 	}
 	ancestor, err := _remoteCommitDescendsFrom(ctx, options, *head.CommitID, pending.CandidateCommit, binding.UserID, budget)
 	if err != nil {
@@ -214,13 +221,10 @@ func resumeRestorePublication(ctx context.Context, db *sql.DB, options bindOptio
 			return discardRestorePublication(ctx, db, binding.Worktree, pending,
 				"restore candidate is published but the worktree changed; rerun sync")
 		}
-		return transitionPublishedRestore(ctx, db, options, binding, snapshot, head, pending, stdout, config)
+		return transitionPublishedRestore(ctx, db, options, binding, head, pending, stdout, config)
 	}
-	if *head.CommitID != pending.ExpectedHead || head.ETag != pending.ExpectedETag || snapshot.root != pending.CapturedRoot {
-		return discardRestorePublication(ctx, db, binding.Worktree, pending,
-			"restore candidate became stale; rerun restore preview")
-	}
-	return uploadAndPublishRestore(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
+	return discardRestorePublication(ctx, db, binding.Worktree, pending,
+		"restore candidate became stale; rerun restore preview")
 }
 
 func discardRestorePublication(ctx context.Context, db *sql.DB, worktree string, pending pendingPublication, message string) error {
@@ -277,8 +281,7 @@ func uploadAndPublishRestore(ctx context.Context, db *sql.DB, options bindOption
 }
 
 func transitionPublishedRestore(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, head remoteHead, pending pendingPublication, stdout io.Writer,
-	config libraryClientConfig) error {
+	head remoteHead, pending pendingPublication, stdout io.Writer, config libraryClientConfig) error {
 	if head.CommitID == nil {
 		return errors.New("published restore Head is empty")
 	}
@@ -288,9 +291,6 @@ func transitionPublishedRestore(ctx context.Context, db *sql.DB, options bindOpt
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
-	}
-	if err := updateBindingAndIndex(ctx, tx, binding, pending.CapturedCommit, pending.CapturedRoot, head.ETag, snapshot.paths); err != nil {
-		return errors.Join(err, tx.Rollback())
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pending_checkouts(server_url, library_id, worktree, user_id, device_id,
 		target_commit, target_root, head_etag, apply_state, conflict_promotions)
@@ -305,7 +305,6 @@ func transitionPublishedRestore(ctx context.Context, db *sql.DB, options bindOpt
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("transition restore publication to checkout: %w", err)
 	}
-	binding.SyncBase, binding.SyncBaseRoot, binding.HeadETag = pending.CapturedCommit, pending.CapturedRoot, head.ETag
 	if config.afterSyncCheckoutTransition != nil {
 		if err := config.afterSyncCheckoutTransition(); err != nil {
 			return fmt.Errorf("after restore checkout transition: %w", err)
