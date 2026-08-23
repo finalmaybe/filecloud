@@ -198,12 +198,12 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 
 	backend, err := url.Parse(serverURL)
 	if err != nil {
-		t.Fatalf("parse restore server URL: %v", err)
+		t.Fatalf("parse restore server URL %q error=%v, want nil", serverURL, err)
 	}
 	reverseProxy := httputil.NewSingleHostReverseProxy(backend)
 	var dropNextHeadResponse atomic.Bool
 	var headPUTs atomic.Int32
-	errLostHeadResponse := errors.New("injected lost Head response")
+	errLostHeadResponse := errors.New("injected lost head response")
 	reverseProxy.ModifyResponse = func(response *http.Response) error {
 		if response.Request.Method != http.MethodPut || !strings.HasSuffix(response.Request.URL.Path, "/head") {
 			return nil
@@ -216,23 +216,28 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	}
 	reverseProxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
 		if !errors.Is(proxyErr, errLostHeadResponse) {
-			t.Errorf("restore reverse proxy: %v", proxyErr)
+			t.Errorf("restore reverse proxy error=%v, want injected lost head response", proxyErr)
 			http.Error(w, "proxy error", http.StatusBadGateway)
 			return
 		}
-		connection, stream, hijackErr := w.(http.Hijacker).Hijack()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("restore proxy supports http.Hijacker=false, want true")
+			return
+		}
+		connection, stream, hijackErr := hijacker.Hijack()
 		if hijackErr != nil {
-			t.Errorf("hijack lost Head response: %v", hijackErr)
+			t.Errorf("hijack lost head response error=%v, want nil", hijackErr)
 			return
 		}
 		if _, writeErr := stream.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n"); writeErr != nil {
-			t.Errorf("write truncated Head response: %v", writeErr)
+			t.Errorf("write truncated head response error=%v, want nil", writeErr)
 		}
 		if flushErr := stream.Flush(); flushErr != nil {
-			t.Errorf("flush truncated Head response: %v", flushErr)
+			t.Errorf("flush truncated head response error=%v, want nil", flushErr)
 		}
 		if closeErr := connection.Close(); closeErr != nil {
-			t.Errorf("close lost Head response: %v", closeErr)
+			t.Errorf("close lost head response error=%v, want nil", closeErr)
 		}
 	}
 	clientProxy := httptest.NewServer(reverseProxy)
@@ -359,8 +364,11 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		t.Fatalf("built directory restore clients A=%+v B=%+v pending=%+v, want shared candidate/root",
 			directoryBindingA, directoryBindingB, directoryPending)
 	}
-	emitBlackBoxRestoreAttestation(t, binary, serverURL, login.Session.AccessToken, clientB, worktreeB,
-		directoryPending, directoryBindingB, directoryConfirmed, "real binary directory restore")
+	emitBlackBoxRestoreAttestation(t, blackBoxRestoreProofInput{
+		binary: binary, serverURL: serverURL, token: login.Session.AccessToken, clientDir: clientB, worktree: worktreeB,
+		pending: directoryPending, binding: directoryBindingB, confirmed: directoryConfirmed,
+		scenario: "real binary directory restore",
+	})
 
 	setBlackBoxMtime(t, worktreeB, time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC))
 	rootPreview := runBlackBoxCLI(t, binary, nil, "library", "restore", "--client-dir", clientB,
@@ -442,10 +450,6 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	unknownStdout, unknownStderr, unknownErr := runBlackBoxCLIResult(t, binary, nil, "library", "restore",
 		"--client-dir", clientB, "--worktree", worktreeB,
 		"--confirm", rootPending.CandidateCommit[:deleteCandidatePrefixLen])
-	if unknownErr != nil || !bytes.Contains(unknownStdout, []byte("library synchronized")) {
-		t.Fatalf("built unknown restore result error=%v stdout=%q stderr=%q, want resolved synchronization",
-			unknownErr, unknownStdout, unknownStderr)
-	}
 	unknownOutput := append(bytes.Clone(unknownStdout), unknownStderr...)
 	for label, canary := range map[string]string{
 		"source path":          rootPending.SourcePath,
@@ -456,6 +460,10 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		if canary != "." && bytes.Contains(unknownOutput, []byte(canary)) {
 			t.Fatalf("built unknown restore diagnostics exposed %s canary", label)
 		}
+	}
+	if unknownErr != nil || !bytes.Contains(unknownStdout, []byte("library synchronized")) {
+		t.Fatalf("built unknown restore result error=%v stdout=%q stderr=%q, want resolved synchronization",
+			unknownErr, unknownStdout, unknownStderr)
 	}
 	afterUnknownResult := captureBlackBoxRestoreState(t, serverURL, login.Session.AccessToken,
 		clientA, worktreeA, clientB, worktreeB)
@@ -522,8 +530,11 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	assertBlackBoxRestoreState(t, "root no-op", beforeNoOp,
 		captureBlackBoxRestoreState(t, serverURL, login.Session.AccessToken, clientA, worktreeA, clientB, worktreeB))
 
-	emitBlackBoxRestoreAttestation(t, binary, serverURL, login.Session.AccessToken, clientB, worktreeB,
-		rootPending, bindingB, confirmed, "real binary directory and root restore")
+	emitBlackBoxRestoreAttestation(t, blackBoxRestoreProofInput{
+		binary: binary, serverURL: serverURL, token: login.Session.AccessToken, clientDir: clientB, worktree: worktreeB,
+		pending: rootPending, binding: bindingB, confirmed: confirmed,
+		scenario: "real binary directory and root restore",
+	})
 	server.stop(t)
 }
 
@@ -814,42 +825,54 @@ func assertBlackBoxRestoreState(t *testing.T, scenario string, before, after bla
 	}
 }
 
-func emitBlackBoxRestoreAttestation(t *testing.T, binary, serverURL, token, clientDir, worktree string,
-	pending pendingPublication, binding clientBinding, confirmed []platformConfirmedInput, scenario string,
-) {
+type blackBoxRestoreProofInput struct {
+	binary    string
+	serverURL string
+	token     string
+	clientDir string
+	worktree  string
+	scenario  string
+	pending   pendingPublication
+	binding   clientBinding
+	confirmed []platformConfirmedInput
+}
+
+func emitBlackBoxRestoreAttestation(t *testing.T, input blackBoxRestoreProofInput) {
 	t.Helper()
-	sourceHistory := runBlackBoxCLI(t, binary, nil, "library", "history", "inspect", "--client-dir", clientDir,
-		"--worktree", worktree, "--commit", pending.SourceCommit)
-	previousHistory := runBlackBoxCLI(t, binary, nil, "library", "history", "inspect", "--client-dir", clientDir,
-		"--worktree", worktree, "--commit", pending.ExpectedHead)
-	sourceReachable := bytes.Contains(sourceHistory, []byte("CommitId="+pending.SourceCommit))
-	previousReachable := bytes.Contains(previousHistory, []byte("CommitId="+pending.ExpectedHead))
-	owner, err := getLibraryOwner(t.Context(), mustServerURL(t, serverURL), _blackBoxLibraryID, []byte(token))
+	sourceHistory := runBlackBoxCLI(t, input.binary, nil, "library", "history", "inspect", "--client-dir", input.clientDir,
+		"--worktree", input.worktree, "--commit", input.pending.SourceCommit)
+	previousHistory := runBlackBoxCLI(t, input.binary, nil, "library", "history", "inspect", "--client-dir", input.clientDir,
+		"--worktree", input.worktree, "--commit", input.pending.ExpectedHead)
+	sourceReachable := bytes.Contains(sourceHistory, []byte("CommitId="+input.pending.SourceCommit))
+	previousReachable := bytes.Contains(previousHistory, []byte("CommitId="+input.pending.ExpectedHead))
+	owner, err := getLibraryOwner(t.Context(), mustServerURL(t, input.serverURL), _blackBoxLibraryID, []byte(input.token))
 	if err != nil {
-		t.Fatalf("read %s owner: %v", scenario, err)
+		t.Fatalf("read %s owner error=%v, want nil", input.scenario, err)
 	}
-	oracle := libraryCLIEnvironment{server: &httptest.Server{URL: serverURL}, token: token}
-	reachability := inspectPlatformReachability(t, oracle, binding.SyncBase, owner)
-	confirmedDigests := platformConfirmedInputDigests(confirmed)
-	preservedDigests := requirePlatformPreservedInputDigests(t, scenario, reachability, confirmed)
+	oracle := libraryCLIEnvironment{server: &httptest.Server{URL: input.serverURL}, token: input.token}
+	reachability := inspectPlatformReachability(t, oracle, input.binding.SyncBase, owner)
+	confirmedDigests := platformConfirmedInputDigests(input.confirmed)
+	preservedDigests := requirePlatformPreservedInputDigests(t, input.scenario, reachability, input.confirmed)
 	platform, filesystem, enabled := acceptance.ActivePlatform()
 	if !enabled {
-		t.Fatal("built restore acceptance requires an active platform")
+		t.Fatalf("acceptance enabled=%t, want true", enabled)
 	}
 	emitPlatformAttestation(t, platformAttestation{
-		Kind: "restore", Scenario: scenario, Platform: platform, Filesystem: filesystem,
-		Head: binding.SyncBase, SyncBase: binding.SyncBase, HeadRoot: binding.SyncBaseRoot, BaseRoot: binding.SyncBaseRoot,
-		Snapshot: scanTestRoot(t, worktree), ReachableObjects: reachability.objects, SourceCommit: pending.SourceCommit,
-		SourceRoot: pending.SourceRoot, SourcePath: pending.SourcePath, PreviousHead: pending.ExpectedHead,
-		ExpectedHead: pending.ExpectedHead, CandidateCommit: pending.CandidateCommit, ResultRoot: pending.CandidateRoot,
-		CreatedCount: new(pending.CreatedCount), UpdatedCount: new(pending.UpdatedCount),
-		TypeReplacementCount: new(pending.TypeReplacementCount), RemovedDescendantCount: new(pending.RemovedDescendantCount),
-		PreservedCurrentOnlyCount: new(pending.PreservedCurrentOnlyCount),
-		PendingPublicationRows:    new(countClientRows(t, clientDir, "pending_publications", worktree)),
-		PendingCheckoutRows:       new(countClientRows(t, clientDir, "pending_checkouts", worktree)),
-		ResidualJournalRows:       countClientRows(t, clientDir, "fs_actions", worktree), SourceReachable: sourceReachable,
-		PreviousHeadReachable: previousReachable, ConfirmedInputDigests: confirmedDigests,
-		PreservedInputDigests: preservedDigests,
+		Kind: "restore", Scenario: input.scenario, Platform: platform, Filesystem: filesystem,
+		Head: input.binding.SyncBase, SyncBase: input.binding.SyncBase, HeadRoot: input.binding.SyncBaseRoot,
+		BaseRoot: input.binding.SyncBaseRoot, Snapshot: scanTestRoot(t, input.worktree), ReachableObjects: reachability.objects,
+		SourceCommit: input.pending.SourceCommit, SourceRoot: input.pending.SourceRoot, SourcePath: input.pending.SourcePath,
+		PreviousHead: input.pending.ExpectedHead, ExpectedHead: input.pending.ExpectedHead,
+		CandidateCommit: input.pending.CandidateCommit, ResultRoot: input.pending.CandidateRoot,
+		CreatedCount: new(input.pending.CreatedCount), UpdatedCount: new(input.pending.UpdatedCount),
+		TypeReplacementCount:      new(input.pending.TypeReplacementCount),
+		RemovedDescendantCount:    new(input.pending.RemovedDescendantCount),
+		PreservedCurrentOnlyCount: new(input.pending.PreservedCurrentOnlyCount),
+		PendingPublicationRows:    new(countClientRows(t, input.clientDir, "pending_publications", input.worktree)),
+		PendingCheckoutRows:       new(countClientRows(t, input.clientDir, "pending_checkouts", input.worktree)),
+		ResidualJournalRows:       countClientRows(t, input.clientDir, "fs_actions", input.worktree),
+		SourceReachable:           sourceReachable, PreviousHeadReachable: previousReachable,
+		ConfirmedInputDigests: confirmedDigests, PreservedInputDigests: preservedDigests,
 	})
 }
 

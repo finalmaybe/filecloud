@@ -574,7 +574,7 @@ func TestDefaultRestorePlannerProtocolBudgets(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("newRestorePlanner() error=%v, want nil", err)
 	}
 	want := restorePlanBudget{
 		maxDepth:            256,
