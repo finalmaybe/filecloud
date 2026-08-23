@@ -1,6 +1,6 @@
 # Filecloud 分发说明
 
-Filecloud 采用 [MIT License](../LICENSE) 发布。每个正式归档均包含项目 `LICENSE`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建实际使用的第三方 Go 模块原始许可文件。
+Filecloud 采用 [MIT License](../LICENSE) 发布。每个正式归档均包含 `README.md`、`DEPLOYMENT.md`、项目 `LICENSE`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建实际使用的第三方 Go 模块原始许可文件。
 
 ## 支持范围
 

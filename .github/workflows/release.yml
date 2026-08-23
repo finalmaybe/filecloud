@@ -127,7 +127,8 @@ jobs:
           set -euo pipefail
           mkdir -p "dist/$PACKAGE"
           cp "dist/bin/$EXECUTABLE" "dist/$PACKAGE/"
-          cp LICENSE docs/distribution.md "dist/$PACKAGE/"
+          cp LICENSE README.md docs/distribution.md "dist/$PACKAGE/"
+          cp docs/operations/deployment-and-client.md "dist/$PACKAGE/DEPLOYMENT.md"
           cp dist/licenses/THIRD_PARTY_NOTICES.md "dist/$PACKAGE/"
           cp -R dist/licenses/third_party_licenses "dist/$PACKAGE/"
       - name: Create and inspect tar archive
@@ -143,6 +144,8 @@ jobs:
           tar -C dist/archive-check -xzf "dist/$PACKAGE.tar.gz"
           test -x "dist/archive-check/$PACKAGE/$EXECUTABLE"
           test -s "dist/archive-check/$PACKAGE/LICENSE"
+          test -s "dist/archive-check/$PACKAGE/README.md"
+          test -s "dist/archive-check/$PACKAGE/DEPLOYMENT.md"
           test -s "dist/archive-check/$PACKAGE/THIRD_PARTY_NOTICES.md"
       - name: Create and inspect zip archive
         if: matrix.archive == 'zip'
@@ -157,6 +160,8 @@ jobs:
           foreach ($path in @(
             "dist/archive-check/$env:PACKAGE/$env:EXECUTABLE",
             "dist/archive-check/$env:PACKAGE/LICENSE",
+            "dist/archive-check/$env:PACKAGE/README.md",
+            "dist/archive-check/$env:PACKAGE/DEPLOYMENT.md",
             "dist/archive-check/$env:PACKAGE/THIRD_PARTY_NOTICES.md"
           )) {
             if (-not (Test-Path -Path $path -PathType Leaf)) {

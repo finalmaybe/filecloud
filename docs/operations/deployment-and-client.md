@@ -23,7 +23,7 @@
 
 正式版本可从项目的 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。归档中包含二进制、项目许可证、第三方模块清单和许可证文本。
 
-也可以从源码构建。当前仓库要求 Go 1.26.5：
+也可以从源码构建。当前仓库要求 Go 1.26.6：
 
 ```bash
 git clone https://github.com/mingming-cn/filecloud.git
