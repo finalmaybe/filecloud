@@ -441,6 +441,9 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		t.Fatalf("read restore acceptance owner: %v", err)
 	}
 	reachability := inspectPlatformReachability(t, oracle, bindingB.SyncBase, owner)
+	confirmedDigests := platformConfirmedInputDigests(confirmed)
+	preservedDigests := requirePlatformPreservedInputDigests(t,
+		"real binary directory and root restore", reachability, confirmed)
 	platform, filesystem, enabled := acceptance.ActivePlatform()
 	if !enabled {
 		t.Fatal("built restore acceptance requires an active platform")
@@ -457,7 +460,8 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		PendingPublicationRows:    new(countClientRows(t, clientB, "pending_publications", worktreeB)),
 		PendingCheckoutRows:       new(countClientRows(t, clientB, "pending_checkouts", worktreeB)),
 		ResidualJournalRows:       countClientRows(t, clientB, "fs_actions", worktreeB), SourceReachable: sourceReachable,
-		PreviousHeadReachable: previousReachable,
+		PreviousHeadReachable: previousReachable, ConfirmedInputDigests: confirmedDigests,
+		PreservedInputDigests: preservedDigests,
 	})
 	server.stop(t)
 }

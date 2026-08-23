@@ -1,6 +1,6 @@
 # filecloud
 
-面向多设备的内容寻址文件同步系统。当前已实现单节点服务端、Linux/ext4、macOS/APFS、Windows/NTFS 共用的 1B 跨平台验收门禁，以及 watch、离线 GC、完整性检查、健康检查、优雅停止和部署性能基线组成的 1C 运维闭环。
+面向多设备的内容寻址文件同步系统。当前已实现单节点服务端、主线历史浏览、合并来源检查、安全恢复、Linux/ext4、macOS/APFS、Windows/NTFS 共用的 1B 跨平台验收门禁，以及 watch、离线 GC、完整性检查、健康检查、优雅停止和部署性能基线组成的 1C 运维闭环。
 
 ## 文档
 
@@ -12,7 +12,7 @@
 - [HTTP API 契约](./docs/design/http-api.md)
 - [第一阶段实施计划](./docs/design/phase-1-plan.md)
 - [第一阶段验收规范](./docs/design/acceptance-tests.md)
-- [历史浏览与安全恢复规格（待实现）](./docs/design/history-and-safe-restore.md)
+- [历史浏览与安全恢复](./docs/design/history-and-safe-restore.md)
 - [服务端部署与客户端使用](./docs/operations/deployment-and-client.md)
 - [1C 部署性能基线](./docs/operations/performance-baseline.md)
 - [分发、许可与平台支持范围](./docs/distribution.md)

@@ -16,7 +16,7 @@ NFS、SMB、FAT、exFAT、Windows 网络映射盘、可移动 NTFS 卷，以及�
 
 正式 tag 的归档仅在以下门禁全部通过后生成：
 
-1. Linux/ext4、macOS/APFS 和 Windows/NTFS 上的统一 1B 验收，包括固定跨平台对象向量。
+1. Linux/ext4、macOS/APFS 和 Windows/NTFS 上的统一 1B 验收，包括历史浏览、安全恢复、故障收敛和固定跨平台对象向量。
 2. 完整 1C 运维正确性测试和部署性能基线。
 3. 每个平台已注入同一 tag、commit 和构建日期的二进制构建。
 4. 每个平台二进制的初始化、用户创建、登录、资料库创建、绑定和同步冒烟测试。

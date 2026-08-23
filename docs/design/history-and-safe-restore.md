@@ -1,6 +1,6 @@
 # 历史浏览与安全恢复规格
 
-状态：产品规格已评审，待实现。本文定义第一阶段之后的下一个产品能力，不表示当前二进制已经支持这些命令或接口。第一阶段冻结基线仍见 [同步架构](./architecture.md)、[HTTP API 契约](./http-api.md)和[验收规范](./acceptance-tests.md)。
+状态：实现基线。历史浏览、安全恢复、迁移、故障恢复和统一跨平台门禁均已落地；后续修改必须继续通过 [验收规范](./acceptance-tests.md)定义的 Linux/ext4、macOS/APFS 和 Windows/固定 NTFS 实机门禁。第一阶段冻结基线仍见 [同步架构](./architecture.md)和[HTTP API 契约](./http-api.md)。
 
 ## 目标与边界
 
@@ -500,4 +500,4 @@ Linux/ext4、macOS/APFS 和 Windows/固定 NTFS 使用同一测试名、场景�
 5. 上传、CAS 结果未知和 checkout journal 复用。
 6. 拒绝、故障注入、资源保护和三平台统一验收门禁。
 
-只有第 6 步通过后，能力状态才能从“待实现”改为“实现基线”。
+上述六个切分均已完成；任何后续修改仍须保持统一 required manifest、结构化证明和三平台固定向量通过。

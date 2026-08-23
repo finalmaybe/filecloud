@@ -1,6 +1,6 @@
 # Filecloud 服务端部署与客户端使用
 
-本文对应当前第一阶段实现。Filecloud 只有一个命令行程序 `filecloud`：服务端和客户端使用同一个二进制。项目暂不提供 Docker 镜像、Web 管理界面、桌面 GUI、移动客户端或 WebDAV。
+本文对应当前实现。Filecloud 只有一个命令行程序 `filecloud`：服务端和客户端使用同一个二进制。项目暂不提供 Docker 镜像、Web 管理界面、桌面 GUI、移动客户端或 WebDAV。
 
 ## 1. 支持范围
 
@@ -460,7 +460,80 @@ filecloud library sync \
 
 不能使用更短前缀、完整 commit ID 或其他候选的前缀。
 
-## 10. 解除绑定和注销
+## 10. 历史浏览与安全恢复
+
+历史命令从绑定读取服务地址、资料库和凭据，只读取已发布历史，不扫描或修改工作目录，也不推进同步基线。列出主线历史：
+
+```bash
+filecloud library history list \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --page-size 100
+```
+
+输出包含完整 Commit ID。存在下一页时，末行会给出 `next_page_token`；将该值原样传回：
+
+```bash
+filecloud library history list \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --page-size 100 \
+  --page-token "$PAGE_TOKEN"
+```
+
+默认只列出曾经成为 Head 的主线提交。高级排查可以增加 `--include-merged`，在所属主线提交下展开已发布且由服务端证明角色的 `merge-source`：
+
+```bash
+filecloud library history list \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --include-merged
+```
+
+检查提交元数据时必须使用完整的 64 位小写 Commit ID：
+
+```bash
+filecloud library history inspect \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --commit "$COMMIT_ID"
+```
+
+增加 `--path` 可以检查历史文件或目录。文件只显示 File ID、大小、mtime 和 block 数，不下载内容；目录按规范名称排序并支持分页。`.` 表示历史根目录：
+
+```bash
+filecloud library history inspect \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --commit "$COMMIT_ID" \
+  --path . \
+  --page-size 100
+```
+
+恢复前先运行一次 `sync`，确保工作目录、同步基线和服务端 Head 已收敛。恢复预览选择一个历史提交和其中存在的原路径，目标固定为相同路径：
+
+```bash
+filecloud library restore \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --commit "$COMMIT_ID" \
+  --path docs/report.txt
+```
+
+目录恢复执行 overlay：历史同名项覆盖当前项，当前独有项保留；`.` 对整个历史根执行相同规则。预览会持久化固定候选，显示创建、更新、类型替换、移除后代和保留当前独有路径的统计，并最多列出 100 条变化路径。预览阶段不会上传对象、改变 Head 或修改工作目录；no-op 不创建候选。
+
+核对预览后，使用输出中的 12 位小写候选前缀精确确认：
+
+```bash
+filecloud library restore \
+  --client-dir "$CLIENT_DIR" \
+  --worktree "$WORKTREE" \
+  --confirm 0123456789ab
+```
+
+恢复通过一个新的前向 Commit 发布，不会把 Head 指回旧版本。预览后若工作目录或 Head 已变化，确认会失效，必须先同步并重新预览；客户端不会自动把旧确认意图应用到新 Head。上传、CAS 响应或 checkout 中断时，使用同一候选前缀重试确认；不要创建另一个预览。历史中不存在的源路径会返回 NotFound，不表示删除当前路径。
+
+## 11. 解除绑定和注销
 
 解除绑定会删除客户端绑定状态，不会删除工作目录中的普通文件，也不会删除服务端资料库：
 
@@ -482,7 +555,7 @@ unset TOKEN
 
 已经保存在绑定数据库中的同一 token 也会失效。之后需要重新登录并刷新绑定凭据。
 
-## 11. 服务端维护
+## 12. 服务端维护
 
 垃圾回收和完整性检查必须离线运行。先停止服务：
 
@@ -543,7 +616,7 @@ sudo systemctl start filecloud
 
 不要只备份 `metadata.db` 或只备份 `objects/`，两者单独恢复都不能组成一致的资料库。
 
-## 12. 常见错误
+## 13. 常见错误
 
 ### `open data-directory lock ... no such file or directory`
 
@@ -593,7 +666,7 @@ read -rsp "Password: " PASSWORD
 
 确认客户端状态目录和工作目录位于本地 ext4、APFS 或固定 NTFS。网络共享、软链接绕转、挂载边界和不受支持的卷会被拒绝。
 
-## 13. 命令速查
+## 14. 命令速查
 
 ```text
 filecloud version
@@ -609,6 +682,10 @@ filecloud library inspect --server URL --library-id UUID --token-stdin
 filecloud library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
 filecloud library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
 filecloud library watch --client-dir PATH --worktree PATH --interval DURATION
+filecloud library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]
+filecloud library history inspect --client-dir PATH --worktree PATH --commit 64_HEX [--path PATH_OR_DOT] [--page-size N] [--page-token TOKEN]
+filecloud library restore --client-dir PATH --worktree PATH --commit 64_HEX --path PATH_OR_DOT
+filecloud library restore --client-dir PATH --worktree PATH --confirm 12_HEX
 filecloud library unbind --client-dir PATH --worktree PATH
 filecloud integrity check --data-dir PATH
 filecloud gc --data-dir PATH [--dry-run] [--grace-period DURATION]

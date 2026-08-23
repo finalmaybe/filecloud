@@ -41,9 +41,36 @@ func platformMatrixScenarios() []platformMatrixScenario {
 		{category: "real process acceptance", packagePath: "./cmd/filecloud", test: "TestBuiltBinaryEndToEndAcceptance"},
 		{category: "real process acceptance", packagePath: "./cmd/filecloud", test: "TestBuiltBinaryHistoryInspectReadOnlyAcceptance"},
 		{category: "real process acceptance", packagePath: "./cmd/filecloud", test: "TestBuiltBinaryDirectoryRestoreAcceptance"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestListHistoryUsesHeadFirstParentOrderAndStableCursor"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestListHistoryValidationAndAuthenticationOrder"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestListHistoryRejectsExpiredAndCrossBoundTokens"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestListHistoryLimiterReleasesOnDeadline"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestGetHistoryCommitReturnsPublishedRolesAndImmutableMetadata"},
+		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestGetHistoryCommitValidationAndVisibility"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryListIncludesVerifiedMergedLineage"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryListMergedSourceBudgetIsAtomic"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreAcceptsPublishedMergeSource"},
+		{category: "history read only", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryInspectDirectoryPaginates500Of501Entries"},
+		{category: "history read only", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryInspectDiagnosticsDoNotExposeCanaries"},
+		{category: "history read only", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryListTransportErrorDoesNotExposePageToken"},
+		{category: "history role migration", packagePath: "./internal/storage", test: "TestPublishedCommitsMigrationBackfillsExistingHead"},
+		{category: "history role migration", packagePath: "./internal/storage", test: "TestPublishedCommitRolesMigrationRollsBackOnUnprovableHistory"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerRestoresFileAndMtimeOnlyChange"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerNoOpAndMissingSourcePath"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerFileReplacesDirectoryAndCountsRemovedDescendants"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerNestedDirectoryOverlayPreservesCurrentOnlySubtrees"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerRootOverlayIsDeterministicWithoutRootMtime"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerPreviewCapAndDeterminism"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerRejectsBudgetsAndNonCanonicalObjects"},
+		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerDirectoryReplacesFileAtSelectedAncestor"},
+		{category: "restore migration", packagePath: "./cmd/filecloud", test: "TestClientV23ToV24SyncPendingMigrationPreservesFields"},
+		{category: "restore dispatcher", packagePath: "./cmd/filecloud", test: "TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation"},
+		{category: "restore dispatcher", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreRejectsSyncPublicationWithoutMutation"},
+		{category: "restore dispatcher", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreRejectsPendingCheckoutWithoutMutation"},
+		{category: "restore rejection", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreNoOpCreatesNoPendingOrPublication"},
+		{category: "restore rejection", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreTypeReplacementRequiresPreviewAndExactConfirmation"},
+		{category: "restore rejection", packagePath: "./cmd/filecloud", test: "TestLibraryRestorePlannerBudgetsRejectBeforeWrites"},
+		{category: "restore rejection", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreConfirmationIsolationAndStaleWorktree"},
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryRestorePreviewReplaysPersistedCandidateAfterOutputFailure"},
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryWatchBlocksOnUnconfirmedRestoreWithoutMutation"},
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreConfirmedObjectPUTFailuresResumeFixedCandidate"},
@@ -54,6 +81,8 @@ func platformMatrixScenarios() []platformMatrixScenario {
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryRestorePublishedDirtyPreservesWorktreeForOrdinarySync"},
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex"},
 		{category: "restore recovery", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreExpectedHeadSkipsPublishedAncestorWalk"},
+		{category: "restore fault injection", packagePath: "./cmd/filecloud", test: "TestLibrarySyncRestorePromotionCrashMatrix"},
+		{category: "log privacy", packagePath: "./cmd/filecloud", test: "TestRunLogsStructuredCommandLifecycleWithoutSensitivePaths"},
 		{category: "first binding", packagePath: "./cmd/filecloud", test: "TestLibraryBindDoubleEmptyConvergesAndUnbindIsLocalOnly"},
 		{category: "first binding", packagePath: "./cmd/filecloud", test: "TestLibraryBindConcurrentInitializationAdoptsWinner"},
 		{category: "first binding", packagePath: "./cmd/filecloud", test: "TestLibraryBindImportsLocalSnapshotAndSyncNoOps"},
@@ -138,8 +167,35 @@ func TestPlatformMatrixWiresFullScenarioSet(t *testing.T) {
 		"TestBuiltBinaryEndToEndAcceptance",
 		"TestBuiltBinaryHistoryInspectReadOnlyAcceptance",
 		"TestBuiltBinaryDirectoryRestoreAcceptance",
+		"TestListHistoryUsesHeadFirstParentOrderAndStableCursor",
+		"TestListHistoryValidationAndAuthenticationOrder",
+		"TestListHistoryRejectsExpiredAndCrossBoundTokens",
+		"TestListHistoryLimiterReleasesOnDeadline",
+		"TestGetHistoryCommitReturnsPublishedRolesAndImmutableMetadata",
+		"TestGetHistoryCommitValidationAndVisibility",
 		"TestLibraryHistoryListIncludesVerifiedMergedLineage",
 		"TestLibraryHistoryListMergedSourceBudgetIsAtomic",
+		"TestLibraryHistoryInspectDirectoryPaginates500Of501Entries",
+		"TestLibraryHistoryInspectDiagnosticsDoNotExposeCanaries",
+		"TestLibraryHistoryListTransportErrorDoesNotExposePageToken",
+		"TestPublishedCommitsMigrationBackfillsExistingHead",
+		"TestPublishedCommitRolesMigrationRollsBackOnUnprovableHistory",
+		"TestRestorePlannerRestoresFileAndMtimeOnlyChange",
+		"TestRestorePlannerNoOpAndMissingSourcePath",
+		"TestRestorePlannerFileReplacesDirectoryAndCountsRemovedDescendants",
+		"TestRestorePlannerNestedDirectoryOverlayPreservesCurrentOnlySubtrees",
+		"TestRestorePlannerRootOverlayIsDeterministicWithoutRootMtime",
+		"TestRestorePlannerPreviewCapAndDeterminism",
+		"TestRestorePlannerRejectsBudgetsAndNonCanonicalObjects",
+		"TestRestorePlannerDirectoryReplacesFileAtSelectedAncestor",
+		"TestClientV23ToV24SyncPendingMigrationPreservesFields",
+		"TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation",
+		"TestLibraryRestoreRejectsSyncPublicationWithoutMutation",
+		"TestLibraryRestoreRejectsPendingCheckoutWithoutMutation",
+		"TestLibraryRestoreNoOpCreatesNoPendingOrPublication",
+		"TestLibraryRestoreTypeReplacementRequiresPreviewAndExactConfirmation",
+		"TestLibraryRestorePlannerBudgetsRejectBeforeWrites",
+		"TestLibraryRestoreConfirmationIsolationAndStaleWorktree",
 		"TestLibraryRestoreAcceptsPublishedMergeSource",
 		"TestLibraryRestorePreviewReplaysPersistedCandidateAfterOutputFailure",
 		"TestLibraryWatchBlocksOnUnconfirmedRestoreWithoutMutation",
@@ -151,6 +207,8 @@ func TestPlatformMatrixWiresFullScenarioSet(t *testing.T) {
 		"TestLibraryRestorePublishedDirtyPreservesWorktreeForOrdinarySync",
 		"TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex",
 		"TestLibraryRestoreExpectedHeadSkipsPublishedAncestorWalk",
+		"TestLibrarySyncRestorePromotionCrashMatrix",
+		"TestRunLogsStructuredCommandLifecycleWithoutSensitivePaths",
 		"TestLibraryBindDoubleEmptyConvergesAndUnbindIsLocalOnly",
 		"TestScanRegularFileRetriesConcurrentRewrite",
 		"TestFSActionSubprocessCrashMatrix",
@@ -242,6 +300,7 @@ func TestPlatformAttestationValidation(t *testing.T) {
 		RemovedDescendantCount: new(int64(3)), PreservedCurrentOnlyCount: new(int64(2)),
 		PendingPublicationRows: new(0), PendingCheckoutRows: new(0),
 		SourceReachable: true, PreviousHeadReachable: true,
+		ConfirmedInputDigests: []string{digest}, PreservedInputDigests: []string{digest},
 	}
 	for _, test := range []struct {
 		name                 string
@@ -279,6 +338,7 @@ func TestPlatformAttestationValidation(t *testing.T) {
 			return value
 		}()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "restore source unreachable", attestations: []platformAttestation{func() platformAttestation { value := restore; value.SourceReachable = false; return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
+		{name: "restore lost pre-restore input", attestations: []platformAttestation{func() platformAttestation { value := restore; value.PreservedInputDigests = nil; return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "restore pending checkout", attestations: []platformAttestation{func() platformAttestation { value := restore; value.PendingCheckoutRows = new(1); return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "restore missing explicit zero", attestations: []platformAttestation{func() platformAttestation { value := restore; value.RemovedDescendantCount = nil; return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "fixed vector drift", attestations: []platformAttestation{func() platformAttestation {
@@ -405,6 +465,10 @@ func validatePlatformAttestations(attestations []platformAttestation, required m
 				return fmt.Errorf("platform recovery attestation %q is invalid", attestation.Scenario)
 			}
 		case "restore":
+			confirmed := uniqueSortedDigests(attestation.ConfirmedInputDigests)
+			preserved := uniqueSortedDigests(attestation.PreservedInputDigests)
+			validInputs := len(confirmed) > 0 && slices.Equal(confirmed, preserved) &&
+				!slices.ContainsFunc(confirmed, func(id string) bool { return !object.ValidID(id) })
 			validIDs := object.ValidID(attestation.SourceCommit) && object.ValidID(attestation.SourceRoot) &&
 				object.ValidID(attestation.PreviousHead) && object.ValidID(attestation.ExpectedHead) &&
 				object.ValidID(attestation.CandidateCommit) && object.ValidID(attestation.ResultRoot) &&
@@ -422,7 +486,7 @@ func validatePlatformAttestations(attestations []platformAttestation, required m
 				*attestation.CreatedCount+*attestation.UpdatedCount+*attestation.TypeReplacementCount > 0 &&
 				*attestation.TypeReplacementCount > 0 && *attestation.RemovedDescendantCount > 0 &&
 				*attestation.PreservedCurrentOnlyCount > 0
-			if !validIDs || !object.ValidPath(attestation.SourcePath) || !validResult || !validStats ||
+			if !validInputs || !validIDs || !object.ValidPath(attestation.SourcePath) || !validResult || !validStats ||
 				*attestation.PendingPublicationRows != 0 || *attestation.PendingCheckoutRows != 0 ||
 				!attestation.SourceReachable || !attestation.PreviousHeadReachable || attestation.ReachableObjects < 2 {
 				return fmt.Errorf("platform restore attestation %q is invalid", attestation.Scenario)
@@ -1070,6 +1134,35 @@ func platformConfirmedFiles(files map[string][]byte) []platformConfirmedInput {
 	return result
 }
 
+func platformConfirmedInputDigests(inputs []platformConfirmedInput) []string {
+	result := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		result = append(result, input.contentDigest())
+	}
+	slices.Sort(result)
+	return slices.Compact(result)
+}
+
+func requirePlatformPreservedInputDigests(t *testing.T, scenario string, reachable platformReachability,
+	confirmed []platformConfirmedInput,
+) []string {
+	t.Helper()
+	preserved := make(map[string]bool, len(reachable.files))
+	for _, digest := range reachable.files {
+		preserved[digest] = true
+	}
+	result := make([]string, 0, len(confirmed))
+	for _, input := range confirmed {
+		digest := input.contentDigest()
+		if !preserved[digest] {
+			t.Fatalf("%s lost confirmed input %q", scenario, input.name)
+		}
+		result = append(result, digest)
+	}
+	slices.Sort(result)
+	return slices.Compact(result)
+}
+
 type platformClient struct {
 	clientDir string
 	worktree  string
@@ -1196,23 +1289,8 @@ func assertPlatformConvergence(t *testing.T, scenario string, environment librar
 		t.Fatalf("%s read library owner: %v", scenario, err)
 	}
 	reachable := inspectPlatformReachability(t, environment, *head.CommitID, owner)
-	preserved := make(map[string]bool, len(reachable.files))
-	for _, digest := range reachable.files {
-		preserved[digest] = true
-	}
-	confirmedSet := make(map[string]bool, len(confirmed))
-	preservedSet := make(map[string]bool, len(confirmed))
-	for _, input := range confirmed {
-		digest := input.contentDigest()
-		confirmedSet[digest] = true
-		if preserved[digest] {
-			preservedSet[digest] = true
-			continue
-		}
-		t.Fatalf("%s lost confirmed input %q", scenario, input.name)
-	}
-	confirmedDigests := slices.Sorted(maps.Keys(confirmedSet))
-	preservedDigests := slices.Sorted(maps.Keys(preservedSet))
+	confirmedDigests := platformConfirmedInputDigests(confirmed)
+	preservedDigests := requirePlatformPreservedInputDigests(t, scenario, reachable, confirmed)
 	if emit {
 		emitPlatformAttestation(t, platformAttestation{
 			Kind: "convergence", Scenario: scenario, Platform: platform, Filesystem: filesystem,
