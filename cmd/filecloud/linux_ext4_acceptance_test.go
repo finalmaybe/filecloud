@@ -29,6 +29,7 @@ func platformMatrixScenarios() []platformMatrixScenario {
 	return []platformMatrixScenario{
 		{category: "fixed vectors", packagePath: "./internal/object", test: "TestCanonicalMetadataVectors"},
 		{category: "fixed vectors", packagePath: "./internal/object", test: "TestBlockVectors"},
+		{category: "resource limits", packagePath: "./internal/object", test: "TestCanonicalMetadataRejectsCollectionPastLimit"},
 		{category: "fixed vectors", packagePath: "./cmd/filecloud", test: "TestCanonicalProtocolObjectIDs"},
 		{category: "fixed vectors", packagePath: "./cmd/filecloud", test: "TestConflictCopyNameAttestedNormalVectors"},
 		{category: "fixed vectors", packagePath: "./cmd/filecloud", test: "TestConflictCopyNameLongExtensionOrdinalOneFixedVector"},
@@ -47,6 +48,7 @@ func platformMatrixScenarios() []platformMatrixScenario {
 		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestListHistoryLimiterReleasesOnDeadline"},
 		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestGetHistoryCommitReturnsPublishedRolesAndImmutableMetadata"},
 		{category: "history HTTP contract", packagePath: "./internal/library", test: "TestGetHistoryCommitValidationAndVisibility"},
+		{category: "resource limits", packagePath: "./internal/library", test: "TestDefaultHeadValidationProtocolBudgets"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryListIncludesVerifiedMergedLineage"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryHistoryListMergedSourceBudgetIsAtomic"},
 		{category: "history merge sources", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreAcceptsPublishedMergeSource"},
@@ -63,6 +65,7 @@ func platformMatrixScenarios() []platformMatrixScenario {
 		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerPreviewCapAndDeterminism"},
 		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerRejectsBudgetsAndNonCanonicalObjects"},
 		{category: "restore planner", packagePath: "./cmd/filecloud", test: "TestRestorePlannerDirectoryReplacesFileAtSelectedAncestor"},
+		{category: "resource limits", packagePath: "./cmd/filecloud", test: "TestDefaultRestorePlannerProtocolBudgets"},
 		{category: "restore migration", packagePath: "./cmd/filecloud", test: "TestClientV23ToV24SyncPendingMigrationPreservesFields"},
 		{category: "restore dispatcher", packagePath: "./cmd/filecloud", test: "TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation"},
 		{category: "restore dispatcher", packagePath: "./cmd/filecloud", test: "TestLibraryRestoreRejectsSyncPublicationWithoutMutation"},
@@ -173,6 +176,9 @@ func TestPlatformMatrixWiresFullScenarioSet(t *testing.T) {
 		"TestListHistoryLimiterReleasesOnDeadline",
 		"TestGetHistoryCommitReturnsPublishedRolesAndImmutableMetadata",
 		"TestGetHistoryCommitValidationAndVisibility",
+		"TestCanonicalMetadataRejectsCollectionPastLimit",
+		"TestDefaultHeadValidationProtocolBudgets",
+		"TestDefaultRestorePlannerProtocolBudgets",
 		"TestLibraryHistoryListIncludesVerifiedMergedLineage",
 		"TestLibraryHistoryListMergedSourceBudgetIsAtomic",
 		"TestLibraryHistoryInspectDirectoryPaginates500Of501Entries",
@@ -302,6 +308,11 @@ func TestPlatformAttestationValidation(t *testing.T) {
 		SourceReachable: true, PreviousHeadReachable: true,
 		ConfirmedInputDigests: []string{digest}, PreservedInputDigests: []string{digest},
 	}
+	directoryRestore := restore
+	directoryRestore.Scenario = "real binary directory restore"
+	directoryRestore.SourcePath = "docs"
+	directoryRestore.TypeReplacementCount = new(int64(0))
+	directoryRestore.RemovedDescendantCount = new(int64(0))
 	for _, test := range []struct {
 		name                 string
 		attestations         []platformAttestation
@@ -322,6 +333,7 @@ func TestPlatformAttestationValidation(t *testing.T) {
 		{name: "unknown APFS casefold lookup", attestations: []platformAttestation{func() platformAttestation { value := primitives; value.CasefoldLookup = "unknown"; return value }()}, required: map[string]string{"filesystem primitives": "filesystem-primitives"}, platform: "darwin", filesystem: "apfs", wantErr: true},
 		{name: "valid fixed vectors", attestations: []platformAttestation{vectors}, required: map[string]string{"cross-platform fixed vectors": "fixed-vectors"}},
 		{name: "valid restore", attestations: []platformAttestation{restore}, required: map[string]string{"real binary directory and root restore": "restore"}},
+		{name: "valid directory restore", attestations: []platformAttestation{directoryRestore}, required: map[string]string{"real binary directory restore": "restore"}},
 		{name: "restore Head drift", attestations: []platformAttestation{func() platformAttestation { value := restore; value.Head = digest; return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "restore invalid source path", attestations: []platformAttestation{func() platformAttestation { value := restore; value.SourcePath = "../outside"; return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
 		{name: "restore missing type replacement", attestations: []platformAttestation{func() platformAttestation { value := restore; value.TypeReplacementCount = new(int64(0)); return value }()}, required: map[string]string{"real binary directory and root restore": "restore"}, wantErr: true},
@@ -483,9 +495,13 @@ func validatePlatformAttestations(attestations []platformAttestation, required m
 				attestation.PreservedCurrentOnlyCount != nil && attestation.PendingPublicationRows != nil &&
 				attestation.PendingCheckoutRows != nil
 			validStats := statsPresent && *attestation.CreatedCount >= 0 && *attestation.UpdatedCount >= 0 &&
-				*attestation.CreatedCount+*attestation.UpdatedCount+*attestation.TypeReplacementCount > 0 &&
-				*attestation.TypeReplacementCount > 0 && *attestation.RemovedDescendantCount > 0 &&
-				*attestation.PreservedCurrentOnlyCount > 0
+				*attestation.TypeReplacementCount >= 0 && *attestation.RemovedDescendantCount >= 0 &&
+				*attestation.PreservedCurrentOnlyCount >= 0 &&
+				*attestation.CreatedCount+*attestation.UpdatedCount+*attestation.TypeReplacementCount > 0
+			if attestation.Scenario == "real binary directory and root restore" {
+				validStats = validStats && *attestation.TypeReplacementCount > 0 &&
+					*attestation.RemovedDescendantCount > 0 && *attestation.PreservedCurrentOnlyCount > 0
+			}
 			if !validInputs || !validIDs || !object.ValidPath(attestation.SourcePath) || !validResult || !validStats ||
 				*attestation.PendingPublicationRows != 0 || *attestation.PendingCheckoutRows != 0 ||
 				!attestation.SourceReachable || !attestation.PreviousHeadReachable || attestation.ReachableObjects < 2 {
@@ -864,8 +880,8 @@ func TestRequiredPlatformAttestationCounts(t *testing.T) {
 		{platform: "darwin", filesystem: "apfs"},
 		{platform: "windows", filesystem: "ntfs"},
 	} {
-		if got := len(requiredPlatformAttestations(test.platform, test.filesystem)); got != 114 {
-			t.Fatalf("%s/%s attestations=%d, want 114", test.platform, test.filesystem, got)
+		if got := len(requiredPlatformAttestations(test.platform, test.filesystem)); got != 115 {
+			t.Fatalf("%s/%s attestations=%d, want 115", test.platform, test.filesystem, got)
 		}
 	}
 }
@@ -879,6 +895,7 @@ func uniqueSortedDigests(values []string) []string {
 func requiredPlatformAttestations(platform, filesystem string) map[string]string {
 	result := map[string]string{
 		"real binary CLI lifecycle":                       "convergence",
+		"real binary directory restore":                   "restore",
 		"real binary directory and root restore":          "restore",
 		"publisher import":                                "convergence",
 		"subscriber checkout":                             "convergence",
@@ -1155,7 +1172,7 @@ func requirePlatformPreservedInputDigests(t *testing.T, scenario string, reachab
 	for _, input := range confirmed {
 		digest := input.contentDigest()
 		if !preserved[digest] {
-			t.Fatalf("%s lost confirmed input %q", scenario, input.name)
+			t.Fatalf("%s input %q digest=%s reachable=false, want true", scenario, input.name, digest)
 		}
 		result = append(result, digest)
 	}

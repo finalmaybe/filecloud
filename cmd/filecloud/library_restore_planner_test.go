@@ -563,6 +563,31 @@ func TestRestorePlannerPreviewCapAndDeterminism(t *testing.T) {
 	}
 }
 
+func TestDefaultRestorePlannerProtocolBudgets(t *testing.T) {
+	id := strings.Repeat("a", 64)
+	planner, err := newRestorePlanner(restorePlanInput{
+		CurrentRoot: id,
+		SourceRoot:  id,
+		SourcePath:  ".",
+		Load: func(string, string) ([]byte, error) {
+			return nil, errors.New("unexpected load")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := restorePlanBudget{
+		maxDepth:            256,
+		maxObjects:          2_000_000,
+		maxPaths:            2_000_000,
+		maxPathBytes:        1024,
+		maxDirectoryEntries: 100_000,
+	}
+	if planner.budget != want {
+		t.Fatalf("default restore planner budget=%+v, want %+v", planner.budget, want)
+	}
+}
+
 func TestRestorePlannerRejectsBudgetsAndNonCanonicalObjects(t *testing.T) {
 	fileData, fileID, err := canonicalFile("same.txt", 1, []string{strings.Repeat("a", 64)})
 	if err != nil {

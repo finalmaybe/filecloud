@@ -120,19 +120,24 @@ func TestCanonicalMetadataRejectsCollectionPastLimit(t *testing.T) {
 		t.Fatalf("oversized File error = %v, want ErrPayloadTooLarge", err)
 	}
 
-	entry := `{"Id":"` + validID + `","ModifiedAt":"2026-08-09T00:00:00Z","Name":"a","Type":"File"}`
 	var directory strings.Builder
 	directory.WriteString(`{"Entries":[`)
-	for i := 0; i < 100000; i++ {
+	for i := range 100000 {
 		if i > 0 {
 			directory.WriteByte(',')
 		}
-		directory.WriteString(entry)
+		fmt.Fprintf(&directory, `{"Id":"%s","ModifiedAt":"2026-08-09T00:00:00Z","Name":"entry-%06d","Type":"File"}`,
+			validID, i)
+	}
+	const directorySuffix = `],"Type":"Directory","Version":1}`
+	directory.WriteString(directorySuffix)
+	if _, _, err := object.Canonicalize("directories", []byte(directory.String())); err != nil {
+		t.Fatalf("100000-entry Directory error = %v, want nil", err)
 	}
 	// The over-limit value is malformed. ErrPayloadTooLarge proves it was not decoded.
-	directory.WriteString(`,{"not":"decoded"`)
-	if _, _, err := object.Canonicalize("directories", []byte(directory.String())); !errors.Is(err, object.ErrPayloadTooLarge) {
-		t.Fatalf("oversized Directory error = %v, want ErrPayloadTooLarge", err)
+	overLimitDirectory := strings.TrimSuffix(directory.String(), directorySuffix) + `,{"not":"decoded"`
+	if _, _, err := object.Canonicalize("directories", []byte(overLimitDirectory)); !errors.Is(err, object.ErrPayloadTooLarge) {
+		t.Fatalf("100001-entry Directory error = %v, want ErrPayloadTooLarge", err)
 	}
 
 	commit := `{"AuthorUserId":"12345678-9abc-4def-8123-456789abcdef","CreatedAt":"2026-08-09T00:00:00Z","DeviceId":"01234567-89ab-4def-8123-456789abcdef","Message":"sync","Parents":["` + validID + `","` + validID + `",{"not":"decoded"`

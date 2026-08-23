@@ -156,6 +156,10 @@ func TestListHistoryValidationAndAuthenticationOrder(t *testing.T) {
 	assertStatusCode(t, invalid, http.StatusBadRequest, 1000)
 	foreign := serve(handler, http.MethodGet, "/v1/libraries/22345678-9abc-4def-8123-456789abcdef/history", "", _otherToken)
 	assertStatusCode(t, foreign, http.StatusNotFound, 2000)
+	assertStatusCode(t, serve(handler, http.MethodGet,
+		"/v1/libraries/"+_headLibraryID+"/history?PageSize=500", "", _ownerToken), http.StatusOK, 0)
+	assertStatusCode(t, serve(handler, http.MethodGet,
+		"/v1/libraries/"+_headLibraryID+"/history?PageSize=501", "", _ownerToken), http.StatusBadRequest, 1000)
 	tooLong := serve(handler, http.MethodGet, "/v1/libraries/"+_headLibraryID+"/history?PageToken="+strings.Repeat("a", _maxHistoryTokenSize+1), "", _ownerToken)
 	assertStatusCode(t, tooLong, http.StatusBadRequest, 1000)
 }
