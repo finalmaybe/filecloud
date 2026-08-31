@@ -12,9 +12,10 @@ import (
 func TestPublicationLifecycleAdvanceAcceptsLockedBoundWorktreeSession(t *testing.T) {
 	state := newImportedBinding(t)
 	session := openTestPublicationSession(t, state)
-	module := &_publicationLifecycle{}
-
-	for _, request := range []_publicationRequest{_syncPublicationRequest{}, _restorePublicationRequest{}} {
+	var module _publicationLifecycle
+	var syncRequest _syncPublicationRequest
+	var restoreRequest _restorePublicationRequest
+	for _, request := range []_publicationRequester{syncRequest, restoreRequest} {
 		outcome, err := module.Advance(t.Context(), session, request)
 		if err != nil {
 			t.Fatalf("Advance(%T) error = %v", request, err)
@@ -26,7 +27,8 @@ func TestPublicationLifecycleAdvanceAcceptsLockedBoundWorktreeSession(t *testing
 }
 
 func TestPublicationLifecycleAdvanceRejectsUnbootstrappedSession(t *testing.T) {
-	_, err := (&_publicationLifecycle{}).Advance(t.Context(), &_lockedBoundWorktreeSession{}, _syncPublicationRequest{})
+	var session _lockedBoundWorktreeSession
+	_, err := advanceTestSyncPublication(t, &session)
 	if !errors.Is(err, _errPublicationSessionLockMismatch) {
 		t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionLockMismatch)
 	}
@@ -51,30 +53,21 @@ func TestPublicationLifecycleAdvanceRejectsChangedSessionScope(t *testing.T) {
 		{
 			name: "binding changed",
 			mutate: func(t *testing.T, session *_lockedBoundWorktreeSession) {
-				t.Helper()
-				if _, err := session.db.ExecContext(t.Context(), "UPDATE bindings SET head_etag = 'changed' WHERE worktree = ?", session.binding.Worktree); err != nil {
-					t.Fatal(err)
-				}
+				updateTestPublicationBinding(t, session, "UPDATE bindings SET head_etag = 'changed' WHERE worktree = ?")
 			},
 			want: _errPublicationSessionBindingMismatch,
 		},
 		{
 			name: "credential changed",
 			mutate: func(t *testing.T, session *_lockedBoundWorktreeSession) {
-				t.Helper()
-				if _, err := session.db.ExecContext(t.Context(), "UPDATE bindings SET access_token = x'00' WHERE worktree = ?", session.binding.Worktree); err != nil {
-					t.Fatal(err)
-				}
+				updateTestPublicationBinding(t, session, "UPDATE bindings SET access_token = x'00' WHERE worktree = ?")
 			},
 			want: _errPublicationSessionBindingMismatch,
 		},
 		{
 			name: "remote location changed",
 			mutate: func(t *testing.T, session *_lockedBoundWorktreeSession) {
-				t.Helper()
-				if _, err := session.db.ExecContext(t.Context(), "UPDATE bindings SET server_url = 'https://changed.invalid' WHERE worktree = ?", session.binding.Worktree); err != nil {
-					t.Fatal(err)
-				}
+				updateTestPublicationBinding(t, session, "UPDATE bindings SET server_url = 'https://changed.invalid' WHERE worktree = ?")
 			},
 			want: _errPublicationSessionBindingMismatch,
 		},
@@ -100,7 +93,7 @@ func TestPublicationLifecycleAdvanceRejectsChangedSessionScope(t *testing.T) {
 			session := openTestPublicationSession(t, state)
 			test.mutate(t, session)
 
-			_, err := (&_publicationLifecycle{}).Advance(t.Context(), session, _syncPublicationRequest{})
+			_, err := advanceTestSyncPublication(t, session)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Advance() error = %v, want classification %v", err, test.want)
 			}
@@ -121,7 +114,40 @@ func TestPublicationLifecycleAdvanceRejectsReleasedOperatingSystemLock(t *testin
 		}
 	}()
 
-	_, err := (&_publicationLifecycle{}).Advance(t.Context(), session, _syncPublicationRequest{})
+	_, err := advanceTestSyncPublication(t, session)
+	if !errors.Is(err, _errPublicationSessionLockMismatch) {
+		t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionLockMismatch)
+	}
+}
+
+func TestPublicationLifecycleAdvanceRejectsReleasedLockHeldByCompetitor(t *testing.T) {
+	state := newImportedBinding(t)
+	session := openTestPublicationSession(t, state)
+	file := session.locks.files[0]
+	if err := fscompat.Flock(int(file.Fd()), fscompat.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	competitor, err := os.OpenFile(file.Name(), os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fscompat.Flock(int(competitor.Fd()), fscompat.LOCK_EX|fscompat.LOCK_NB); err != nil {
+		competitor.Close()
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := fscompat.Flock(int(competitor.Fd()), fscompat.LOCK_UN); err != nil {
+			t.Errorf("release competing client lock: %v", err)
+		}
+		if err := competitor.Close(); err != nil {
+			t.Errorf("close competing client lock: %v", err)
+		}
+		if err := fscompat.Flock(int(file.Fd()), fscompat.LOCK_EX|fscompat.LOCK_NB); err != nil {
+			t.Errorf("restore client lock for cleanup: %v", err)
+		}
+	}()
+
+	_, err = advanceTestSyncPublication(t, session)
 	if !errors.Is(err, _errPublicationSessionLockMismatch) {
 		t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionLockMismatch)
 	}
@@ -135,7 +161,7 @@ func TestPublicationLifecycleAdvanceRejectsClosedAndConcurrentSession(t *testing
 			t.Fatal(err)
 		}
 
-		_, err := (&_publicationLifecycle{}).Advance(t.Context(), session, _syncPublicationRequest{})
+		_, err := advanceTestSyncPublication(t, session)
 		if !errors.Is(err, _errPublicationSessionClosed) {
 			t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionClosed)
 		}
@@ -150,7 +176,7 @@ func TestPublicationLifecycleAdvanceRejectsClosedAndConcurrentSession(t *testing
 		}
 		defer release()
 
-		_, err = (&_publicationLifecycle{}).Advance(t.Context(), session, _restorePublicationRequest{})
+		_, err = advanceTestRestorePublication(t, session)
 		if !errors.Is(err, _errPublicationSessionConcurrentUse) {
 			t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionConcurrentUse)
 		}
@@ -176,6 +202,32 @@ func TestOpenLockedBoundWorktreeSessionRejectsUnboundWorktree(t *testing.T) {
 	})
 	if session != nil || err == nil || err.Error() != "worktree is not bound" {
 		t.Fatalf("openLockedBoundWorktreeSession() = (%v, %v), want (nil, worktree is not bound)", session, err)
+	}
+}
+
+func advanceTestSyncPublication(t *testing.T, session *_lockedBoundWorktreeSession) (_publicationOutcome, error) {
+	t.Helper()
+	var request _syncPublicationRequest
+	return advanceTestPublication(t, session, request)
+}
+
+func advanceTestRestorePublication(t *testing.T, session *_lockedBoundWorktreeSession) (_publicationOutcome, error) {
+	t.Helper()
+	var request _restorePublicationRequest
+	return advanceTestPublication(t, session, request)
+}
+
+func advanceTestPublication(t *testing.T, session *_lockedBoundWorktreeSession,
+	request _publicationRequester) (_publicationOutcome, error) {
+	t.Helper()
+	var module _publicationLifecycle
+	return module.Advance(t.Context(), session, request)
+}
+
+func updateTestPublicationBinding(t *testing.T, session *_lockedBoundWorktreeSession, statement string) {
+	t.Helper()
+	if _, err := session.db.ExecContext(t.Context(), statement, session.binding.Worktree); err != nil {
+		t.Fatal(err)
 	}
 }
 

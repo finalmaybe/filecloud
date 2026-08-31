@@ -37,45 +37,46 @@ type _publicationOutcome struct {
 	kind _publicationOutcomeKind
 }
 
-func (outcome _publicationOutcome) Kind() _publicationOutcomeKind {
-	return outcome.kind
+func (o _publicationOutcome) Kind() _publicationOutcomeKind {
+	return o.kind
 }
 
-type _publicationRequest interface {
+type _publicationRequester interface {
 	publicationRequest()
 }
 
 type _syncPublicationRequest struct{}
 
-func (_syncPublicationRequest) publicationRequest() {}
+func (r _syncPublicationRequest) publicationRequest() {}
 
 type _restorePublicationRequest struct{}
 
-func (_restorePublicationRequest) publicationRequest() {}
+func (r _restorePublicationRequest) publicationRequest() {}
 
 type _publicationLifecycle struct{}
 
-func (*_publicationLifecycle) Advance(ctx context.Context, session *_lockedBoundWorktreeSession,
-	request _publicationRequest) (_publicationOutcome, error) {
-	if session == nil {
-		return _publicationOutcome{}, _errPublicationSessionClosed
+func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWorktreeSession,
+	request _publicationRequester) (_publicationOutcome, error) {
+	var noOutcome _publicationOutcome
+	if s == nil {
+		return noOutcome, _errPublicationSessionClosed
 	}
-	release, err := session.beginAdvance()
+	release, err := s.beginAdvance()
 	if err != nil {
-		return _publicationOutcome{}, err
+		return noOutcome, err
 	}
 	defer release()
 	if err := ctx.Err(); err != nil {
-		return _publicationOutcome{}, err
+		return noOutcome, err
 	}
-	if err := session.validate(ctx); err != nil {
-		return _publicationOutcome{}, err
+	if err := s.validate(ctx); err != nil {
+		return noOutcome, err
 	}
 	switch request.(type) {
 	case _syncPublicationRequest, _restorePublicationRequest:
 		return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
 	default:
-		return _publicationOutcome{}, _errPublicationRequestInvalid
+		return noOutcome, _errPublicationRequestInvalid
 	}
 }
 
@@ -173,81 +174,81 @@ func readLockedSessionBinding(ctx context.Context, db *sql.DB, worktree string) 
 	return binding, token, nil
 }
 
-func (session *_lockedBoundWorktreeSession) beginAdvance() (func(), error) {
-	session.mu.Lock()
-	defer session.mu.Unlock()
-	if session.closed {
+func (s *_lockedBoundWorktreeSession) beginAdvance() (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
 		return nil, _errPublicationSessionClosed
 	}
-	if session.active {
+	if s.active {
 		return nil, _errPublicationSessionConcurrentUse
 	}
-	session.active = true
+	s.active = true
 	return func() {
-		session.mu.Lock()
-		session.active = false
-		session.mu.Unlock()
+		s.mu.Lock()
+		s.active = false
+		s.mu.Unlock()
 	}, nil
 }
 
-func (session *_lockedBoundWorktreeSession) validate(ctx context.Context) error {
-	if session.locks == nil || len(session.lockNames) == 0 {
+func (s *_lockedBoundWorktreeSession) validate(ctx context.Context) error {
+	if s.locks == nil || len(s.lockNames) == 0 {
 		return _errPublicationSessionLockMismatch
 	}
-	if err := session.locks.validate(session.lockNames); err != nil {
+	if err := s.locks.validate(s.lockNames); err != nil {
 		return fmt.Errorf("%w: %v", _errPublicationSessionLockMismatch, err)
 	}
-	if session.root == nil {
+	if s.root == nil {
 		return _errPublicationSessionWorktreeMismatch
 	}
-	if err := session.root.validateIdentity(); err != nil {
+	if err := s.root.validateIdentity(); err != nil {
 		return fmt.Errorf("%w: %v", _errPublicationSessionWorktreeMismatch, err)
 	}
-	if session.db == nil || session.base == nil {
+	if s.db == nil || s.base == nil {
 		return _errPublicationSessionBindingMismatch
 	}
-	binding, token, err := readLockedSessionBinding(ctx, session.db, session.binding.Worktree)
+	binding, token, err := readLockedSessionBinding(ctx, s.db, s.binding.Worktree)
 	if err != nil {
 		return fmt.Errorf("%w: %v", _errPublicationSessionBindingMismatch, err)
 	}
 	defer clear(token)
-	if binding != session.binding || !bytes.Equal(token, session.token) || session.root.path != session.binding.Worktree ||
-		session.base.String() != session.binding.ServerURL {
+	if binding != s.binding || !bytes.Equal(token, s.token) || s.root.path != s.binding.Worktree ||
+		s.base.String() != s.binding.ServerURL {
 		return _errPublicationSessionBindingMismatch
 	}
 	return nil
 }
 
-func (session *_lockedBoundWorktreeSession) Close() error {
-	if session == nil {
+func (s *_lockedBoundWorktreeSession) Close() error {
+	if s == nil {
 		return nil
 	}
-	session.mu.Lock()
-	if session.active {
-		session.mu.Unlock()
+	s.mu.Lock()
+	if s.active {
+		s.mu.Unlock()
 		return _errPublicationSessionConcurrentUse
 	}
-	if session.closed {
-		session.mu.Unlock()
+	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
-	session.closed = true
-	session.mu.Unlock()
+	s.closed = true
+	s.mu.Unlock()
 
 	var err error
-	if session.root != nil {
-		err = errors.Join(err, session.root.Close())
-		session.root = nil
+	if s.root != nil {
+		err = errors.Join(err, s.root.Close())
+		s.root = nil
 	}
-	if session.db != nil {
-		err = errors.Join(err, session.db.Close())
-		session.db = nil
+	if s.db != nil {
+		err = errors.Join(err, s.db.Close())
+		s.db = nil
 	}
-	clear(session.token)
-	session.token = nil
-	if session.locks != nil {
-		err = errors.Join(err, session.locks.Close())
-		session.locks = nil
+	clear(s.token)
+	s.token = nil
+	if s.locks != nil {
+		err = errors.Join(err, s.locks.Close())
+		s.locks = nil
 	}
 	return err
 }

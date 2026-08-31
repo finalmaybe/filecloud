@@ -1237,6 +1237,16 @@ func lockClientKeysMode(ctx context.Context, clientDir string, names []string, c
 		if err := file.Chmod(0o600); err != nil {
 			return nil, fmt.Errorf("secure client lock: %w", err)
 		}
+		info, err := file.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("inspect client lock: %w", err)
+		}
+		if info.Size() == 0 {
+			var sentinel [1]byte
+			if _, err := file.WriteAt(sentinel[:], 0); err != nil {
+				return nil, fmt.Errorf("initialize client lock: %w", err)
+			}
+		}
 		if err := config.syncFile(file); err != nil {
 			return nil, fmt.Errorf("sync client lock: %w", err)
 		}
@@ -1284,13 +1294,13 @@ func flockContext(ctx context.Context, file *os.File) error {
 	}
 }
 
-func (locks *clientLocks) validate(names []string) error {
-	locks.mu.Lock()
-	defer locks.mu.Unlock()
-	if len(locks.files) != len(names) || !slices.Equal(locks.names, names) {
+func (l *clientLocks) validate(names []string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.files) != len(names) || !slices.Equal(l.names, names) {
 		return errors.New("client lock scope does not match")
 	}
-	for _, file := range locks.files {
+	for _, file := range l.files {
 		if _, err := file.Stat(); err != nil {
 			return fmt.Errorf("inspect client lock: %w", err)
 		}
@@ -1307,6 +1317,9 @@ func (locks *clientLocks) validate(names []string) error {
 			if err := probe.Close(); err != nil {
 				return fmt.Errorf("close client lock probe: %w", err)
 			}
+			if err := fscompat.ValidateFlock(int(file.Fd())); err != nil {
+				return fmt.Errorf("validate client lock ownership: %w", err)
+			}
 		default:
 			return errors.Join(fmt.Errorf("probe client lock: %w", lockErr), probe.Close())
 		}
@@ -1314,13 +1327,13 @@ func (locks *clientLocks) validate(names []string) error {
 	return nil
 }
 
-func (locks *clientLocks) Close() (retErr error) {
-	locks.mu.Lock()
-	defer locks.mu.Unlock()
-	for index := len(locks.files) - 1; index >= 0; index-- {
-		retErr = errors.Join(retErr, fscompat.Flock(int(locks.files[index].Fd()), fscompat.LOCK_UN), locks.files[index].Close())
+func (l *clientLocks) Close() (retErr error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for index := len(l.files) - 1; index >= 0; index-- {
+		retErr = errors.Join(retErr, fscompat.Flock(int(l.files[index].Fd()), fscompat.LOCK_UN), l.files[index].Close())
 	}
-	locks.files = nil
+	l.files = nil
 	return retErr
 }
 

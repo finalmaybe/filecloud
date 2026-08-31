@@ -283,6 +283,22 @@ func Flock(fd int, operation int) error {
 	return windows.LockFileEx(windows.Handle(fd), flags, 0, 1, 0, &windows.Overlapped{})
 }
 
+func ValidateFlock(fd int) error {
+	handle := windows.Handle(fd)
+	if _, err := windows.SetFilePointer(handle, 0, nil, windows.FILE_BEGIN); err != nil {
+		return err
+	}
+	var sentinel [1]byte
+	var read uint32
+	if err := windows.ReadFile(handle, sentinel[:], &read, nil); err != nil {
+		return err
+	}
+	if read != uint32(len(sentinel)) {
+		return errors.New("client lock sentinel is missing")
+	}
+	return nil
+}
+
 // NormalizeError turns NT native statuses into the Win32 errors shared code
 // compares with errors.Is (for example ERROR_FILE_NOT_FOUND and ERROR_SHARING_VIOLATION).
 func NormalizeError(err error) error {
