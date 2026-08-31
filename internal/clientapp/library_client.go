@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	fscompat "github.com/mingming-cn/filecloud/internal/fscompat"
@@ -1179,7 +1180,11 @@ func readWorktreeScope(ctx context.Context, databasePath, worktree string) (serv
 	return serverURL, libraryID, nil
 }
 
-type clientLocks struct{ files []*os.File }
+type clientLocks struct {
+	mu    sync.Mutex
+	names []string
+	files []*os.File
+}
 
 func lockName(key string) string {
 	return fmt.Sprintf("lock-%x", sha256.Sum256([]byte(key)))
@@ -1217,7 +1222,7 @@ func lockClientKeysMode(ctx context.Context, clientDir string, names []string, c
 	if err := checkStateDirFilesystem(clientDir, checkFilesystem); err != nil {
 		return nil, err
 	}
-	locks := &clientLocks{}
+	locks := &clientLocks{names: slices.Clone(names)}
 	defer func() {
 		if retErr != nil {
 			retErr = errors.Join(retErr, locks.Close())
@@ -1279,7 +1284,39 @@ func flockContext(ctx context.Context, file *os.File) error {
 	}
 }
 
+func (locks *clientLocks) validate(names []string) error {
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
+	if len(locks.files) != len(names) || !slices.Equal(locks.names, names) {
+		return errors.New("client lock scope does not match")
+	}
+	for _, file := range locks.files {
+		if _, err := file.Stat(); err != nil {
+			return fmt.Errorf("inspect client lock: %w", err)
+		}
+		probe, err := os.OpenFile(file.Name(), os.O_RDWR, 0o600)
+		if err != nil {
+			return fmt.Errorf("probe client lock: %w", err)
+		}
+		lockErr := fscompat.Flock(int(probe.Fd()), fscompat.LOCK_EX|fscompat.LOCK_NB)
+		switch {
+		case lockErr == nil:
+			releaseErr := errors.Join(fscompat.Flock(int(probe.Fd()), fscompat.LOCK_UN), probe.Close())
+			return errors.Join(errors.New("client lock is not held"), releaseErr)
+		case errors.Is(lockErr, fscompat.EWOULDBLOCK), errors.Is(lockErr, fscompat.EAGAIN):
+			if err := probe.Close(); err != nil {
+				return fmt.Errorf("close client lock probe: %w", err)
+			}
+		default:
+			return errors.Join(fmt.Errorf("probe client lock: %w", lockErr), probe.Close())
+		}
+	}
+	return nil
+}
+
 func (locks *clientLocks) Close() (retErr error) {
+	locks.mu.Lock()
+	defer locks.mu.Unlock()
 	for index := len(locks.files) - 1; index >= 0; index-- {
 		retErr = errors.Join(retErr, fscompat.Flock(int(locks.files[index].Fd()), fscompat.LOCK_UN), locks.files[index].Close())
 	}
