@@ -132,8 +132,7 @@ func TestPublicationLifecycleAdvanceRejectsReleasedLockHeldByCompetitor(t *testi
 		t.Fatal(err)
 	}
 	if err := fscompat.Flock(int(competitor.Fd()), fscompat.LOCK_EX|fscompat.LOCK_NB); err != nil {
-		competitor.Close()
-		t.Fatal(err)
+		t.Fatal(errors.Join(err, competitor.Close()))
 	}
 	defer func() {
 		if err := fscompat.Flock(int(competitor.Fd()), fscompat.LOCK_UN); err != nil {

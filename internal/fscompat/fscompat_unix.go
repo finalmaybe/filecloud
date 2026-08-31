@@ -56,9 +56,11 @@ func Unlinkat(dirfd int, path string, flags int) error  { return unix.Unlinkat(d
 func Ftruncate(fd int, size int64) error                { return unix.Ftruncate(fd, size) }
 func Fchmod(fd int, mode uint32) error                  { return unix.Fchmod(fd, mode) }
 func Flock(fd int, operation int) error                 { return unix.Flock(fd, operation) }
-func ValidateFlock(fd int) error                        { return unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB) }
-func SyncFile(fd int) error                             { return unix.Fsync(fd) }
-func SyncDirectory(fd int) error                        { return unix.Fsync(fd) }
+
+// ValidateFlock verifies that fd still owns an exclusive client lock.
+func ValidateFlock(fd int) error { return unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB) }
+func SyncFile(fd int) error      { return unix.Fsync(fd) }
+func SyncDirectory(fd int) error { return unix.Fsync(fd) }
 
 // OpenDirectoryEnumeration returns a separate directory description so each
 // scanner pass starts at the beginning without sharing another pass's offset.

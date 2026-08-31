@@ -37,6 +37,7 @@ type _publicationOutcome struct {
 	kind _publicationOutcomeKind
 }
 
+// Kind classifies the lifecycle result without requiring error-string parsing.
 func (o _publicationOutcome) Kind() _publicationOutcomeKind {
 	return o.kind
 }
@@ -55,6 +56,7 @@ func (r _restorePublicationRequest) publicationRequest() {}
 
 type _publicationLifecycle struct{}
 
+// Advance validates the session scope before advancing one sealed lifecycle request.
 func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWorktreeSession,
 	request _publicationRequester) (_publicationOutcome, error) {
 	var noOutcome _publicationOutcome
@@ -166,10 +168,10 @@ func readLockedSessionBinding(ctx context.Context, db *sql.DB, worktree string) 
 		&binding.ServerURL, &binding.LibraryID, &binding.Worktree, &binding.UserID, &binding.DeviceID,
 		&binding.SyncBase, &binding.SyncBaseRoot, &binding.HeadETag, &token)
 	if errors.Is(err, sql.ErrNoRows) {
-		return clientBinding{}, nil, errors.New("worktree is not bound")
+		return binding, nil, errors.New("worktree is not bound")
 	}
 	if err != nil {
-		return clientBinding{}, nil, fmt.Errorf("read client binding: %w", err)
+		return binding, nil, fmt.Errorf("read client binding: %w", err)
 	}
 	return binding, token, nil
 }
@@ -219,6 +221,7 @@ func (s *_lockedBoundWorktreeSession) validate(ctx context.Context) error {
 	return nil
 }
 
+// Close releases the Worktree, database, credentials, and lock capability held by the session.
 func (s *_lockedBoundWorktreeSession) Close() error {
 	if s == nil {
 		return nil

@@ -283,6 +283,7 @@ func Flock(fd int, operation int) error {
 	return windows.LockFileEx(windows.Handle(fd), flags, 0, 1, 0, &windows.Overlapped{})
 }
 
+// ValidateFlock verifies that fd can read the byte range locked through the same handle.
 func ValidateFlock(fd int) error {
 	handle := windows.Handle(fd)
 	if _, err := windows.SetFilePointer(handle, 0, nil, windows.FILE_BEGIN); err != nil {
