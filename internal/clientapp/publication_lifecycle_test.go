@@ -13,7 +13,7 @@ func TestPublicationLifecycleAdvanceAcceptsLockedBoundWorktreeSession(t *testing
 	state := newImportedBinding(t)
 	session := openTestPublicationSession(t, state)
 	var module _publicationLifecycle
-	var syncRequest _syncPublicationRequest
+	var syncRequest _inspectPublicationRequest
 	var restoreRequest _restorePublicationRequest
 	for _, request := range []_publicationRequester{syncRequest, restoreRequest} {
 		outcome, err := module.Advance(t.Context(), session, request)
@@ -206,7 +206,7 @@ func TestOpenLockedBoundWorktreeSessionRejectsUnboundWorktree(t *testing.T) {
 
 func advanceTestSyncPublication(t *testing.T, session *_lockedBoundWorktreeSession) (_publicationOutcome, error) {
 	t.Helper()
-	var request _syncPublicationRequest
+	var request _inspectPublicationRequest
 	return advanceTestPublication(t, session, request)
 }
 

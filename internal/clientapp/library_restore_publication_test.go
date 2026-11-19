@@ -171,7 +171,7 @@ func TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation(t *testin
 		t.Fatal(err)
 	}
 	headID := pending.ExpectedHead
-	err = dispatchPendingPublication(t.Context(), db, bindOptions{}, binding, worktreeSnapshot{},
+	err = dispatchRestorePublication(t.Context(), db, bindOptions{}, binding, worktreeSnapshot{},
 		remoteHead{CommitID: &headID, ETag: pending.ExpectedETag}, pending, io.Discard,
 		normalizeLibraryClientConfig(libraryClientConfig{}), _newReplayBudget(), _publicationDispatchResume)
 	if err == nil || !strings.Contains(err.Error(), "restore --confirm "+candidatePrefix) {

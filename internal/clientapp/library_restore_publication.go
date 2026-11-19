@@ -108,7 +108,54 @@ func uploadAndPublishRestore(ctx context.Context, db *sql.DB, options bindOption
 			return err
 		}
 	}
-	return publishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
+	return publishRestorePending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
+}
+
+func publishRestorePending(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
+	pending _restorePublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+	current, err := headBeforePublication(ctx, options, config, pending._publicationCandidate)
+	if err != nil {
+		return err
+	}
+	if *current.CommitID != pending.ExpectedHead || current.ETag != pending.ExpectedETag {
+		return dispatchRestorePublication(ctx, db, options, binding, snapshot, current, pending, stdout, config, budget, _publicationDispatchResume)
+	}
+	if err := _assertPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
+		return err
+	}
+	conflictingHead, conflict, publishErr := updateRemoteHeadOnce(ctx, options.base, options.libraryID, options.token,
+		pending.ExpectedETag, pending.CandidateCommit)
+	if conflict {
+		observed, scanErr := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+		if scanErr != nil {
+			return fmt.Errorf("rescan worktree after Head conflict: %w", scanErr)
+		}
+		return dispatchRestorePublication(ctx, db, options, binding, observed, conflictingHead, pending, stdout, config, budget,
+			_publicationDispatchResume)
+	}
+	published, observed, err := headAfterPublication(ctx, options, publishErr)
+	if err != nil {
+		return err
+	}
+	if published.CommitID == nil {
+		return errors.Join(publishErr, errors.New("library Head became empty during publication"))
+	}
+	switch *published.CommitID {
+	case pending.CandidateCommit:
+		return dispatchRestorePublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget, _publicationDispatchResume)
+	case pending.ExpectedHead:
+		if published.ETag == pending.ExpectedETag {
+			return errors.Join(publishErr, errors.New("library Head publication did not complete; rerun sync"))
+		}
+		return errors.Join(publishErr, dispatchRestorePublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
+			_publicationDispatchResume))
+	default:
+		if err := dispatchRestorePublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
+			_publicationDispatchResume); err != nil {
+			return errors.Join(publishErr, err)
+		}
+		return nil
+	}
 }
 
 func transitionPublishedRestore(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,

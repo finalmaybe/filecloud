@@ -698,7 +698,7 @@ func TestFinalizePublishedRollsBackStaleRows(t *testing.T) {
 			}
 			beforeIndex := countClientRows(t, state.clientDir, "path_index", state.worktree)
 			head := remoteHead{CommitID: &pending.CandidateCommit, ETag: "published-etag"}
-			if err := finalizePublished(t.Context(), db, binding, snapshot, head, pending, io.Discard); err == nil {
+			if err := finalizePublished(t.Context(), db, binding, snapshot, head, pending); err == nil {
 				t.Fatal("stale finalization succeeded")
 			}
 			afterBinding := readTestBinding(t, state.clientDir, state.worktree)
@@ -1122,36 +1122,13 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 		t.Fatalf("second replacement=%+v history=%d puts=%d", third, len(history), puts.Load())
 	}
 	binding := readTestBinding(t, subscriberDir, subscriberTree)
-	db, err := openClientDB(filepath.Join(subscriberDir, _clientDatabaseName), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := openWorktreeRoot(subscriberTree, func(*os.File) error { return nil })
-	if err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	snapshot, err := scanWorktree(root)
-	if err != nil {
-		root.Close()
-		db.Close()
-		t.Fatal(err)
-	}
-	head, err := getRemoteHead(t.Context(), mustServerURL(t, binding.ServerURL), testClientLibraryID, []byte(environment.token))
-	if err != nil {
-		root.Close()
-		db.Close()
-		t.Fatal(err)
-	}
+	session := openTestPublicationSession(t, importedBinding{clientDir: subscriberDir, worktree: subscriberTree})
 	budget := &_replayBudget{commitLimit: 2, treeLimit: _mergeMaxObjects, pathLimit: _mergeMaxObjects,
 		commits: make(map[string]object.Commit), walked: make(map[string]bool)}
 	puts.Store(0)
-	err = dispatchPendingPublication(t.Context(), db, bindOptions{base: mustServerURL(t, binding.ServerURL),
-		libraryID: testClientLibraryID, token: []byte(environment.token), clientDir: subscriberDir, worktreeRoot: root},
-		binding, snapshot, head, third, io.Discard, normalizeLibraryClientConfig(libraryClientConfig{}), budget,
-		_publicationDispatchResume)
-	if closeErr := errors.Join(root.Close(), db.Close()); closeErr != nil {
-		t.Fatal(closeErr)
+	_, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: _syncPublicationRoundOptions{budget: budget, stdout: io.Discard}})
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if err == nil || !strings.Contains(err.Error(), "cumulative synchronization budget") || puts.Load() != 0 ||
 		!reflect.DeepEqual(readTestSyncPublication(t, subscriberDir, subscriberTree), third) ||

@@ -48,9 +48,22 @@ type _publicationRequester interface {
 	publicationRequest()
 }
 
-type _syncPublicationRequest struct{}
+type _inspectPublicationRequest struct{}
 
-func (r _syncPublicationRequest) publicationRequest() {}
+func (_inspectPublicationRequest) publicationRequest() {}
+
+type _startSyncPublicationRequest struct {
+	prepared _preparedSyncPublication
+	round    _syncPublicationRoundOptions
+}
+
+func (_startSyncPublicationRequest) publicationRequest() {}
+
+type _resumeSyncPublicationRequest struct {
+	round _syncPublicationRoundOptions
+}
+
+func (_resumeSyncPublicationRequest) publicationRequest() {}
 
 type _restorePublicationRequest struct{}
 
@@ -77,11 +90,27 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 		return noOutcome, err
 	}
 	switch request.(type) {
-	case _syncPublicationRequest, _restorePublicationRequest:
-		checkout, pending, err := loadWorktreePendingPublication(ctx, s.db, s.binding)
-		if err != nil {
-			return noOutcome, err
+	case _inspectPublicationRequest, _restorePublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest:
+	default:
+		return noOutcome, _errPublicationRequestInvalid
+	}
+	checkout, pending, err := loadWorktreePendingPublication(ctx, s.db, s.binding)
+	if err != nil {
+		return noOutcome, err
+	}
+	switch request := request.(type) {
+	case _startSyncPublicationRequest:
+		if checkout != nil || pending != nil || request.prepared.session != s {
+			return noOutcome, _errPublicationRequestInvalid
 		}
+		return newSyncPublicationRound(s, request.round).start(ctx, request.prepared)
+	case _resumeSyncPublicationRequest:
+		value, ok := pending.(_syncPublicationState)
+		if checkout != nil || !ok {
+			return noOutcome, _errPublicationRequestInvalid
+		}
+		return newSyncPublicationRound(s, request.round).resumeCurrent(ctx, value)
+	default:
 		switch {
 		case checkout != nil:
 			return _publicationOutcome{kind: _publicationOutcomeCheckoutPending}, nil
@@ -90,8 +119,6 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 		default:
 			return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
 		}
-	default:
-		return noOutcome, _errPublicationRequestInvalid
 	}
 }
 
@@ -102,16 +129,19 @@ type _lockedBoundWorktreeSession struct {
 	closed bool
 
 	locks     *clientLocks
+	ownsLocks bool
 	lockNames []string
 	db        *sql.DB
 	binding   clientBinding
 	token     []byte
 	base      *url.URL
 	root      *openedWorktree
+	clientDir string
+	config    libraryClientConfig
 }
 
 func openLockedBoundWorktreeSession(ctx context.Context, clientDir, worktree string,
-	config libraryClientConfig) (session *_lockedBoundWorktreeSession, retErr error) {
+	config libraryClientConfig) (_ *_lockedBoundWorktreeSession, retErr error) {
 	config = normalizeLibraryClientConfig(config)
 	canonicalClientDir, err := canonicalStateDir(clientDir)
 	if err != nil {
@@ -125,15 +155,18 @@ func openLockedBoundWorktreeSession(ctx context.Context, clientDir, worktree str
 		return nil, err
 	}
 	databasePath := filepath.Join(canonicalClientDir, _clientDatabaseName)
-	locks, err := tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
-	if err != nil {
-		return nil, err
+	locks := config.watchLocks
+	ownsLocks := locks == nil
+	if ownsLocks {
+		locks, err = tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
+		if err != nil {
+			return nil, err
+		}
 	}
-	session = &_lockedBoundWorktreeSession{locks: locks}
+	session := &_lockedBoundWorktreeSession{locks: locks, ownsLocks: ownsLocks, clientDir: canonicalClientDir, config: config}
 	defer func() {
 		if retErr != nil {
 			retErr = errors.Join(retErr, session.Close())
-			session = nil
 		}
 	}()
 
@@ -262,9 +295,47 @@ func (s *_lockedBoundWorktreeSession) Close() error {
 	}
 	clear(s.token)
 	s.token = nil
-	if s.locks != nil {
+	if s.ownsLocks {
 		err = errors.Join(err, s.locks.Close())
-		s.locks = nil
 	}
+	s.locks = nil
 	return err
+}
+
+func (s *_lockedBoundWorktreeSession) bindOptions() bindOptions {
+	return bindOptions{clientDir: s.clientDir, serverURL: s.binding.ServerURL, libraryID: s.binding.LibraryID,
+		worktree: s.binding.Worktree, deviceID: s.binding.DeviceID, base: s.base, token: s.token,
+		worktreeRoot: s.root, fallbackOccupied: s.config.fallbackOccupied}
+}
+
+func headBeforePublication(ctx context.Context, options bindOptions, config libraryClientConfig, candidate _publicationCandidate) (remoteHead, error) {
+	if config.beforeHeadCAS != nil {
+		if err := config.beforeHeadCAS(); err != nil {
+			return remoteHead{}, fmt.Errorf("prepare Head publication: %w", err)
+		}
+	}
+	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	if err != nil || verified.root != candidate.CapturedRoot {
+		return remoteHead{}, errors.New("worktree changed before Head publication")
+	}
+	current, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
+	if err != nil {
+		return remoteHead{}, err
+	}
+	if current.CommitID == nil {
+		return remoteHead{}, errors.New("library Head is empty before publication")
+	}
+	return current, nil
+}
+
+func headAfterPublication(ctx context.Context, options bindOptions, publishErr error) (remoteHead, worktreeSnapshot, error) {
+	head, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
+	if err != nil {
+		return remoteHead{}, worktreeSnapshot{}, errors.Join(publishErr, fmt.Errorf("resolve library Head after publish: %w", err))
+	}
+	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	if err != nil {
+		return remoteHead{}, worktreeSnapshot{}, errors.Join(publishErr, fmt.Errorf("rescan worktree after publish: %w", err))
+	}
+	return head, snapshot, nil
 }

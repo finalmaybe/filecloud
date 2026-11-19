@@ -55,7 +55,7 @@ func TestPublicationLifecyclePreservesCorruptPendingState(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var session *_lockedBoundWorktreeSession
-			var request _publicationRequester = _syncPublicationRequest{}
+			var request _publicationRequester = _inspectPublicationRequest{}
 			if test.restore {
 				state, _, _ := prepareRestoreConfirmationTest(t)
 				session = openTestPublicationSession(t, state)

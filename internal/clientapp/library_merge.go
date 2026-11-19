@@ -3,10 +3,8 @@ package clientapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,53 +73,47 @@ type _preparedMerge struct {
 	promotions        []_conflictPromotion
 }
 
-func _startRecursiveMerge(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, head remoteHead, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+func prepareSyncMergePublication(ctx context.Context, session *_lockedBoundWorktreeSession, options bindOptions,
+	snapshot worktreeSnapshot, head remoteHead, budget *_replayBudget) (_preparedSyncPublication, error) {
+	binding, config := session.binding, session.config
 	if head.CommitID == nil {
-		return errors.New("remote merge Head is empty")
+		return _preparedSyncPublication{}, errors.New("remote merge Head is empty")
 	}
 	remote, err := getRemoteCommit(ctx, options.base, options.libraryID, options.token, *head.CommitID)
 	if err != nil || remote.AuthorUserID != binding.UserID {
-		return errors.Join(errors.New("verify remote Head for merge"), err)
+		return _preparedSyncPublication{}, errors.Join(errors.New("verify remote Head for merge"), err)
 	}
 	capturedData, capturedID, err := canonicalCommit(binding.UserID, binding.DeviceID, snapshot.root,
 		[]string{binding.SyncBase}, config.now)
 	if err != nil {
-		return err
+		return _preparedSyncPublication{}, err
 	}
 	localSeed, err := object.VerifyCommit(capturedData, capturedID)
 	if err != nil || localSeed.AuthorUserID != binding.UserID || localSeed.DeviceID != binding.DeviceID ||
 		localSeed.Root != snapshot.root {
-		return errors.New("captured local conflict-name seed is invalid")
+		return _preparedSyncPublication{}, errors.New("captured local conflict-name seed is invalid")
 	}
 	prepared, err := _prepareRecursiveMerge(ctx, options, snapshot, binding.SyncBaseRoot, snapshot.root, remote.Root,
 		*head.CommitID, capturedID, localSeed, binding, config, budget)
 	if err != nil {
-		return err
+		return _preparedSyncPublication{}, err
 	}
 	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
 	if err != nil || verified.root != snapshot.root {
-		return errors.New("worktree changed while preparing recursive merge")
+		return _preparedSyncPublication{}, errors.New("worktree changed while preparing recursive merge")
 	}
 	basePaths, err := _verifiedRemotePaths(ctx, options, binding.SyncBaseRoot, budget)
 	if err != nil {
-		return fmt.Errorf("verify merge Base snapshot: %w", err)
+		return _preparedSyncPublication{}, fmt.Errorf("verify merge Base snapshot: %w", err)
 	}
 	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
-	protected := protectedDeletion(deleted, tracked)
-	pending := _syncPublicationState{
-		_publicationCandidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
+	return _preparedSyncPublication{session: session, snapshot: snapshot,
+		candidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
 			ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID,
 			CandidateRoot: prepared.root, CandidateData: prepared.candidateData, CapturedCommit: capturedID,
 			CapturedRoot: snapshot.root, CapturedData: capturedData},
-		_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
-			RequiresDeleteConfirmation: protected},
-	}
-	if err := saveSyncPublication(ctx, db, binding, &pending); err != nil {
-		return err
-	}
-	return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget,
-		_publicationDispatchStart)
+		deleted: deleted, tracked: tracked, requiresDeleteConfirmation: protectedDeletion(deleted, tracked),
+	}, nil
 }
 
 func _prepareRecursiveMerge(ctx context.Context, options bindOptions, snapshot worktreeSnapshot, baseRoot, localRoot,
@@ -943,35 +935,6 @@ func (merger *_treeMerger) ensureBudget() {
 	if merger.budget == nil {
 		merger.budget = _newReplayBudget()
 	}
-}
-
-func _uploadMergedDirectories(ctx context.Context, options bindOptions, values []scannedObject) error {
-	byID := make(map[string]scannedObject, len(values))
-	for _, value := range values {
-		byID[value.id] = value
-	}
-	ids := make([]string, 0, len(byID))
-	for id := range byID {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	references := make([]clientObjectReference, 0, len(ids))
-	for _, id := range ids {
-		references = append(references, clientObjectReference{ObjectID: id, ObjectType: "Directory"})
-	}
-	missing, err := checkRemoteObjects(ctx, options, references)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		value := byID[id]
-		if missing["directories\x00"+id] {
-			if err := putMetadata(ctx, options.base, options.libraryID, options.token, "directories", id, value.data); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func _entriesByName(directory object.Directory) map[string]*object.DirectoryEntry {

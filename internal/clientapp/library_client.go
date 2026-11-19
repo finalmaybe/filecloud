@@ -95,7 +95,7 @@ type libraryClientConfig struct {
 	fsTransactionFault              func(string) error
 	fallbackOccupied                func(string) bool
 	restorePlanBudget               *restorePlanBudget
-	bindingLockHeld                 bool
+	watchLocks                      *clientLocks
 }
 
 func normalizeLibraryClientConfig(config libraryClientConfig) libraryClientConfig {
@@ -813,7 +813,7 @@ func runLibraryWatch(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, locks.Close()) }()
-	config.bindingLockHeld = true
+	config.watchLocks = locks
 	syncArgs := []string{"--client-dir", canonicalClientDir, "--worktree", canonicalWorktree}
 	for {
 		started := time.Now()
@@ -862,63 +862,20 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
 		return errors.New("usage: filecloud library sync --client-dir path --worktree path [--confirm-delete 12-hex-prefix]")
 	}
-	canonicalClientDir, err := canonicalStateDir(*clientDir)
+	session, err := openLockedBoundWorktreeSession(ctx, *clientDir, *worktree, config)
 	if err != nil {
 		return err
 	}
-	if err := checkStateDirFilesystem(canonicalClientDir, config.checkFilesystem); err != nil {
-		return err
-	}
-	canonicalWorktree, err := canonicalExistingPath(*worktree)
-	if err != nil {
-		return err
-	}
-	databasePath := filepath.Join(canonicalClientDir, _clientDatabaseName)
-	if !config.bindingLockHeld {
-		locks, err := tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
-		if err != nil {
-			return err
-		}
-		defer func() { retErr = errors.Join(retErr, locks.Close()) }()
-	}
-	db, err := openClientDB(databasePath, false)
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, db.Close()) }()
-	if err := initializeClientSchema(ctx, db); err != nil {
-		return err
-	}
-	var binding clientBinding
-	var token []byte
-	if err := db.QueryRowContext(ctx, `SELECT server_url, library_id, worktree, user_id, device_id, sync_base_commit,
-		sync_base_root, head_etag, access_token FROM bindings WHERE worktree = ?`, canonicalWorktree).Scan(&binding.ServerURL,
-		&binding.LibraryID, &binding.Worktree, &binding.UserID, &binding.DeviceID, &binding.SyncBase, &binding.SyncBaseRoot,
-		&binding.HeadETag, &token); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("worktree is not bound")
-		}
-		return fmt.Errorf("read client binding: %w", err)
-	}
-	defer clear(token)
+	defer func() { retErr = errors.Join(retErr, session.Close()) }()
+	db, binding, root := session.db, session.binding, session.root
 	checkout, publication, err := loadWorktreePendingPublication(ctx, db, binding)
 	if err != nil {
 		return err
 	}
-	base, err := validateServerURL(binding.ServerURL)
-	if err != nil {
-		return err
-	}
-	authorityOptions := bindOptions{clientDir: canonicalClientDir, serverURL: binding.ServerURL,
-		libraryID: binding.LibraryID, worktree: binding.Worktree, deviceID: binding.DeviceID, base: base, token: token}
-	if err := rehydratePendingPromotionSeedAuthority(ctx, db, authorityOptions, binding); err != nil {
+	options := session.bindOptions()
+	if err := rehydratePendingPromotionSeedAuthority(ctx, db, options, binding); err != nil {
 		return fmt.Errorf("rehydrate checkout promotion authority: %w", err)
 	}
-	root, err := openWorktreeRoot(canonicalWorktree, config.checkFilesystem)
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, root.Close()) }()
 	if err := validatePendingPromotionTargets(ctx, db, binding.Worktree); err != nil {
 		return fmt.Errorf("validate checkout promotion targets: %w", err)
 	}
@@ -929,10 +886,8 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return err
 	}
-	options := bindOptions{clientDir: canonicalClientDir, serverURL: binding.ServerURL, libraryID: binding.LibraryID,
-		worktree: binding.Worktree, deviceID: binding.DeviceID, base: base, token: token, worktreeRoot: root,
-		confirmDelete: *confirmDelete, confirmDeleteSet: confirmDeleteSet, fallbackOccupied: config.fallbackOccupied,
-		scanConfig: worktreeScanConfig{trackedPaths: tracked, warning: stderr, fault: config.scanFault, ignoreUntrackedUnsupported: true}}
+	options.confirmDelete, options.confirmDeleteSet = *confirmDelete, confirmDeleteSet
+	options.scanConfig = worktreeScanConfig{trackedPaths: tracked, warning: stderr, fault: config.scanFault, ignoreUntrackedUnsupported: true}
 	if len(tracked) == 0 {
 		tracked, err = loadRemoteTrackedPaths(ctx, options, binding)
 		if err != nil {
@@ -940,7 +895,7 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 		}
 		options.scanConfig.trackedPaths = tracked
 	}
-	return syncLibrary(ctx, db, options, binding, checkout, publication, stdout, config)
+	return syncLibrary(ctx, session, options, checkout, publication, stdout)
 }
 
 func loadTrackedPaths(ctx context.Context, db *sql.DB, worktree string) (map[string]bool, error) {

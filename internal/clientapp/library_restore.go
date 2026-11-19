@@ -97,12 +97,9 @@ func openRestoreClientState(ctx context.Context, clientDir, worktree string, std
 		return nil, err
 	}
 	databasePath := filepath.Join(canonicalClientDir, _clientDatabaseName)
-	var locks *clientLocks
-	if !config.bindingLockHeld {
-		locks, err = tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
-		if err != nil {
-			return nil, err
-		}
+	locks, err := tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
+	if err != nil {
+		return nil, err
 	}
 	state = &restoreClientState{locks: locks, config: config}
 	var token []byte
@@ -328,7 +325,7 @@ func runLibraryRestoreConfirm(ctx context.Context, clientDir, worktree, prefix s
 			return handleRestoreRevalidationFailure(ctx, state, pending, err)
 		}
 		if published {
-			return dispatchPendingPublication(ctx, state.db, state.options, state.binding, snapshot, head, pending,
+			return dispatchRestorePublication(ctx, state.db, state.options, state.binding, snapshot, head, pending,
 				stdout, state.config, _newReplayBudget(), _publicationDispatchResume)
 		}
 		return discardStaleRestore(ctx, state, pending)
@@ -361,7 +358,7 @@ func runLibraryRestoreConfirm(ctx context.Context, clientDir, worktree, prefix s
 			return err
 		}
 	}
-	return dispatchPendingPublication(ctx, state.db, state.options, state.binding, snapshot, head, pending, stdout,
+	return dispatchRestorePublication(ctx, state.db, state.options, state.binding, snapshot, head, pending, stdout,
 		state.config, _newReplayBudget(), _publicationDispatchStart)
 }
 

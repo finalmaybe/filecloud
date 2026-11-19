@@ -81,14 +81,32 @@ func syncRecoveryPromotionCASArgs(value syncRecoveryPromotion) []any {
 	return []any{value.worktree, value.recoveryPath, value.sourcePath, value.currentActionID, value.rollbackActionID}
 }
 
-func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, checkout *pendingCheckout,
-	pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig) error {
+var _errSyncCheckoutRolledBack = errors.New("sync checkout rolled back")
+
+func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, options bindOptions,
+	checkout *pendingCheckout, pending _pendingPublicationState, stdout io.Writer) error {
+	db, binding, config := session.db, session.binding, session.config
 	if checkout != nil {
-		return continueSyncCheckout(ctx, db, options, binding, *checkout, stdout, config)
+		if err := continueSyncCheckout(ctx, db, options, binding, *checkout, stdout, config); err != _errSyncCheckoutRolledBack {
+			return err
+		}
+		var err error
+		pending, err = loadPendingPublication(ctx, db, binding)
+		if err != nil {
+			return err
+		}
 	}
-	budget := _newReplayBudget()
 	if options.confirmDeleteSet && pending == nil {
-		return errors.New("--confirm-delete requires a protected pending deletion candidate for this worktree")
+		return _errNoProtectedDeletion
+	}
+
+	budget := _newReplayBudget()
+	publication := _publicationLifecycle{}
+	round := _syncPublicationRoundOptions{scanConfig: options.scanConfig, confirmDelete: options.confirmDelete,
+		confirmDeleteSet: options.confirmDeleteSet, budget: budget, stdout: stdout}
+	if _, ok := pending.(_syncPublicationState); ok {
+		outcome, err := publication.Advance(ctx, session, _resumeSyncPublicationRequest{round: round})
+		return reportSyncPublication(outcome, err, stdout)
 	}
 
 	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
@@ -102,50 +120,67 @@ func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding c
 	if head.CommitID == nil {
 		return errors.New("bound library Head is empty")
 	}
-	if pending != nil {
-		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget,
+	if restore, ok := pending.(_restorePublicationState); ok {
+		return dispatchRestorePublication(ctx, db, options, binding, snapshot, head, restore, stdout, config, budget,
 			_publicationDispatchResume)
 	}
 
 	localChanged := snapshot.root != binding.SyncBaseRoot
 	remoteChanged := *head.CommitID != binding.SyncBase
-	switch {
-	case !localChanged && !remoteChanged:
+	if !localChanged {
+		if remoteChanged {
+			checkout := pendingCheckout{ServerURL: binding.ServerURL, LibraryID: binding.LibraryID, Worktree: binding.Worktree,
+				UserID: binding.UserID, DeviceID: binding.DeviceID, TargetCommit: *head.CommitID, HeadETag: head.ETag,
+				ApplyState: "pending", ConflictPromotions: _emptyConflictPromotions}
+			if err := savePendingCheckout(ctx, db, checkout); err != nil {
+				return err
+			}
+			return continueSyncCheckout(ctx, db, options, binding, checkout, stdout, config)
+		}
 		if err := replacePathIndex(ctx, db, binding.Worktree, snapshot.paths); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(stdout, "library already synchronized")
+		_, err := fmt.Fprintln(stdout, "library already synchronized")
 		return err
-	case localChanged && remoteChanged:
-		return _startRecursiveMerge(ctx, db, options, binding, snapshot, head, stdout, config, budget)
-	case remoteChanged:
-		pendingCheckout := pendingCheckout{ServerURL: binding.ServerURL, LibraryID: binding.LibraryID, Worktree: binding.Worktree,
-			UserID: binding.UserID, DeviceID: binding.DeviceID, TargetCommit: *head.CommitID, HeadETag: head.ETag,
-			ApplyState: "pending", ConflictPromotions: _emptyConflictPromotions}
-		if err := savePendingCheckout(ctx, db, pendingCheckout); err != nil {
-			return err
-		}
-		return continueSyncCheckout(ctx, db, options, binding, pendingCheckout, stdout, config)
-	default:
-		data, id, err := canonicalCommit(binding.UserID, binding.DeviceID, snapshot.root, []string{binding.SyncBase}, config.now)
-		if err != nil {
-			return err
-		}
-		deleted, tracked := deletionStats(options.scanConfig.trackedPaths, snapshot.paths)
-		protected := protectedDeletion(deleted, tracked)
-		candidate := _syncPublicationState{
-			_publicationCandidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
-				ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: id, CandidateRoot: snapshot.root,
-				CandidateData: data, CapturedCommit: id, CapturedRoot: snapshot.root, CapturedData: data},
-			_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
-				RequiresDeleteConfirmation: protected},
-		}
-		if err := saveSyncPublication(ctx, db, binding, &candidate); err != nil {
-			return err
-		}
-		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, candidate, stdout, config, budget,
-			_publicationDispatchStart)
 	}
+
+	var prepared _preparedSyncPublication
+	if remoteChanged {
+		prepared, err = prepareSyncMergePublication(ctx, session, options, snapshot, head, budget)
+	} else {
+		prepared, err = prepareDirectSyncPublication(session, options.scanConfig.trackedPaths, snapshot, head)
+	}
+	if err != nil {
+		return err
+	}
+	outcome, err := publication.Advance(ctx, session, _startSyncPublicationRequest{prepared: prepared, round: round})
+	return reportSyncPublication(outcome, err, stdout)
+}
+
+func reportSyncPublication(outcome _publicationOutcome, err error, stdout io.Writer) error {
+	if err != nil {
+		return err
+	}
+	if outcome.Kind() == _publicationOutcomeFinalized {
+		_, err = fmt.Fprintln(stdout, "library synchronized")
+	}
+	return err
+}
+
+func prepareDirectSyncPublication(session *_lockedBoundWorktreeSession, trackedPaths map[string]bool,
+	snapshot worktreeSnapshot, head remoteHead) (_preparedSyncPublication, error) {
+	binding := session.binding
+	data, id, err := canonicalCommit(binding.UserID, binding.DeviceID, snapshot.root, []string{binding.SyncBase}, session.config.now)
+	if err != nil {
+		return _preparedSyncPublication{}, err
+	}
+	deleted, tracked := deletionStats(trackedPaths, snapshot.paths)
+	return _preparedSyncPublication{session: session, snapshot: snapshot,
+		candidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
+			ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: id, CandidateRoot: snapshot.root,
+			CandidateData: data, CapturedCommit: id, CapturedRoot: snapshot.root, CapturedData: data},
+		deleted: deleted, tracked: tracked, requiresDeleteConfirmation: protectedDeletion(deleted, tracked),
+	}, nil
 }
 
 func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, value _syncPublicationState, binding clientBinding,
@@ -200,140 +235,42 @@ func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, va
 	return nil
 }
 
-func dispatchPendingPublication(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget,
-	mode _publicationDispatchMode) error {
-	switch pending := pending.(type) {
-	case _restorePublicationState:
-		return dispatchRestorePublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget, mode)
-	case _syncPublicationState:
-		switch mode {
-		case _publicationDispatchResume:
-			return resumeSyncPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
-		case _publicationDispatchStart:
-		default:
-			return errors.New("pending publication dispatcher has an invalid mode")
-		}
-		if pending.RequiresDeleteConfirmation && !pending.DeleteConfirmed {
-			return deletionConfirmationError(pending)
-		}
-		return uploadAndPublishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
-	default:
-		return errors.New("unsupported pending publication kind")
-	}
-}
-
-func resumeSyncPublication(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
-	if options.confirmDeleteSet && !pending.RequiresDeleteConfirmation && !pending.LegacyRevalidationRequired {
-		return errors.New("--confirm-delete requires a protected pending deletion candidate for this worktree")
-	}
-	if err := _verifyPendingPublicationChain(ctx, options, pending, binding, budget); err != nil {
-		return err
-	}
-	if *head.CommitID == pending.CandidateCommit {
-		if snapshot.root != pending.CapturedRoot {
-			return recoverPublishedCandidate(ctx, db, options, binding, head, pending)
-		}
-		if pending.CandidateRoot == pending.CapturedRoot {
-			return finalizePublished(ctx, db, binding, snapshot, head, pending, stdout)
-		}
-		return transitionPublishedSuccessor(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
-	}
-	ancestor, err := _remoteCommitDescendsFrom(ctx, options, *head.CommitID, pending.CandidateCommit, binding.UserID, budget)
-	if err != nil {
-		return err
-	}
-	if ancestor {
-		if snapshot.root == pending.CapturedRoot {
-			return transitionPublishedSuccessor(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
-		}
-		return recoverPublishedCandidate(ctx, db, options, binding, head, pending)
-	}
-	if *head.CommitID != pending.ExpectedHead {
-		return replacePendingForTrivialMerge(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
-	}
-	if head.ETag != pending.ExpectedETag {
-		if err := refreshPendingETag(ctx, db, binding.Worktree, &pending, head.ETag); err != nil {
-			return err
-		}
-	}
-	if pending.LegacyRevalidationRequired {
-		if snapshot.root != pending.CapturedRoot {
-			if err := discardPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
-				return err
-			}
-			return errors.New("worktree changed after legacy pending publication was created; stale candidate discarded, rerun sync")
-		}
-		deleted, tracked := deletionStats(options.scanConfig.trackedPaths, snapshot.paths)
-		if err := revalidateLegacySyncPublication(ctx, db, binding.Worktree, &pending, deleted, tracked); err != nil {
-			return err
-		}
-	}
-	if snapshot.root != pending.CapturedRoot {
-		if err := discardPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
-			return err
-		}
-		return errors.New("worktree changed after pending publication was created; stale candidate discarded, rerun sync")
-	}
-	if pending.CandidateCommit != pending.CapturedCommit {
-		if _, err := _rebuildPendingMerge(ctx, options, binding, snapshot, pending, budget); err != nil {
-			return fmt.Errorf("revalidate pending recursive merge: %w", err)
-		}
-	}
-	if pending.RequiresDeleteConfirmation && !pending.DeleteConfirmed {
-		if !options.confirmDeleteSet {
-			return deletionConfirmationError(pending)
-		}
-		if len(options.confirmDelete) != deleteCandidatePrefixLen || options.confirmDelete != pending.CandidateCommit[:deleteCandidatePrefixLen] {
-			return errors.New("--confirm-delete must exactly match the 12-character prefix of this worktree's protected candidate")
-		}
-		if err := confirmSyncPublication(ctx, db, binding.Worktree, &pending); err != nil {
-			return err
-		}
-	} else if options.confirmDeleteSet && (len(options.confirmDelete) != deleteCandidatePrefixLen || options.confirmDelete != pending.CandidateCommit[:deleteCandidatePrefixLen]) {
-		return errors.New("--confirm-delete must exactly match the 12-character prefix of this worktree's protected candidate")
-	}
-	return uploadAndPublishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
-}
-
-func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, head remoteHead, old _syncPublicationState, stdout io.Writer, config libraryClientConfig,
-	budget *_replayBudget) error {
+func (r _syncPublicationRound) replacePendingForTrivialMerge(ctx context.Context, snapshot worktreeSnapshot, head remoteHead,
+	old _syncPublicationState) (_publicationOutcome, error) {
 	if head.CommitID == nil {
-		return errors.New("remote merge Head is empty")
+		return _publicationOutcome{}, errors.New("remote merge Head is empty")
 	}
-	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	verified, err := scanWorktreeWithConfig(r.options.worktreeRoot, r.options.scanConfig)
 	if err != nil || verified.root != old.CapturedRoot {
-		return errors.New("worktree changed before pending merge replacement")
+		return _publicationOutcome{}, errors.New("worktree changed before pending merge replacement")
 	}
 	rebuilt := _rebuiltPendingMerge{snapshot: verified, paths: verified.paths}
 	if old.CandidateCommit != old.CapturedCommit {
-		rebuilt, err = _rebuildPendingMerge(ctx, options, binding, verified, old, budget)
+		rebuilt, err = _rebuildPendingMerge(ctx, r.options, r.binding, verified, old, r.budget)
 		if err != nil {
-			return fmt.Errorf("rebuild pending recursive merge before replacement: %w", err)
+			return _publicationOutcome{}, fmt.Errorf("rebuild pending recursive merge before replacement: %w", err)
 		}
 	}
-	base, err := _budgetedRemoteCommit(ctx, options, old.ExpectedHead, budget)
-	if err != nil || base.AuthorUserID != binding.UserID {
-		return errors.Join(errors.New("verify previous expected Head for merge"), err)
+	base, err := _budgetedRemoteCommit(ctx, r.options, old.ExpectedHead, r.budget)
+	if err != nil || base.AuthorUserID != r.binding.UserID {
+		return _publicationOutcome{}, errors.Join(errors.New("verify previous expected Head for merge"), err)
 	}
-	remote, err := _budgetedRemoteCommit(ctx, options, *head.CommitID, budget)
-	if err != nil || remote.AuthorUserID != binding.UserID {
-		return errors.Join(errors.New("verify latest Head for merge"), err)
+	remote, err := _budgetedRemoteCommit(ctx, r.options, *head.CommitID, r.budget)
+	if err != nil || remote.AuthorUserID != r.binding.UserID {
+		return _publicationOutcome{}, errors.Join(errors.New("verify latest Head for merge"), err)
 	}
-	prepared, err := _prepareRecursiveMerge(ctx, options, rebuilt.snapshot, base.Root, old.CandidateRoot, remote.Root,
-		*head.CommitID, old.CandidateCommit, old.candidate, binding, config, budget)
+	prepared, err := _prepareRecursiveMerge(ctx, r.options, rebuilt.snapshot, base.Root, old.CandidateRoot, remote.Root,
+		*head.CommitID, old.CandidateCommit, old.candidate, r.binding, r.config, r.budget)
 	if err != nil {
-		return err
+		return _publicationOutcome{}, err
 	}
-	verified, err = scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	verified, err = scanWorktreeWithConfig(r.options.worktreeRoot, r.options.scanConfig)
 	if err != nil || verified.root != old.CapturedRoot {
-		return errors.New("worktree changed while preparing pending merge replacement")
+		return _publicationOutcome{}, errors.New("worktree changed while preparing pending merge replacement")
 	}
-	basePaths, err := _verifiedRemotePaths(ctx, options, base.Root, budget)
+	basePaths, err := _verifiedRemotePaths(ctx, r.options, base.Root, r.budget)
 	if err != nil {
-		return fmt.Errorf("verify replacement Base snapshot: %w", err)
+		return _publicationOutcome{}, fmt.Errorf("verify replacement Base snapshot: %w", err)
 	}
 	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
 	next := _syncPublicationState{
@@ -349,19 +286,19 @@ func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bind
 		history := old.CandidateHistory
 		next.CandidateHistory = append(history[:len(history):len(history)], old.CandidateData)
 	}
-	if err := replaceSyncPublication(ctx, db, binding, old, &next); err != nil {
-		return err
+	if err := replaceSyncPublication(ctx, r.db, r.binding, old, &next); err != nil {
+		return _publicationOutcome{}, err
 	}
-	if config.afterPendingReplacement != nil {
-		if err := config.afterPendingReplacement(); err != nil {
-			return fmt.Errorf("after pending publication replacement: %w", err)
+	if r.config.afterPendingReplacement != nil {
+		if err := r.config.afterPendingReplacement(); err != nil {
+			return _publicationOutcome{}, fmt.Errorf("after pending publication replacement: %w", err)
 		}
 	}
 	if next.RequiresDeleteConfirmation {
-		return deletionConfirmationError(next)
+		return _publicationOutcome{kind: _publicationOutcomeConfirmationRequired}, deletionConfirmationError(next)
 	}
 	directories := append(rebuilt.directories, prepared.directories...)
-	return _uploadAndPublishPrepared(ctx, db, options, binding, snapshot, next, directories, stdout, config, budget)
+	return r.uploadPrepared(ctx, snapshot, next, directories)
 }
 
 func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending _pendingPublicationState) error {
@@ -422,70 +359,6 @@ func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOpti
 		return fmt.Errorf("recover published candidate: %w", err)
 	}
 	return errors.New("published candidate recovered as Sync Base while preserving local changes; rerun sync")
-}
-
-func uploadAndPublishPending(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
-	if pending.LegacyRevalidationRequired {
-		return errors.New("legacy pending publication requires deletion revalidation before publication")
-	}
-	var directories []scannedObject
-	if pending.CandidateCommit != pending.CapturedCommit {
-		rebuilt, err := _rebuildPendingMerge(ctx, options, binding, snapshot, pending, budget)
-		if err != nil {
-			return fmt.Errorf("rebuild pending recursive merge for upload: %w", err)
-		}
-		directories = rebuilt.directories
-	}
-	return _uploadAndPublishPrepared(ctx, db, options, binding, snapshot, pending, directories, stdout, config, budget)
-}
-
-func _uploadAndPublishPrepared(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, pending _syncPublicationState, directories []scannedObject, stdout io.Writer,
-	config libraryClientConfig, budget *_replayBudget) error {
-	if err := uploadSnapshot(ctx, options, snapshot); err != nil {
-		return err
-	}
-	if err := putMetadata(ctx, options.base, options.libraryID, options.token, "commits", pending.CapturedCommit,
-		pending.CapturedData); err != nil {
-		return err
-	}
-	if err := _uploadMergedDirectories(ctx, options, directories); err != nil {
-		return err
-	}
-	if err := _uploadCandidateHistory(ctx, options, pending.CandidateHistory); err != nil {
-		return err
-	}
-	if pending.CandidateCommit != pending.CapturedCommit {
-		if err := putMetadata(ctx, options.base, options.libraryID, options.token, "commits", pending.CandidateCommit,
-			pending.CandidateData); err != nil {
-			return err
-		}
-	}
-	return publishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
-}
-
-func _uploadCandidateHistory(ctx context.Context, options bindOptions, history [][]byte) error {
-	if len(history) == 0 {
-		return nil
-	}
-	references := make([]clientObjectReference, 0, len(history))
-	for _, data := range history {
-		references = append(references, clientObjectReference{ObjectID: object.ID(data), ObjectType: "Commit"})
-	}
-	missing, err := checkRemoteObjects(ctx, options, references)
-	if err != nil {
-		return err
-	}
-	for _, data := range history {
-		id := object.ID(data)
-		if missing["commits\x00"+id] {
-			if err := putMetadata(ctx, options.base, options.libraryID, options.token, "commits", id, data); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func deletionStats(trackedPaths map[string]bool, paths []checkoutPath) (deleted, tracked int64) {
@@ -635,119 +508,6 @@ func transitionPublishedSuccessor(ctx context.Context, db *sql.DB, options bindO
 	return continueSyncCheckout(ctx, db, options, binding, checkout, stdout, config)
 }
 
-func publishPending(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
-	candidate := pending.publicationCandidate()
-	syncState, isSync := pending.(_syncPublicationState)
-	if config.beforeHeadCAS != nil {
-		if err := config.beforeHeadCAS(); err != nil {
-			return fmt.Errorf("prepare Head publication: %w", err)
-		}
-	}
-	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
-	if err != nil || verified.root != candidate.CapturedRoot {
-		return errors.New("worktree changed before Head publication")
-	}
-	current, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
-	if err != nil {
-		return err
-	}
-	if current.CommitID == nil {
-		return errors.New("library Head is empty before publication")
-	}
-	if *current.CommitID != candidate.ExpectedHead {
-		return dispatchPendingPublication(ctx, db, options, binding, snapshot, current, pending, stdout, config, budget,
-			_publicationDispatchResume)
-	}
-	if current.ETag != candidate.ExpectedETag {
-		if !isSync {
-			return dispatchPendingPublication(ctx, db, options, binding, snapshot, current, pending, stdout, config, budget,
-				_publicationDispatchResume)
-		}
-		if err := refreshPendingETag(ctx, db, binding.Worktree, &syncState, current.ETag); err != nil {
-			return err
-		}
-		pending, candidate = syncState, syncState._publicationCandidate
-	}
-	if err := _assertPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
-		return err
-	}
-	var publishErr error
-	if !isSync {
-		conflictingHead, conflict, err := updateRemoteHeadOnce(ctx, options.base, options.libraryID, options.token,
-			candidate.ExpectedETag, candidate.CandidateCommit)
-		publishErr = err
-		if conflict {
-			observed, scanErr := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
-			if scanErr != nil {
-				return fmt.Errorf("rescan worktree after Head conflict: %w", scanErr)
-			}
-			return dispatchPendingPublication(ctx, db, options, binding, observed, conflictingHead, pending,
-				stdout, config, budget, _publicationDispatchResume)
-		}
-	} else {
-		_, _, publishErr = updateRemoteHead(ctx, options.base, options.libraryID, options.token,
-			candidate.ExpectedETag, candidate.CandidateCommit)
-	}
-	published, getErr := getRemoteHead(ctx, options.base, options.libraryID, options.token)
-	if getErr != nil {
-		return errors.Join(publishErr, fmt.Errorf("resolve library Head after publish: %w", getErr))
-	}
-	observed, scanErr := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
-	if scanErr != nil {
-		return errors.Join(publishErr, fmt.Errorf("rescan worktree after publish: %w", scanErr))
-	}
-	if published.CommitID != nil && *published.CommitID == candidate.CandidateCommit {
-		return dispatchPendingPublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
-			_publicationDispatchResume)
-	}
-	if published.CommitID != nil && *published.CommitID == candidate.ExpectedHead {
-		if published.ETag != candidate.ExpectedETag {
-			if !isSync {
-				resumeErr := dispatchPendingPublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
-					_publicationDispatchResume)
-				return errors.Join(publishErr, resumeErr)
-			}
-			if err := refreshPendingETag(ctx, db, binding.Worktree, &syncState, published.ETag); err != nil {
-				return errors.Join(publishErr, err)
-			}
-		}
-		return errors.Join(publishErr, errors.New("library Head publication did not complete; rerun sync"))
-	}
-	if published.CommitID == nil {
-		return errors.Join(publishErr, errors.New("library Head became empty during publication"))
-	}
-	resumeErr := dispatchPendingPublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
-		_publicationDispatchResume)
-	if resumeErr != nil {
-		return errors.Join(publishErr, resumeErr)
-	}
-	return nil
-}
-
-func finalizePublished(ctx context.Context, db *sql.DB, binding clientBinding, snapshot worktreeSnapshot, head remoteHead,
-	pending _syncPublicationState, stdout io.Writer) error {
-	if head.CommitID == nil || *head.CommitID != pending.CandidateCommit {
-		return errors.New("published Head does not match pending publication")
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := updateBindingAndIndex(ctx, tx, binding, pending.CandidateCommit, pending.CandidateRoot, head.ETag, snapshot.paths); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
-		"publication changed during finalization"); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("finalize publication: %w", err)
-	}
-	_, err = fmt.Fprintln(stdout, "library synchronized")
-	return err
-}
-
 func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, pending pendingCheckout,
 	stdout io.Writer, config libraryClientConfig) error {
 	if pending.UserID != binding.UserID || pending.DeviceID != binding.DeviceID {
@@ -763,11 +523,7 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 		if err := clearApplyingCheckout(ctx, db, binding.Worktree); err != nil {
 			return err
 		}
-		publication, err := loadPendingPublication(ctx, db, binding)
-		if err != nil {
-			return err
-		}
-		return syncLibrary(ctx, db, options, binding, nil, publication, stdout, config)
+		return _errSyncCheckoutRolledBack
 	}
 	if pending.ApplyState != "pending" && pending.ApplyState != "applying" {
 		return errors.New("pending checkout has invalid apply state")
