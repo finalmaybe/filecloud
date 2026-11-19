@@ -77,30 +77,26 @@ func syncRecoveryPromotionCASArgs(value syncRecoveryPromotion) []any {
 var _errSyncCheckoutRolledBack = errors.New("sync checkout rolled back")
 
 func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, options bindOptions,
-	checkout *pendingCheckout, pending _pendingPublicationState, stdout io.Writer) error {
+	status _publicationOutcome, stdout io.Writer) error {
 	db, binding, config := session.db, session.binding, session.config
-	if checkout != nil {
-		if err := continueSyncCheckout(ctx, db, options, binding, *checkout, stdout, config); err != _errSyncCheckoutRolledBack {
+	if status.Kind() == _publicationOutcomeCheckoutPending {
+		if err := continueSyncCheckout(ctx, db, options, binding, *status.checkout, stdout, config); err != _errSyncCheckoutRolledBack {
 			return err
 		}
+		var lifecycle _publicationLifecycle
 		var err error
-		pending, err = loadPendingPublication(ctx, db, binding)
+		status, err = lifecycle.Advance(ctx, session, _inspectPublicationRequest{})
 		if err != nil {
 			return err
 		}
 	}
-	if options.confirmDeleteSet && pending == nil {
-		return _errNoProtectedDeletion
-	}
-
-	budget := _newReplayBudget()
 	round := _syncPublicationRoundOptions{scanConfig: options.scanConfig, confirmDelete: options.confirmDelete,
-		confirmDeleteSet: options.confirmDeleteSet, budget: budget}
-	switch pending.(type) {
-	case _syncPublicationState:
-		return runSyncPublication(ctx, session, options, _resumeSyncPublicationRequest{round: round}, stdout)
-	case _restorePublicationState:
-		return runSyncPublication(ctx, session, options, _resumeRestorePublicationRequest{scanConfig: options.scanConfig}, stdout)
+		confirmDeleteSet: options.confirmDeleteSet}
+	if status.Kind() == _publicationOutcomePending {
+		return runSyncPublication(ctx, session, options, _resumePublicationRequest{round: round}, stdout)
+	}
+	if options.confirmDeleteSet {
+		return _errNoProtectedDeletion
 	}
 
 	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
@@ -135,7 +131,8 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 
 	var prepared _preparedSyncPublication
 	if remoteChanged {
-		prepared, err = prepareSyncMergePublication(ctx, session, options, snapshot, head, budget)
+		round.budget = _newReplayBudget()
+		prepared, err = prepareSyncMergePublication(ctx, session, options, snapshot, head, round.budget)
 	} else {
 		prepared, err = prepareDirectSyncPublication(session, options.scanConfig.trackedPaths, snapshot, head)
 	}
@@ -184,65 +181,6 @@ func prepareDirectSyncPublication(session *_lockedBoundWorktreeSession, trackedP
 			CandidateData: data, CapturedCommit: id, CapturedRoot: snapshot.root, CapturedData: data},
 		deleted: deleted, tracked: tracked, requiresDeleteConfirmation: protectedDeletion(deleted, tracked),
 	}, nil
-}
-
-func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, value _syncPublicationState, binding clientBinding,
-	budget *_replayBudget) error {
-	sequence := value.mergeSequence
-	if len(sequence) == 0 {
-		return nil
-	}
-	if sequence[0].id == value.CapturedCommit {
-		localID := sequence[0].commit.Parents[1]
-		seen := map[string]bool{value.CapturedCommit: true}
-		for localID != binding.SyncBase {
-			if seen[localID] {
-				return errors.New("pending publication captured second-parent chain contains a cycle")
-			}
-			seen[localID] = true
-			local, localErr := _budgetedRemoteCommit(ctx, options, localID, budget)
-			if localErr != nil || local.AuthorUserID != binding.UserID || local.DeviceID != binding.DeviceID ||
-				(len(local.Parents) != 1 && len(local.Parents) != 2) {
-				return errors.Join(errors.New("pending publication captured second-parent chain is invalid"), localErr)
-			}
-			localID = local.Parents[len(local.Parents)-1]
-		}
-	}
-	base, err := _budgetedRemoteCommit(ctx, options, value.BaseCommit, budget)
-	if err != nil || base.AuthorUserID != binding.UserID || base.Root != value.BaseRoot {
-		return errors.Join(errors.New("pending publication Base is invalid"), err)
-	}
-	baseLinked, err := _remoteCommitDescendsFrom(ctx, options, value.BaseCommit, binding.SyncBase, binding.UserID, budget)
-	if err != nil || !baseLinked {
-		return errors.Join(errors.New("pending publication Base is not anchored to the binding Sync Base"), err)
-	}
-	previousRemote := binding.SyncBase
-	if sequence[0].id == value.CapturedCommit {
-		previousRemote = value.BaseCommit
-	}
-	for index, entry := range sequence {
-		remoteID := entry.commit.Parents[0]
-		remote, remoteErr := _budgetedRemoteCommit(ctx, options, remoteID, budget)
-		if remoteErr != nil || remote.AuthorUserID != binding.UserID {
-			return errors.Join(fmt.Errorf("pending publication merge Remote %d is invalid", index), remoteErr)
-		}
-		linked, linkErr := _remoteCommitDescendsFrom(ctx, options, remoteID, previousRemote, binding.UserID, budget)
-		if linkErr != nil || !linked {
-			return errors.Join(fmt.Errorf("pending publication merge Remote %d is not anchored to its predecessor", index), linkErr)
-		}
-		if remoteID == value.BaseCommit && remote.Root != value.BaseRoot {
-			return errors.New("pending publication Base root does not match merge history")
-		}
-		previousRemote = remoteID
-	}
-	return nil
-}
-
-func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending _pendingPublicationState) error {
-	if err := _deletePendingPublication(ctx, db, worktree, pending, "pending publication changed before discard"); err != nil {
-		return fmt.Errorf("discard changed pending publication: %w", err)
-	}
-	return nil
 }
 
 func deletionStats(trackedPaths map[string]bool, paths []checkoutPath) (deleted, tracked int64) {

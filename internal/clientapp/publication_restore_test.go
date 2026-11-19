@@ -12,8 +12,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/mingming-cn/filecloud/internal/object"
 )
 
 func TestPublicationLifecycleRestorePreviewAndOfflineReplay(t *testing.T) {
@@ -35,15 +33,6 @@ func TestPublicationLifecycleRestorePreviewAndOfflineReplay(t *testing.T) {
 		preview.preservedCurrentOnlyCount != 1 || preview.changedPathCount != 1 ||
 		!slices.Equal(preview.changedPaths, []string{"local"}) || preview.truncated || writes.Load() != 0 {
 		t.Fatalf("unexpected preview: %+v (PUTs=%d)", preview, writes.Load())
-	}
-	inspected, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-	pending, ok := inspected.pending.(_restorePublicationState)
-	if err != nil || !ok || pending.RestoreConfirmed || pending.CandidateCommit != preview.candidateCommit {
-		t.Fatalf("preview did not persist its unconfirmed candidate: kind=%v err=%v", inspected.Kind(), err)
-	}
-	candidate, err := object.VerifyCommit(pending.CandidateData, preview.candidateCommit)
-	if err != nil || !slices.Equal(candidate.Parents, []string{preview.expectedHead}) || candidate.Root != pending.CandidateRoot {
-		t.Fatalf("preview commit is not a canonical single-parent forward commit: %+v err=%v", candidate, err)
 	}
 
 	// An empty path index would make scan setup fetch legacy tracked paths from the remote.
@@ -74,9 +63,8 @@ func TestPublicationLifecycleRestorePreviewAndOfflineReplay(t *testing.T) {
 	if requests.Load() != calls {
 		t.Fatalf("replay or wrong confirmation made %d unexpected HTTP requests", requests.Load()-calls)
 	}
-	after, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-	if err != nil || !reflect.DeepEqual(after.pending, pending) {
-		t.Fatalf("replay or wrong confirmation changed the candidate: kind=%v err=%v", after.Kind(), err)
+	if after := advanceTestRestorePreview(t, session, request); !reflect.DeepEqual(after, preview) {
+		t.Fatalf("wrong confirmation changed the preview: got %+v, want %+v", after, preview)
 	}
 	assertRestoreConfirmationTestState(t, "replay and wrong confirmation", state, before)
 }
@@ -150,6 +138,10 @@ func TestPublicationLifecycleRestoreRevalidatesBeforeConfirming(t *testing.T) {
 	if _, err := advanceTestPublication(t, session, confirm); err == nil || !strings.Contains(err.Error(), "restore candidate changed before confirmation") {
 		t.Fatalf("confirmation did not compare the full preview row: %v", err)
 	}
+	changeRow.Store(true)
+	if _, err := advanceTestPublication(t, session, confirm); err == nil || !strings.Contains(err.Error(), "pending publication changed before discard") {
+		t.Fatalf("discard did not compare the full preview row: %v", err)
+	}
 	outcome, err := advanceTestPublication(t, session, confirm)
 	if outcome.Kind() != _publicationOutcomeRerunRestore || err == nil || !strings.Contains(err.Error(), "stale restore candidate discarded") || writes.Load() != 0 {
 		t.Fatalf("confirmation did not reject stale statistics: outcome=%v err=%v PUTs=%d", outcome.Kind(), err, writes.Load())
@@ -210,16 +202,11 @@ func TestPublicationLifecycleRestoreResumesUploadsAndHandsOffSingleCAS(t *testin
 		t.Fatal(err)
 	}
 	session = openTestPublicationSession(t, state)
-	inspected, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-	pending, ok := inspected.pending.(_restorePublicationState)
-	if err != nil || !ok || !pending.RestoreConfirmed || pending.CandidateCommit != preview.candidateCommit {
-		t.Fatalf("upload failure did not preserve exact confirmation: outcome=%v err=%v", inspected.Kind(), err)
-	}
 	scanConfig, err := session.loadScanConfig(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resume := _resumeRestorePublicationRequest{scanConfig: scanConfig}
+	resume := _resumePublicationRequest{round: _syncPublicationRoundOptions{scanConfig: scanConfig}}
 	if _, err := advanceTestPublication(t, session, resume); err == nil || !strings.Contains(err.Error(), "failed after 1 attempts") ||
 		directoryPUTs.Load() != dirs || commitPUTs.Load() != 2 || headPUTs.Load() != 1 {
 		t.Fatalf("first CAS: directories=%d candidate=%d Head=%d err=%v", directoryPUTs.Load(), commitPUTs.Load(), headPUTs.Load(), err)
@@ -252,8 +239,7 @@ func TestPublicationLifecycleRestoreRollsBackHandoffIfPublicationCannotBeDeleted
 		t.Fatalf("expected handoff deletion to fail: %v", err)
 	}
 	inspected, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-	pending, ok := inspected.pending.(_restorePublicationState)
-	if err != nil || inspected.Kind() != _publicationOutcomePending || !ok || !pending.RestoreConfirmed || pending.CandidateCommit != preview.candidateCommit {
+	if err != nil || inspected.Kind() != _publicationOutcomePending {
 		t.Fatalf("failed handoff did not retain only the confirmed Publication: outcome=%v err=%v", inspected.Kind(), err)
 	}
 	commit, _, _ := strings.Cut(restoreTestHead(t, state), "\x00")
@@ -262,6 +248,12 @@ func TestPublicationLifecycleRestoreRollsBackHandoffIfPublicationCannotBeDeleted
 	}
 	before.head = restoreTestHead(t, state)
 	assertRestoreConfirmationTestState(t, "failed handoff", state, before)
+	if _, err := session.db.ExecContext(t.Context(), `DROP TRIGGER interrupt_handoff`); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := advanceTestPublication(t, session, _resumePublicationRequest{}); err != nil || out.Kind() != _publicationOutcomeCheckoutPending || out.checkout.TargetCommit != preview.candidateCommit {
+		t.Fatalf("resume after rolled back handoff: outcome=%v err=%v", out.Kind(), err)
+	}
 }
 
 func newRestoreLifecycleFixture(t *testing.T) (importedBinding, _previewRestorePublicationRequest) {

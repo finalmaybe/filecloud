@@ -2,21 +2,20 @@ package clientapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 )
 
 func (r _syncPublicationRound) settlePublished(ctx context.Context, snapshot worktreeSnapshot, head remoteHead, pending _syncPublicationState) (_publicationOutcome, error) {
 	if snapshot.root != pending.CapturedRoot {
-		if err := recoverPublishedCandidate(ctx, r.db, r.options, r.binding, head, pending); err != nil {
+		if err := r.recoverCapturedBaseline(ctx, head.ETag, pending); err != nil {
 			return _publicationOutcome{}, err
 		}
 		r.recordBaseline(pending.CapturedCommit, pending.CapturedRoot, head.ETag)
 		return _publicationOutcome{kind: _publicationOutcomeRerunSync}, errors.New("published candidate recovered as Sync Base while preserving local changes; rerun sync")
 	}
 	if *head.CommitID == pending.CandidateCommit && pending.CandidateRoot == pending.CapturedRoot {
-		if err := finalizePublished(ctx, r.db, r.binding, snapshot, head, pending); err != nil {
+		if err := r.finalize(ctx, snapshot, head.ETag, pending); err != nil {
 			return _publicationOutcome{}, err
 		}
 		r.recordBaseline(pending.CandidateCommit, pending.CandidateRoot, head.ETag)
@@ -40,8 +39,8 @@ func (s *_lockedBoundWorktreeSession) recordBaseline(commit, root, etag string) 
 	s.binding.SyncBase, s.binding.SyncBaseRoot, s.binding.HeadETag = commit, root, etag
 }
 
-func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	head remoteHead, pending _syncPublicationState) error {
+func (r _syncPublicationRound) recoverCapturedBaseline(ctx context.Context, etag string, pending _syncPublicationState) error {
+	options, binding := r.options, r.binding
 	cacheRoot, err := openVerifiedCacheRoot(options.clientDir)
 	if err != nil {
 		return err
@@ -59,14 +58,14 @@ func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOpti
 	if err != nil {
 		return fmt.Errorf("recover published candidate paths: %w", err)
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE bindings SET sync_base_commit = ?, sync_base_root = ?, head_etag = ?
 		WHERE server_url = ? AND library_id = ? AND worktree = ? AND user_id = ? AND device_id = ?
 		AND sync_base_commit = ? AND sync_base_root = ? AND head_etag = ?`, pending.CapturedCommit,
-		pending.CapturedRoot, head.ETag, binding.ServerURL, binding.LibraryID, binding.Worktree, binding.UserID,
+		pending.CapturedRoot, etag, binding.ServerURL, binding.LibraryID, binding.Worktree, binding.UserID,
 		binding.DeviceID, binding.SyncBase, binding.SyncBaseRoot, binding.HeadETag)
 	if err != nil {
 		return errors.Join(err, tx.Rollback())
@@ -132,13 +131,7 @@ func (r _syncPublicationRound) handoffToCheckout(ctx context.Context, snapshot w
 	if err := updateBindingAndIndex(ctx, tx, binding, pending.CapturedCommit, pending.CapturedRoot, checkout.HeadETag, snapshot.paths); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pending_checkouts(server_url, library_id, worktree, user_id, device_id,
-		target_commit, target_root, head_etag, apply_state, conflict_promotions)
-		VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending', ?)`, checkout.ServerURL, checkout.LibraryID, checkout.Worktree,
-		checkout.UserID, checkout.DeviceID, checkout.TargetCommit, checkout.HeadETag, checkout.ConflictPromotions); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
+	if err := handoffPendingPublication(ctx, tx, *checkout, pending,
 		"publication changed during checkout transition"); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}

@@ -3,6 +3,7 @@ package clientapp
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -495,7 +496,7 @@ func TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex(t *testing
 		t.Fatal(err)
 	}
 	session = openTestPublicationSession(t, state)
-	outcome, err := advanceTestPublication(t, session, _resumeRestorePublicationRequest{})
+	outcome, err := advanceTestPublication(t, session, _resumePublicationRequest{})
 	if err != nil || outcome.Kind() != _publicationOutcomeCheckoutPending || outcome.checkout.TargetCommit != pending.CandidateCommit {
 		t.Fatalf("reopen after restore checkout transition: outcome=%v checkout=%+v err=%v", outcome.Kind(), outcome.checkout, err)
 	}
@@ -725,20 +726,10 @@ func TestLibraryRestoreConfirmationRetainsPendingOnTransientSourceFailure(t *tes
 				state.environment.handler.ServeHTTP(w, request)
 			}))
 			t.Cleanup(proxy.Close)
-			updateRestoreTestServer(t, state, proxy.URL)
 			if test.confirmed {
-				db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := db.ExecContext(t.Context(),
-					"UPDATE pending_publications SET restore_confirmed = 1 WHERE worktree = ?", state.worktree); err != nil {
-					t.Fatal(errors.Join(err, db.Close()))
-				}
-				if err := db.Close(); err != nil {
-					t.Fatal(err)
-				}
+				leaveConfirmedRestorePending(t, state, pending.CandidateCommit)
 			}
+			updateRestoreTestServer(t, state, proxy.URL)
 			beforePending := readTestRestorePublication(t, state.clientDir, state.worktree)
 			before := captureRestoreConfirmationTestState(t, state)
 
@@ -796,17 +787,7 @@ func TestLibraryRestoreExpectedHeadSkipsPublishedAncestorWalk(t *testing.T) {
 		t.Run(entry.name, func(t *testing.T) {
 			state, pending, config := prepareRestoreConfirmationTest(t)
 			if !entry.confirm {
-				db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := db.ExecContext(t.Context(),
-					"UPDATE pending_publications SET restore_confirmed = 1 WHERE worktree = ?", state.worktree); err != nil {
-					t.Fatal(errors.Join(err, db.Close()))
-				}
-				if err := db.Close(); err != nil {
-					t.Fatal(err)
-				}
+				leaveConfirmedRestorePending(t, state, pending.CandidateCommit)
 			}
 			historyPath := "/v1/libraries/" + testClientLibraryID + "/history/" + pending.SourceCommit
 			expectedHeadPath := "/v1/libraries/" + testClientLibraryID + "/objects/commits/" + pending.ExpectedHead
@@ -1413,18 +1394,7 @@ func TestLibraryRestorePlannerBudgetsRejectBeforeWrites(t *testing.T) {
 		"--worktree", state.worktree, "--commit", sourceCommit, "--path", "."}, nil, io.Discard, io.Discard, config); err != nil {
 		t.Fatalf("create resumable restore preview: %v", err)
 	}
-	db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(t.Context(),
-		"UPDATE pending_publications SET restore_confirmed = 1 WHERE worktree = ?", state.worktree); err != nil {
-		db.Close()
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
+	leaveConfirmedRestorePending(t, state, readTestRestorePublication(t, state.clientDir, state.worktree).CandidateCommit)
 	confirmed := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if !confirmed.RestoreConfirmed {
 		t.Fatalf("confirmed restore state=%+v, want RestoreConfirmed=true", confirmed)
@@ -1433,7 +1403,7 @@ func TestLibraryRestorePlannerBudgetsRejectBeforeWrites(t *testing.T) {
 	resumeBudget := restorePlanBudget{maxDepth: 256, maxObjects: 1, maxPaths: 100,
 		maxPathBytes: 1024, maxDirectoryEntries: 100000}
 	config.restorePlanBudget = &resumeBudget
-	err = runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir,
+	err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir,
 		"--worktree", state.worktree}, nil, io.Discard, io.Discard, config)
 	if err == nil || !strings.Contains(err.Error(), "object budget") {
 		t.Fatalf("resume restore budget error=%v, want object budget rejection", err)
@@ -1444,6 +1414,19 @@ func TestLibraryRestorePlannerBudgetsRejectBeforeWrites(t *testing.T) {
 		!reflect.DeepEqual(beforeIndex, captureTestPathIndex(t, state.clientDir, state.worktree)) ||
 		!reflect.DeepEqual(beforeWorktree, captureHistoryInspectWorktree(t, state.worktree)) {
 		t.Fatalf("resume restore budget state pending=%+v puts=%d binding=%+v head=%q, want pending=%+v puts=0 binding=%+v head=%q and no local mutations", afterResume, puts.Load(), readTestBinding(t, state.clientDir, state.worktree), restoreTestHead(t, state), confirmed, beforeBinding, beforeHead)
+	}
+}
+
+func leaveConfirmedRestorePending(t *testing.T, state importedBinding, candidate string) {
+	t.Helper()
+	session := openTestPublicationSession(t, state)
+	stop := errors.New("stop before restore Head CAS")
+	session.config.beforeHeadCAS = func() error { return stop }
+	if _, err := advanceTestPublication(t, session, _confirmRestorePublicationRequest{prefix: candidate[:deleteCandidatePrefixLen]}); !errors.Is(err, stop) {
+		t.Fatalf("interrupt confirmed restore: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1642,10 +1625,23 @@ func TestLibraryRestorePreviewPersistsFixedCandidateWithoutMutation(t *testing.T
 		t.Fatal(err)
 	}
 	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
-	if pending.SourceCommit != sourceCommit || pending.SourcePath != "local" ||
-		pending.ExpectedHead != beforeBinding.SyncBase || pending.CapturedRoot != beforeBinding.SyncBaseRoot || !bytes.Contains(output.Bytes(), []byte("source commit: "+sourceCommit)) ||
-		!bytes.Contains(output.Bytes(), []byte("confirm: filecloud library restore")) {
-		t.Fatalf("preview output=%q pending=%+v binding=%+v", output.String(), pending, beforeBinding)
+	prefix := pending.CandidateCommit[:12]
+	wantOutput := fmt.Sprintf(`source commit: %s
+source path: local
+expected head: %s
+candidate: %s
+created paths: 0
+updated paths: 1
+type replacements: 0
+removed descendants by type replacement: 0
+preserved current-only paths: 0
+changed paths:
+local
+truncated: false
+confirm: filecloud library restore --client-dir %s --worktree %s --confirm %s
+`, sourceCommit, beforeBinding.SyncBase, prefix, state.clientDir, state.worktree, prefix)
+	if output.String() != wantOutput {
+		t.Fatalf("preview output:\n%s\nwant:\n%s", output.String(), wantOutput)
 	}
 	candidate, err := object.VerifyCommit(pending.CandidateData, pending.CandidateCommit)
 	if err != nil || candidate.Root != pending.CandidateRoot || len(candidate.Parents) != 1 || candidate.Parents[0] != pending.ExpectedHead ||

@@ -868,7 +868,8 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	defer func() { retErr = errors.Join(retErr, session.Close()) }()
 	db, binding, root := session.db, session.binding, session.root
-	checkout, publication, err := loadWorktreePendingPublication(ctx, db, binding)
+	var lifecycle _publicationLifecycle
+	status, err := lifecycle.Advance(ctx, session, _inspectPublicationRequest{})
 	if err != nil {
 		return err
 	}
@@ -887,7 +888,7 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		return err
 	}
-	return syncLibrary(ctx, session, options, checkout, publication, stdout)
+	return syncLibrary(ctx, session, options, status, stdout)
 }
 
 func loadTrackedPaths(ctx context.Context, db *sql.DB, worktree string) (map[string]bool, error) {

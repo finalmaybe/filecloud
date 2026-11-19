@@ -20,7 +20,7 @@ func TestPublicationLifecycleSyncReplansContinuousCompetition(t *testing.T) {
 	session, start := leaveTestSyncPending(t, state)
 	captured := start.prepared.candidate.CapturedCommit
 	firstHead := publishSameRootSuccessor(t, state, time.Unix(100, 0))
-	outcome, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: start.round})
+	outcome, err := advanceTestPublication(t, session, _resumePublicationRequest{round: start.round})
 	if err != nil || outcome.Kind() != _publicationOutcomeSyncReplan {
 		t.Fatalf("first conflict: kind=%v err=%v", outcome.Kind(), err)
 	}
@@ -63,7 +63,7 @@ func TestPublicationLifecycleSyncReplansContinuousCompetition(t *testing.T) {
 		t.Fatal("second replacement did not retain the captured commit and candidate history")
 	}
 	session.config.afterPendingReplacement = nil
-	outcome, err = advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: start.round})
+	outcome, err = advanceTestPublication(t, session, _resumePublicationRequest{round: start.round})
 	if err != nil || outcome.Kind() != _publicationOutcomeFinalized {
 		t.Fatalf("resume replacement: kind=%v err=%v", outcome.Kind(), err)
 	}
@@ -108,7 +108,7 @@ func TestPublicationLifecycleSyncHeadConflictRequiresNewDeletionConfirmation(t *
 		staleHead.Store(true)
 		return nil
 	}
-	confirm := _resumeSyncPublicationRequest{round: start.round}
+	confirm := _resumePublicationRequest{round: start.round}
 	id := start.prepared.candidate.CandidateCommit
 	confirm.round.confirmDeleteSet, confirm.round.confirmDelete = true, id[:deleteCandidatePrefixLen]
 	out, err = advanceTestPublication(t, session, confirm)
@@ -139,7 +139,7 @@ func TestPublicationLifecycleSyncRejectsStaleReplacement(t *testing.T) {
 			session, start := leaveTestSyncPending(t, state)
 			id := start.prepared.candidate.CandidateCommit
 			publishSameRootSuccessor(t, state, time.Unix(100, 0))
-			out, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: start.round})
+			out, err := advanceTestPublication(t, session, _resumePublicationRequest{round: start.round})
 			if err != nil || out.Kind() != _publicationOutcomeSyncReplan {
 				t.Fatalf("conflict: kind=%v err=%v", out.Kind(), err)
 			}
@@ -246,7 +246,7 @@ func TestPublicationLifecycleSyncRecoversPublishedCandidate(t *testing.T) {
 				}
 			}
 			writes.Store(0)
-			resume := _resumeSyncPublicationRequest{round: start.round}
+			resume := _resumePublicationRequest{round: start.round}
 			stop := errors.New("interrupted after handoff commit")
 			if scenario == "interrupted successor handoff" {
 				index := captureTestPathIndex(t, state.clientDir, state.worktree)

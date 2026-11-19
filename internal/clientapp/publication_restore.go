@@ -28,12 +28,6 @@ type _confirmRestorePublicationRequest struct {
 
 func (_confirmRestorePublicationRequest) publicationRequest() {}
 
-type _resumeRestorePublicationRequest struct {
-	scanConfig worktreeScanConfig
-}
-
-func (_resumeRestorePublicationRequest) publicationRequest() {}
-
 type restorePreview struct {
 	sourceCommit, sourcePath                     string
 	expectedHead, candidateCommit                string

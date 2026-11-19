@@ -31,7 +31,7 @@ const (
 )
 
 type _pendingPublicationState interface {
-	publicationCandidate() _publicationCandidate
+	pendingPublication()
 }
 
 type _publicationCandidate struct {
@@ -58,9 +58,7 @@ type _syncPublicationState struct {
 	mergeSequence       []_pendingMergeCommit
 }
 
-func (value _syncPublicationState) publicationCandidate() _publicationCandidate {
-	return value._publicationCandidate
-}
+func (_syncPublicationState) pendingPublication() {}
 
 type _restorePublicationFields struct {
 	SourceCommit, SourcePath, SourceRoot         string
@@ -76,9 +74,7 @@ type _restorePublicationState struct {
 	ChangedPathPreview []string
 }
 
-func (value _restorePublicationState) publicationCandidate() _publicationCandidate {
-	return value._publicationCandidate
-}
+func (_restorePublicationState) pendingPublication() {}
 
 // _pendingPublicationRow is the SQLite representation, not a state that callers can act on.
 type _pendingPublicationRow struct {
@@ -102,15 +98,6 @@ var _pendingPublicationWhere = strings.Join(strings.FieldsFunc(_pendingPublicati
 
 type _pendingPublicationExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-func loadWorktreePendingPublication(ctx context.Context, db *sql.DB, binding clientBinding) (*pendingCheckout, _pendingPublicationState, error) {
-	checkout, err := loadPendingCheckout(ctx, db, binding.ServerURL, binding.LibraryID, binding.Worktree)
-	if err != nil || checkout != nil {
-		return checkout, nil, err
-	}
-	publication, err := loadPendingPublication(ctx, db, binding)
-	return nil, publication, err
 }
 
 func loadPendingPublication(ctx context.Context, db *sql.DB, binding clientBinding) (_pendingPublicationState, error) {
@@ -273,6 +260,24 @@ func _deletePendingPublication(ctx context.Context, execer _pendingPublicationEx
 func _assertPendingPublication(ctx context.Context, execer _pendingPublicationExecer, worktree string, old _pendingPublicationState) error {
 	return execPendingPublicationCAS(ctx, execer, "UPDATE pending_publications SET worktree = worktree", nil,
 		worktree, old, "pending publication changed before remote publication")
+}
+
+func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending _pendingPublicationState) error {
+	if err := _deletePendingPublication(ctx, db, worktree, pending, "pending publication changed before discard"); err != nil {
+		return fmt.Errorf("discard changed pending publication: %w", err)
+	}
+	return nil
+}
+
+// The caller owns the transaction: Sync also advances the captured baseline, while Restore leaves it for checkout.
+func handoffPendingPublication(ctx context.Context, tx *sql.Tx, checkout pendingCheckout, pending _pendingPublicationState, changedMessage string) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO pending_checkouts(server_url, library_id, worktree, user_id, device_id,
+		target_commit, target_root, head_etag, apply_state, conflict_promotions)
+		VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending', ?)`, checkout.ServerURL, checkout.LibraryID, checkout.Worktree,
+		checkout.UserID, checkout.DeviceID, checkout.TargetCommit, checkout.HeadETag, checkout.ConflictPromotions); err != nil {
+		return err
+	}
+	return _deletePendingPublication(ctx, tx, checkout.Worktree, pending, changedMessage)
 }
 
 func _removePendingPublicationForUnbind(ctx context.Context, tx *sql.Tx, worktree string) error {

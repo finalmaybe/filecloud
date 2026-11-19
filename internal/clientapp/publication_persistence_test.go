@@ -1,38 +1,10 @@
 package clientapp
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestPublicationLifecycleLoadsTypedPendingState(t *testing.T) {
-	t.Run("sync", func(t *testing.T) {
-		state := newImportedBinding(t)
-		session := openTestPublicationSession(t, state)
-		want := testSyncPublicationState(t, session.binding)
-		if err := saveSyncPublication(t.Context(), session.db, session.binding, &want); err != nil {
-			t.Fatal(err)
-		}
-
-		outcome, err := advanceTestSyncPublication(t, session)
-		got, ok := outcome.pending.(_syncPublicationState)
-		if err != nil || outcome.Kind() != _publicationOutcomePending || !ok || !reflect.DeepEqual(got, want) {
-			t.Fatalf("Advance Sync: kind=%v value=%T matches=%v err=%v", outcome.Kind(), outcome.pending, reflect.DeepEqual(got, want), err)
-		}
-	})
-
-	t.Run("restore", func(t *testing.T) {
-		state, want, _ := prepareRestoreConfirmationTest(t)
-		session := openTestPublicationSession(t, state)
-		outcome, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-		got, ok := outcome.pending.(_restorePublicationState)
-		if err != nil || outcome.Kind() != _publicationOutcomePending || !ok || !reflect.DeepEqual(got, want) {
-			t.Fatalf("Advance Restore: kind=%v value=%T matches=%v err=%v", outcome.Kind(), outcome.pending, reflect.DeepEqual(got, want), err)
-		}
-	})
-}
 
 func TestPublicationLifecyclePreservesCorruptPendingState(t *testing.T) {
 	for _, test := range []struct {
@@ -76,8 +48,8 @@ func TestPublicationLifecyclePreservesCorruptPendingState(t *testing.T) {
 
 			for range 2 {
 				outcome, err := advanceTestPublication(t, session, request)
-				if err == nil || !strings.Contains(err.Error(), test.want) || outcome.pending != nil {
-					t.Fatalf("Advance corrupt publication: kind=%v value=%T err=%v; want %q", outcome.Kind(), outcome.pending, err, test.want)
+				if err == nil || !strings.Contains(err.Error(), test.want) || outcome.Kind() != 0 {
+					t.Fatalf("Advance corrupt publication: kind=%v err=%v; want %q", outcome.Kind(), err, test.want)
 				}
 			}
 		})
@@ -97,7 +69,7 @@ func TestPublicationLifecycleRejectsRestoreCandidateWithDifferentDevice(t *testi
 		t.Fatal(err)
 	}
 	outcome, err := advanceTestPublication(t, session, _confirmRestorePublicationRequest{prefix: id[:deleteCandidatePrefixLen]})
-	if err == nil || !strings.Contains(err.Error(), "restore publication candidate commit is invalid") || outcome.pending != nil {
-		t.Fatalf("Advance with mismatched device: kind=%v value=%T err=%v", outcome.Kind(), outcome.pending, err)
+	if err == nil || !strings.Contains(err.Error(), "restore publication candidate commit is invalid") || outcome.Kind() != 0 {
+		t.Fatalf("Advance with mismatched device: kind=%v err=%v", outcome.Kind(), err)
 	}
 }

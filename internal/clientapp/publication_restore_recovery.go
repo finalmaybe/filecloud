@@ -138,13 +138,7 @@ func (r _restorePublicationRound) settlePublished(ctx context.Context, snapshot 
 	if err != nil {
 		return _publicationOutcome{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pending_checkouts(server_url, library_id, worktree, user_id, device_id,
-		target_commit, target_root, head_etag, apply_state, conflict_promotions)
-		VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending', ?)`, checkout.ServerURL, checkout.LibraryID, checkout.Worktree,
-		checkout.UserID, checkout.DeviceID, checkout.TargetCommit, checkout.HeadETag, checkout.ConflictPromotions); err != nil {
-		return _publicationOutcome{}, errors.Join(err, tx.Rollback())
-	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
+	if err := handoffPendingPublication(ctx, tx, checkout, pending,
 		"restore publication changed during checkout transition"); err != nil {
 		return _publicationOutcome{}, errors.Join(err, tx.Rollback())
 	}

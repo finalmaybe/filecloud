@@ -660,46 +660,44 @@ func TestLibrarySyncRejectsOversizedPendingBlobsBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestFinalizePublishedRollsBackStaleRows(t *testing.T) {
+func TestPublicationLifecycleSyncFinalizationRollsBackStaleRows(t *testing.T) {
 	for _, stale := range []string{"pending field", "binding device"} {
 		t.Run(stale, func(t *testing.T) {
 			state := newImportedBinding(t)
 			if err := os.WriteFile(filepath.Join(state.worktree, "pending"), []byte("data"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir, "--worktree", state.worktree},
-				strings.NewReader(""), io.Discard, io.Discard, libraryClientConfig{checkFilesystem: func(*os.File) error { return nil },
-					beforeHeadCAS: func() error { return errors.New("stop before CAS") }})
-			if err == nil {
-				t.Fatal("expected pending publication")
-			}
-			binding := readTestBinding(t, state.clientDir, state.worktree)
-			pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 			db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			if stale == "pending field" {
-				_, err = db.Exec(`UPDATE pending_publications SET tracked_count=tracked_count+1 WHERE worktree=?`, state.worktree)
-			} else {
-				_, err = db.Exec(`UPDATE bindings SET device_id=? WHERE worktree=?`, testOtherDeviceID, state.worktree)
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/head") {
+					var err error
+					if stale == "pending field" {
+						_, err = db.Exec(`UPDATE pending_publications SET tracked_count=tracked_count+1 WHERE worktree=?`, state.worktree)
+					} else {
+						_, err = db.Exec(`UPDATE bindings SET device_id=? WHERE worktree=?`, testOtherDeviceID, state.worktree)
+					}
+					if err != nil {
+						t.Errorf("inject stale %s: %v", stale, err)
+					}
+				}
+				state.environment.handler.ServeHTTP(w, req)
+			}))
+			t.Cleanup(proxy.Close)
+			updateRestoreTestServer(t, state, proxy.URL)
+			session := openTestPublicationSession(t, state)
+			binding := session.binding
+			start := prepareTestSyncPublication(t, session)
+			beforeIndex := captureTestPathIndex(t, state.clientDir, state.worktree)
+			wantErr := "publication changed during finalization"
+			if stale == "binding device" {
+				wantErr = "synchronization did not update one binding"
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			root, err := openWorktreeRoot(state.worktree, func(*os.File) error { return nil })
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot, scanErr := scanWorktree(root)
-			if err := errors.Join(scanErr, root.Close()); err != nil {
-				t.Fatal(err)
-			}
-			beforeIndex := countClientRows(t, state.clientDir, "path_index", state.worktree)
-			head := remoteHead{CommitID: &pending.CandidateCommit, ETag: "published-etag"}
-			if err := finalizePublished(t.Context(), db, binding, snapshot, head, pending); err == nil {
-				t.Fatal("stale finalization succeeded")
+			if _, err := advanceTestPublication(t, session, start); err == nil || !strings.Contains(err.Error(), wantErr) {
+				t.Fatalf("stale finalization: got %v, want %q", err, wantErr)
 			}
 			afterBinding := readTestBinding(t, state.clientDir, state.worktree)
 			afterState, err := loadPendingPublication(t.Context(), db, binding)
@@ -707,13 +705,13 @@ func TestFinalizePublishedRollsBackStaleRows(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatalf("read retained sync publication: type=%T err=%v", afterState, err)
 			}
-			if countClientRows(t, state.clientDir, "path_index", state.worktree) != beforeIndex ||
+			if !reflect.DeepEqual(captureTestPathIndex(t, state.clientDir, state.worktree), beforeIndex) ||
 				afterBinding.SyncBase != binding.SyncBase || afterBinding.SyncBaseRoot != binding.SyncBaseRoot ||
-				afterBinding.HeadETag != binding.HeadETag || afterPending.CandidateCommit != pending.CandidateCommit {
+				afterBinding.HeadETag != binding.HeadETag || afterPending.CandidateCommit != start.prepared.candidate.CandidateCommit {
 				t.Fatalf("stale %s partially finalized: binding=%+v pending=%+v", stale, afterBinding, afterPending)
 			}
-			if stale == "pending field" && afterPending.TrackedCount != pending.TrackedCount+1 {
-				t.Fatalf("stale pending row was overwritten: before=%+v after=%+v", pending, afterPending)
+			if stale == "pending field" && afterPending.TrackedCount != start.prepared.tracked+1 {
+				t.Fatalf("stale pending tracked count = %d, want %d", afterPending.TrackedCount, start.prepared.tracked+1)
 			}
 			if stale == "binding device" && afterBinding.DeviceID != testOtherDeviceID {
 				t.Fatalf("stale binding row was overwritten: %+v", afterBinding)
@@ -1126,7 +1124,7 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 	budget := &_replayBudget{commitLimit: 2, treeLimit: _mergeMaxObjects, pathLimit: _mergeMaxObjects,
 		commits: make(map[string]object.Commit), walked: make(map[string]bool)}
 	puts.Store(0)
-	_, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: _syncPublicationRoundOptions{budget: budget}})
+	_, err := advanceTestPublication(t, session, _resumePublicationRequest{round: _syncPublicationRoundOptions{budget: budget}})
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}

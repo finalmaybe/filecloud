@@ -50,24 +50,6 @@ func TestClientV24RestorePublicationSchemaAndRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(loaded, pending) {
 		t.Fatalf("round trip changed restore publication:\nwant=%+v\ngot=%+v", pending, loaded)
 	}
-	if err := _assertPendingPublication(t.Context(), db, "/work", loaded); err != nil {
-		t.Fatalf("unchanged restore publication CAS: %v", err)
-	}
-	changed := loaded.(_restorePublicationState)
-	changed.PreservedCurrentOnlyCount++
-	if err := _assertPendingPublication(t.Context(), db, binding.Worktree, changed); err == nil {
-		t.Fatal("restore publication CAS accepted changed preview statistics")
-	}
-	if err := confirmRestorePublication(t.Context(), db, binding.Worktree, &changed); err == nil {
-		t.Fatal("restore confirmation overwrote changed preview statistics")
-	}
-	if err := discardPendingPublication(t.Context(), db, binding.Worktree, changed); err == nil {
-		t.Fatal("restore discard removed a changed preview")
-	}
-	again, err := loadPendingPublication(t.Context(), db, binding)
-	if err != nil || again == nil || !reflect.DeepEqual(again, pending) {
-		t.Fatalf("failed CAS changed restore publication state: pending=%+v err=%v", again, err)
-	}
 }
 
 func TestClientV24RestorePublicationDatabaseChecks(t *testing.T) {
@@ -162,15 +144,15 @@ func TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := advanceTestPublication(t, session, _resumeRestorePublicationRequest{scanConfig: scanConfig})
+	outcome, err := advanceTestPublication(t, session, _resumePublicationRequest{round: _syncPublicationRoundOptions{scanConfig: scanConfig}})
 	if outcome.Kind() != _publicationOutcomeConfirmationRequired || err == nil ||
 		!strings.Contains(err.Error(), "restore --confirm "+pending.CandidateCommit[:deleteCandidatePrefixLen]) {
 		t.Fatalf("unconfirmed restore outcome=%v, error=%v", outcome.Kind(), err)
 	}
 	assertRestoreConfirmationTestState(t, "unconfirmed restore", state, before)
-	after, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
-	if err != nil || !reflect.DeepEqual(after.pending, pending) {
-		t.Fatalf("resume changed unconfirmed restore: after=%+v error=%v", after.pending, err)
+	preview := advanceTestRestorePreview(t, session, _previewRestorePublicationRequest{sourceCommit: pending.SourceCommit, sourcePath: pending.SourcePath})
+	if preview.candidateCommit != pending.CandidateCommit {
+		t.Fatalf("resume changed unconfirmed restore: got %s, want %s", preview.candidateCommit, pending.CandidateCommit)
 	}
 }
 

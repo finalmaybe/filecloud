@@ -73,7 +73,7 @@ func TestPublicationLifecycleSyncConfirmsAndResumesOnlyMissingUploads(t *testing
 		t.Fatalf("start persisted the wrong candidate")
 	}
 
-	resume := _resumeSyncPublicationRequest{round: start.round}
+	resume := _resumePublicationRequest{round: start.round}
 	resume.round.confirmDeleteSet, resume.round.confirmDelete = true, id
 	if _, err := advanceTestPublication(t, session, resume); !errors.Is(err, _errWrongDeletePrefix) {
 		t.Fatalf("full-length confirmation: %v", err)
@@ -192,7 +192,7 @@ func TestPublicationLifecycleSyncDoesNotConfirmChangedWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(state.worktree, "changed"), []byte("new bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resume := _resumeSyncPublicationRequest{round: start.round}
+	resume := _resumePublicationRequest{round: start.round}
 	resume.round.confirmDeleteSet = true
 	resume.round.confirmDelete = start.prepared.candidate.CandidateCommit[:deleteCandidatePrefixLen]
 	outcome, err = advanceTestPublication(t, session, resume)

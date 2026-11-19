@@ -39,7 +39,6 @@ const (
 
 type _publicationOutcome struct {
 	kind           _publicationOutcomeKind
-	pending        _pendingPublicationState
 	replan         *_syncReplanChallenge
 	checkout       *pendingCheckout
 	restorePreview *restorePreview
@@ -65,11 +64,12 @@ type _startSyncPublicationRequest struct {
 
 func (_startSyncPublicationRequest) publicationRequest() {}
 
-type _resumeSyncPublicationRequest struct {
+// Sync and watch resume whichever workflow owns the durable candidate.
+type _resumePublicationRequest struct {
 	round _syncPublicationRoundOptions
 }
 
-func (_resumeSyncPublicationRequest) publicationRequest() {}
+func (_resumePublicationRequest) publicationRequest() {}
 
 type _publicationLifecycle struct{}
 
@@ -83,12 +83,12 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 	}
 	defer release()
 	switch request.(type) {
-	case _inspectPublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest, _replaceSyncPublicationRequest,
-		_previewRestorePublicationRequest, _confirmRestorePublicationRequest, _resumeRestorePublicationRequest:
+	case _inspectPublicationRequest, _startSyncPublicationRequest, _resumePublicationRequest, _replaceSyncPublicationRequest,
+		_previewRestorePublicationRequest, _confirmRestorePublicationRequest:
 	default:
 		return noOutcome, _errPublicationRequestInvalid
 	}
-	checkout, pending, err := loadWorktreePendingPublication(ctx, s.db, s.binding)
+	checkout, err := loadPendingCheckout(ctx, s.db, s.binding.ServerURL, s.binding.LibraryID, s.binding.Worktree)
 	if err != nil {
 		return noOutcome, err
 	}
@@ -101,32 +101,33 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 		}
 		return outcome, nil
 	}
+	pending, err := loadPendingPublication(ctx, s.db, s.binding)
+	if err != nil {
+		return noOutcome, err
+	}
 	switch request := request.(type) {
 	case _previewRestorePublicationRequest:
 		return newRestorePublicationRound(s).preview(ctx, pending, request)
 	case _confirmRestorePublicationRequest:
 		return newRestorePublicationRound(s).confirm(ctx, pending, request)
-	case _resumeRestorePublicationRequest:
-		value, ok := pending.(_restorePublicationState)
-		if !ok {
-			return noOutcome, _errPublicationRequestInvalid
-		}
-		round := newRestorePublicationRound(s)
-		round.options.scanConfig = clonePublicationScanConfig(request.scanConfig)
-		return round.resumeCurrent(ctx, value)
 	case _startSyncPublicationRequest:
 		if pending != nil || request.prepared.session != s {
 			return noOutcome, _errPublicationRequestInvalid
 		}
 		s.challenge = nil
 		return newSyncPublicationRound(s, request.round).start(ctx, request.prepared)
-	case _resumeSyncPublicationRequest:
-		value, ok := pending.(_syncPublicationState)
-		if !ok {
+	case _resumePublicationRequest:
+		s.challenge = nil
+		switch value := pending.(type) {
+		case _syncPublicationState:
+			return newSyncPublicationRound(s, request.round).resumeCurrent(ctx, value)
+		case _restorePublicationState:
+			round := newRestorePublicationRound(s)
+			round.options.scanConfig = clonePublicationScanConfig(request.round.scanConfig)
+			return round.resumeCurrent(ctx, value)
+		default:
 			return noOutcome, _errPublicationRequestInvalid
 		}
-		s.challenge = nil
-		return newSyncPublicationRound(s, request.round).resumeCurrent(ctx, value)
 	case _replaceSyncPublicationRequest:
 		c := request.challenge
 		if c == nil || c != s.challenge || c.binding != s.binding || c.replacement == nil {
@@ -136,7 +137,7 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 		return c.replace(ctx)
 	default:
 		if pending != nil {
-			return _publicationOutcome{kind: _publicationOutcomePending, pending: pending}, nil
+			return _publicationOutcome{kind: _publicationOutcomePending}, nil
 		}
 		return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
 	}

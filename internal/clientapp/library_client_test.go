@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1045,6 +1046,66 @@ func TestLibraryBindRejectsNoncanonicalPendingWinner(t *testing.T) {
 	if err := runLibraryWithConfig(t.Context(), []string{"unbind", "--client-dir", clientDir, "--worktree", worktree},
 		strings.NewReader(""), io.Discard, io.Discard, config); err != nil {
 		t.Fatalf("repeat unbind after cancel: %v", err)
+	}
+}
+
+func TestLibraryUnbindRollsBackPendingPublicationWithBinding(t *testing.T) {
+	state, request := newRestoreLifecycleFixture(t)
+	session := openTestPublicationSession(t, state)
+	preview := advanceTestRestorePreview(t, session, request)
+	binding := session.binding
+	index := captureTestPathIndex(t, state.clientDir, state.worktree)
+	// An outstanding intent makes unbind fail its final check, after deleting the publication.
+	stop := errors.New("interrupted filesystem action")
+	err := journalMtime(t.Context(), session.db, session.root, binding.Worktree, fsPhaseRollback, "", "", "Directory",
+		"2026-08-09T12:00:00Z", session.root.device, session.root.inode, func(point string, _ fsAction) error {
+			if point == "after_intent_commit" {
+				return stop
+			}
+			return nil
+		})
+	if !errors.Is(err, stop) {
+		t.Fatalf("interrupt filesystem action: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err = runTest(t.Context(), []string{"library", "unbind", "--client-dir", state.clientDir, "--worktree", state.worktree}, nil, &output, io.Discard)
+	if err == nil || err.Error() != "cannot unbind with incomplete filesystem actions" || output.Len() != 0 {
+		t.Fatalf("unbind with incomplete intent: output=%q err=%v", output.String(), err)
+	}
+	session = openTestPublicationSession(t, state)
+	if session.binding != binding || !slices.Equal(captureTestPathIndex(t, state.clientDir, state.worktree), index) ||
+		advanceTestRestorePreview(t, session, request).candidateCommit != preview.candidateCommit {
+		t.Fatal("failed unbind did not retain the binding, path index and exact pending preview together")
+	}
+}
+
+func TestLibraryUnbindMissingWorktreeRemovesPendingPublication(t *testing.T) {
+	state := newImportedBinding(t)
+	session, _ := leaveTestSyncPending(t, state)
+	binding := session.binding
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(state.worktree); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []string{"library unbound: ", "library not bound: "} {
+		var output bytes.Buffer
+		err := runTest(t.Context(), []string{"library", "unbind", "--client-dir", state.clientDir, "--worktree", state.worktree}, nil, &output, io.Discard)
+		if err != nil || output.String() != message+binding.Worktree+"\n" {
+			t.Fatalf("unbind missing worktree: output=%q err=%v", output.String(), err)
+		}
+	}
+	db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if pending, err := loadPendingPublication(t.Context(), db, binding); err != nil || pending != nil {
+		t.Fatalf("publication after unbind: type=%T err=%v", pending, err)
 	}
 }
 

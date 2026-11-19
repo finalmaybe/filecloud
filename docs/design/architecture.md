@@ -194,6 +194,8 @@ stateDiagram-v2
 
 ### 上传与发布
 
+普通 Sync、watch 和安全恢复都通过 `internal/clientapp` 中的 `_publicationLifecycle.Advance` 发布候选。调用方传入持锁的绑定会话和请求，由生命周期读取待处理状态：已有 checkout 优先；否则按持久化的候选类型继续 Sync 或 Restore。交给 checkout 后，文件落盘仍由 checkout 负责。`pending_publications` 的运行时 SQL 集中在 `publication_persistence.go`；unbind 把自己的事务传入清理操作，使候选和绑定一起删除或一起回滚。
+
 客户端先在本地构造候选 Commit 及完整引用图并持久化 `PendingPublication{Base, ExpectedHead, ExpectedETag, Candidate, Captured, CandidateHistory}`；若命中删除保护，在精确确认前不上传任何对象。授权后才上传稳定扫描对象、Captured Commit、按 ID 排序去重的合成目录、按时间顺序的历史 Candidate Commit 和当前 Candidate Commit，最后以 `If-Match` 发布 Head。对象 PUT 天然幂等；批量检查只减少请求，不影响正确性。`CapturedCommit/CapturedRoot/CapturedData` 标识当前工作目录稳定扫描对应的本地提交、根和规范提交正文；普通发布中 Captured 等于 Candidate，递归合并中 Captured 是作为第二 parent 的本地提交，而 Candidate 是尚未 checkout 到工作目录的合并结果。`CandidateHistory` 按从旧到新的顺序保存连续 Head 冲突中被替换且尚未上传的 Candidate 规范正文；普通本地发布和第一次递归合并为空。连续 Head 冲突只替换 Candidate，始终保留 Captured 并把旧 Candidate 追加到历史。
 
 恢复 pending publication 时先读取远端 Head，并重新扫描工作目录。未上传的递归候选从持久化 CapturedData 和稳定扫描对象开始，按 CandidateHistory 再到当前 Candidate 的顺序逐步重放；每一步只读取已发布的远端 first parent，并把前一步生成的本地根和合成目录直接提供给下一步，不依赖旧 Candidate 已上传。重建逐项核对 Candidate root、规范正文、parents 和相对三方 Base 树计算的删除统计；重验只执行 GET 和本地 SQLite 操作。若 Candidate 已成为 Head 或其可达祖先，且扫描仍等于 Captured：CandidateRoot 等于 CapturedRoot 时直接完成普通发布；根不同时，在一个事务中把绑定和索引推进到 Captured、建立指向已观察 Head 的 pending checkout 并精确删除 pending publication，随后由既有文件系统 journal checkout。若 CAS 后扫描已变化，同一事务只把绑定和索引推进到 Captured、清除 publication pending，不覆盖工作目录，并要求重跑同步。若远端仍等于 ExpectedHead，才允许在扫描等于 Captured 时重试 CAS；否则进入三方合并。Candidate 的第二 parent 链必须在 1024 个提交内无环地到达 Captured，Captured 再到达绑定 Sync Base；链上提交必须是同一所有者和本地 Device。

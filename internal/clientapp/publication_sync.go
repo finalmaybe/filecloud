@@ -3,7 +3,6 @@ package clientapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -41,6 +40,9 @@ type _syncPublicationRound struct {
 }
 
 func newSyncPublicationRound(session *_lockedBoundWorktreeSession, round _syncPublicationRoundOptions) _syncPublicationRound {
+	if round.budget == nil {
+		round.budget = _newReplayBudget()
+	}
 	options := session.bindOptions()
 	options.confirmDelete, options.confirmDeleteSet = round.confirmDelete, round.confirmDeleteSet
 	options.scanConfig = clonePublicationScanConfig(round.scanConfig)
@@ -99,7 +101,7 @@ func (r _syncPublicationRound) resume(ctx context.Context, snapshot worktreeSnap
 	if r.options.confirmDeleteSet && !pending.RequiresDeleteConfirmation && !pending.LegacyRevalidationRequired {
 		return _publicationOutcome{}, _errNoProtectedDeletion
 	}
-	if err := _verifyPendingPublicationChain(ctx, r.options, pending, r.binding, r.budget); err != nil {
+	if err := r.verifyPendingChain(ctx, pending); err != nil {
 		return _publicationOutcome{}, err
 	}
 	published, err := _remoteCommitDescendsFrom(ctx, r.options, *head.CommitID, pending.CandidateCommit, r.binding.UserID, r.budget)
@@ -150,6 +152,57 @@ func (r _syncPublicationRound) resume(ctx context.Context, snapshot worktreeSnap
 		}
 	}
 	return r.upload(ctx, snapshot, pending)
+}
+
+func (r _syncPublicationRound) verifyPendingChain(ctx context.Context, value _syncPublicationState) error {
+	sequence := value.mergeSequence
+	if len(sequence) == 0 {
+		return nil
+	}
+	if sequence[0].id == value.CapturedCommit {
+		localID := sequence[0].commit.Parents[1]
+		seen := map[string]bool{value.CapturedCommit: true}
+		for localID != r.binding.SyncBase {
+			if seen[localID] {
+				return errors.New("pending publication captured second-parent chain contains a cycle")
+			}
+			seen[localID] = true
+			local, localErr := _budgetedRemoteCommit(ctx, r.options, localID, r.budget)
+			if localErr != nil || local.AuthorUserID != r.binding.UserID || local.DeviceID != r.binding.DeviceID ||
+				(len(local.Parents) != 1 && len(local.Parents) != 2) {
+				return errors.Join(errors.New("pending publication captured second-parent chain is invalid"), localErr)
+			}
+			localID = local.Parents[len(local.Parents)-1]
+		}
+	}
+	base, err := _budgetedRemoteCommit(ctx, r.options, value.BaseCommit, r.budget)
+	if err != nil || base.AuthorUserID != r.binding.UserID || base.Root != value.BaseRoot {
+		return errors.Join(errors.New("pending publication Base is invalid"), err)
+	}
+	baseLinked, err := _remoteCommitDescendsFrom(ctx, r.options, value.BaseCommit, r.binding.SyncBase, r.binding.UserID, r.budget)
+	if err != nil || !baseLinked {
+		return errors.Join(errors.New("pending publication Base is not anchored to the binding Sync Base"), err)
+	}
+	previousRemote := r.binding.SyncBase
+	if sequence[0].id == value.CapturedCommit {
+		previousRemote = value.BaseCommit
+	}
+	for index, entry := range sequence {
+		remoteID := entry.commit.Parents[0]
+		remote, remoteErr := _budgetedRemoteCommit(ctx, r.options, remoteID, r.budget)
+		if remoteErr != nil || remote.AuthorUserID != r.binding.UserID {
+			return errors.Join(fmt.Errorf("pending publication merge Remote %d is invalid", index), remoteErr)
+		}
+		linked, linkErr := _remoteCommitDescendsFrom(ctx, r.options, remoteID, previousRemote, r.binding.UserID, r.budget)
+		if linkErr != nil || !linked {
+			return errors.Join(fmt.Errorf("pending publication merge Remote %d is not anchored to its predecessor", index), linkErr)
+		}
+		if remoteID == value.BaseCommit && remote.Root != value.BaseRoot {
+			return errors.New("pending publication Base root does not match merge history")
+		}
+		previousRemote = remoteID
+	}
+	return nil
 }
 
 func (r _syncPublicationRound) upload(ctx context.Context, snapshot worktreeSnapshot, pending _syncPublicationState) (_publicationOutcome, error) {
@@ -292,19 +345,15 @@ func uploadCandidateHistory(ctx context.Context, options bindOptions, history []
 	return nil
 }
 
-func finalizePublished(ctx context.Context, db *sql.DB, binding clientBinding, snapshot worktreeSnapshot, head remoteHead,
-	pending _syncPublicationState) error {
-	if head.CommitID == nil || *head.CommitID != pending.CandidateCommit {
-		return errors.New("published Head does not match pending publication")
-	}
-	tx, err := db.BeginTx(ctx, nil)
+func (r _syncPublicationRound) finalize(ctx context.Context, snapshot worktreeSnapshot, etag string, pending _syncPublicationState) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if err := updateBindingAndIndex(ctx, tx, binding, pending.CandidateCommit, pending.CandidateRoot, head.ETag, snapshot.paths); err != nil {
+	if err := updateBindingAndIndex(ctx, tx, r.binding, pending.CandidateCommit, pending.CandidateRoot, etag, snapshot.paths); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
+	if err := _deletePendingPublication(ctx, tx, r.binding.Worktree, pending,
 		"publication changed during finalization"); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}

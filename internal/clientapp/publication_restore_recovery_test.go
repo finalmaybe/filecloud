@@ -80,11 +80,6 @@ func TestPublicationLifecycleRestoreRecoversCASOutcome(t *testing.T) {
 					t.Fatal(err)
 				}
 				session = openTestPublicationSession(t, state)
-				inspected, inspectErr := advanceTestPublication(t, session, _inspectPublicationRequest{})
-				pending, ok := inspected.pending.(_restorePublicationState)
-				if inspectErr != nil || !ok || !pending.RestoreConfirmed || pending.CandidateCommit != preview.candidateCommit {
-					t.Fatalf("interrupted resolution did not retain exact confirmation: outcome=%v err=%v", inspected.Kind(), inspectErr)
-				}
 				if scenario == "ancestor" {
 					wantCheckout = publishSameRootSuccessor(t, state, time.Date(2026, 8, 9, 4, 5, 6, 0, time.UTC))
 				}
@@ -101,7 +96,7 @@ func TestPublicationLifecycleRestoreRecoversCASOutcome(t *testing.T) {
 					if scanErr != nil {
 						t.Fatal(scanErr)
 					}
-					outcome, err = advanceTestPublication(t, session, _resumeRestorePublicationRequest{scanConfig: scanConfig})
+					outcome, err = advanceTestPublication(t, session, _resumePublicationRequest{round: _syncPublicationRoundOptions{scanConfig: scanConfig}})
 				}
 			}
 			if headPUTs.Load() != 1 || objectPUTs.Load() != uploaded {
