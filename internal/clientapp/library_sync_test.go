@@ -188,7 +188,7 @@ func TestLibrarySyncExistingPendingCreatesConflictCopy(t *testing.T) {
 	if err == nil {
 		t.Fatal("initial pending publication unexpectedly completed")
 	}
-	beforePending := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	beforePending := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	if err := os.WriteFile(filepath.Join(publisherTree, "base"), []byte("remote"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -350,10 +350,7 @@ func TestLibraryPendingPublicationKindDispatch(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected pending publication")
 			}
-			pending := readTestPendingPublication(t, state.clientDir, state.worktree)
-			if pending.Kind != PublicationKindSync {
-				t.Fatalf("new pending publication kind=%q, want %q", pending.Kind, PublicationKindSync)
-			}
+			pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 			beforeBinding, beforeRoot := readTestBinding(t, state.clientDir, state.worktree), scanTestRoot(t, state.worktree)
 			beforeHead, err := getRemoteHead(t.Context(), mustServerURL(t, state.environment.server.URL), testClientLibraryID,
 				[]byte(state.environment.token))
@@ -433,7 +430,8 @@ func TestLibrarySyncMigratesV22PendingPublicationWithoutFieldDrift(t *testing.T)
 		db.Close()
 		t.Fatal(err)
 	}
-	before, err := loadPendingPublication(t.Context(), db, state.worktree)
+	binding := readTestBinding(t, state.clientDir, state.worktree)
+	before, err := loadPendingPublication(t.Context(), db, binding)
 	if err != nil || before == nil {
 		db.Close()
 		t.Fatalf("load v23 pending before downgrade: pending=%+v err=%v", before, err)
@@ -461,11 +459,11 @@ func TestLibrarySyncMigratesV22PendingPublicationWithoutFieldDrift(t *testing.T)
 		db.Close()
 		t.Fatal(err)
 	}
-	after, err := loadPendingPublication(t.Context(), db, state.worktree)
+	after, err := loadPendingPublication(t.Context(), db, binding)
 	if closeErr := db.Close(); err != nil || closeErr != nil || after == nil {
 		t.Fatalf("load migrated v22 pending: pending=%+v err=%v", after, errors.Join(err, closeErr))
 	}
-	if !reflect.DeepEqual(after, before) || after.Kind != PublicationKindSync {
+	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("v22 migration changed pending fields:\nbefore=%+v\nafter=%+v", before, after)
 	}
 }
@@ -610,7 +608,7 @@ func TestLibrarySyncRejectsOversizedPendingBlobsBeforeMutation(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected pending publication")
 	}
-	pending := readTestPendingPublication(t, clientDir, worktree)
+	pending := readTestSyncPublication(t, clientDir, worktree)
 	beforeBinding, beforeRoot := readTestBinding(t, clientDir, worktree), scanTestRoot(t, worktree)
 	beforeHead, err := getRemoteHead(t.Context(), mustServerURL(t, proxy.URL), testClientLibraryID, []byte(environment.token))
 	if err != nil {
@@ -623,7 +621,7 @@ func TestLibrarySyncRejectsOversizedPendingBlobsBeforeMutation(t *testing.T) {
 	}{
 		{"candidate_data", pending.CandidateData, 65537},
 		{"captured_data", pending.CapturedData, 65537},
-		{"candidate_history", pending.CandidateHistory, _maxCandidateHistoryBytes + 1},
+		{"candidate_history", []byte(_emptyCandidateHistory), _maxCandidateHistoryBytes + 1},
 	} {
 		t.Run(test.column, func(t *testing.T) {
 			db, err := openClientDB(filepath.Join(clientDir, _clientDatabaseName), false)
@@ -676,7 +674,7 @@ func TestFinalizePublishedRollsBackStaleRows(t *testing.T) {
 				t.Fatal("expected pending publication")
 			}
 			binding := readTestBinding(t, state.clientDir, state.worktree)
-			pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+			pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 			db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
 			if err != nil {
 				t.Fatal(err)
@@ -704,7 +702,11 @@ func TestFinalizePublishedRollsBackStaleRows(t *testing.T) {
 				t.Fatal("stale finalization succeeded")
 			}
 			afterBinding := readTestBinding(t, state.clientDir, state.worktree)
-			afterPending := readTestPendingPublication(t, state.clientDir, state.worktree)
+			afterState, err := loadPendingPublication(t.Context(), db, binding)
+			afterPending, ok := afterState.(_syncPublicationState)
+			if err != nil || !ok {
+				t.Fatalf("read retained sync publication: type=%T err=%v", afterState, err)
+			}
 			if countClientRows(t, state.clientDir, "path_index", state.worktree) != beforeIndex ||
 				afterBinding.SyncBase != binding.SyncBase || afterBinding.SyncBaseRoot != binding.SyncBaseRoot ||
 				afterBinding.HeadETag != binding.HeadETag || afterPending.CandidateCommit != pending.CandidateCommit {
@@ -995,7 +997,7 @@ func TestLibrarySyncRecursiveMergeParentsAndCapturedSnapshot(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "inspect merge") {
 		t.Fatalf("merge inspection error=%v", err)
 	}
-	pending := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	pending := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	commit, err := object.VerifyCommit(pending.CandidateData, pending.CandidateCommit)
 	if err != nil || len(commit.Parents) != 2 || commit.Parents[0] != pending.ExpectedHead ||
 		commit.Parents[1] != pending.CapturedCommit || pending.CapturedRoot != scanTestRoot(t, subscriberTree) ||
@@ -1039,7 +1041,7 @@ func TestLibrarySyncProtectedRecursiveMergeUploadsOnlyAfterConfirmation(t *testi
 			if !errors.As(err, &required) || required.deleted != int64(test.deleted) || required.tracked != int64(test.tracked) {
 				t.Fatalf("protected recursive merge error=%v required=%+v", err, required)
 			}
-			pending := readTestPendingPublication(t, subscriberDir, subscriberTree)
+			pending := readTestSyncPublication(t, subscriberDir, subscriberTree)
 			if puts.Load() != 0 || pending.CandidateCommit != required.candidate ||
 				pending.CapturedCommit == pending.CandidateCommit || !pending.RequiresDeleteConfirmation || pending.DeleteConfirmed ||
 				readTestBinding(t, subscriberDir, subscriberTree) != before ||
@@ -1078,9 +1080,9 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 	if err := syncTestWorktree(t, subscriberDir, subscriberTree); err == nil {
 		t.Fatal("initial protected merge succeeded")
 	}
-	first := readTestPendingPublication(t, subscriberDir, subscriberTree)
-	if history, err := _decodeCandidateHistory(first.CandidateHistory); err != nil || len(history) != 0 || puts.Load() != 0 {
-		t.Fatalf("initial history=%d puts=%d err=%v", len(history), puts.Load(), err)
+	first := readTestSyncPublication(t, subscriberDir, subscriberTree)
+	if len(first.CandidateHistory) != 0 || puts.Load() != 0 {
+		t.Fatalf("initial history=%d puts=%d", len(first.CandidateHistory), puts.Load())
 	}
 	if err := syncTestWorktree(t, subscriberDir, subscriberTree); err == nil || puts.Load() != 0 {
 		t.Fatalf("restart error=%v puts=%d", err, puts.Load())
@@ -1100,24 +1102,24 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 	if err := syncTestWorktree(t, subscriberDir, subscriberTree); err == nil {
 		t.Fatal("first protected replacement succeeded")
 	}
-	second := readTestPendingPublication(t, subscriberDir, subscriberTree)
-	history, err := _decodeCandidateHistory(second.CandidateHistory)
-	if err != nil || len(history) != 1 || !bytes.Equal(history[0], first.CandidateData) || puts.Load() != 0 ||
+	second := readTestSyncPublication(t, subscriberDir, subscriberTree)
+	history := second.CandidateHistory
+	if len(history) != 1 || !bytes.Equal(history[0], first.CandidateData) || puts.Load() != 0 ||
 		second.BaseCommit != first.ExpectedHead || second.CapturedCommit != first.CapturedCommit {
-		t.Fatalf("first replacement=%+v history=%d puts=%d err=%v", second, len(history), puts.Load(), err)
+		t.Fatalf("first replacement=%+v history=%d puts=%d", second, len(history), puts.Load())
 	}
 
 	advance("remote-2")
 	if err := syncTestWorktree(t, subscriberDir, subscriberTree); err == nil {
 		t.Fatal("second protected replacement succeeded")
 	}
-	third := readTestPendingPublication(t, subscriberDir, subscriberTree)
-	history, err = _decodeCandidateHistory(third.CandidateHistory)
-	if err != nil || len(history) != 2 || !bytes.Equal(history[0], first.CandidateData) ||
+	third := readTestSyncPublication(t, subscriberDir, subscriberTree)
+	history = third.CandidateHistory
+	if len(history) != 2 || !bytes.Equal(history[0], first.CandidateData) ||
 		!bytes.Equal(history[1], second.CandidateData) || puts.Load() != 0 || third.BaseCommit != second.ExpectedHead ||
 		third.CapturedCommit != first.CapturedCommit || third.CapturedRoot != first.CapturedRoot ||
 		!bytes.Equal(third.CapturedData, first.CapturedData) {
-		t.Fatalf("second replacement=%+v history=%d puts=%d err=%v", third, len(history), puts.Load(), err)
+		t.Fatalf("second replacement=%+v history=%d puts=%d", third, len(history), puts.Load())
 	}
 	binding := readTestBinding(t, subscriberDir, subscriberTree)
 	db, err := openClientDB(filepath.Join(subscriberDir, _clientDatabaseName), false)
@@ -1152,7 +1154,7 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 		t.Fatal(closeErr)
 	}
 	if err == nil || !strings.Contains(err.Error(), "cumulative synchronization budget") || puts.Load() != 0 ||
-		!reflect.DeepEqual(readTestPendingPublication(t, subscriberDir, subscriberTree), third) ||
+		!reflect.DeepEqual(readTestSyncPublication(t, subscriberDir, subscriberTree), third) ||
 		readTestBinding(t, subscriberDir, subscriberTree) != binding {
 		t.Fatalf("cumulative history budget changed state: err=%v puts=%d", err, puts.Load())
 	}
@@ -1188,9 +1190,20 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			corrupt := third
-			corrupt.CandidateHistory = encoded
-			if err := verifyPendingPublication(corrupt, binding); err == nil {
+			session := openTestPublicationSession(t, importedBinding{clientDir: subscriberDir, worktree: subscriberTree})
+			original, err := _encodeCandidateHistory(third.CandidateHistory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := session.db.ExecContext(t.Context(), `UPDATE pending_publications SET candidate_history = ? WHERE worktree = ?`, encoded, binding.Worktree); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := session.db.Exec(`UPDATE pending_publications SET candidate_history = ? WHERE worktree = ?`, original, binding.Worktree); err != nil {
+					t.Errorf("restore test candidate history: %v", err)
+				}
+			})
+			if _, err := advanceTestSyncPublication(t, session); err == nil {
 				t.Fatal("corrupt candidate history was accepted")
 			}
 		})
@@ -1285,7 +1298,7 @@ func TestLibrarySyncProtectedReplacementStoresBeforeUpload(t *testing.T) {
 	if !errors.As(err, &required) {
 		t.Fatal(err)
 	}
-	old := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	old := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	var putsAtReplacement atomic.Int32
 	config := libraryClientConfig{beforeHeadCAS: func() error {
 		if err := os.WriteFile(filepath.Join(publisherTree, "remote-addition"), []byte("remote"), 0o600); err != nil {
@@ -1301,7 +1314,7 @@ func TestLibrarySyncProtectedReplacementStoresBeforeUpload(t *testing.T) {
 	if !errors.As(err, &required) {
 		t.Fatalf("protected replacement error=%v", err)
 	}
-	next := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	next := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	if next.CandidateCommit == old.CandidateCommit ||
 		next.CandidateCommit[:deleteCandidatePrefixLen] == old.CandidateCommit[:deleteCandidatePrefixLen] ||
 		required.candidate != next.CandidateCommit || next.DeleteConfirmed || !next.RequiresDeleteConfirmation ||
@@ -4608,7 +4621,7 @@ func TestLibrarySyncProtectedDeletionConfirmation(t *testing.T) {
 	if after := readTestBinding(t, clientDir, worktree); after != before {
 		t.Fatalf("protected deletion changed binding: before=%+v after=%+v", before, after)
 	}
-	pending := readTestPendingPublication(t, clientDir, worktree)
+	pending := readTestSyncPublication(t, clientDir, worktree)
 	if pending.CandidateCommit != required.candidate || pending.DeletionCount != 1 || pending.TrackedCount != 2 ||
 		!pending.RequiresDeleteConfirmation || pending.DeleteConfirmed {
 		t.Fatalf("pending=%+v", pending)
@@ -4630,7 +4643,7 @@ func TestLibrarySyncProtectedDeletionConfirmation(t *testing.T) {
 		if err := confirmTestDeletion(t, clientDir, worktree, wrong, libraryClientConfig{}); err == nil {
 			t.Fatalf("confirmation %q succeeded", wrong)
 		}
-		if got := readTestPendingPublication(t, clientDir, worktree); got.CandidateCommit != pending.CandidateCommit || got.DeleteConfirmed {
+		if got := readTestSyncPublication(t, clientDir, worktree); got.CandidateCommit != pending.CandidateCommit || got.DeleteConfirmed {
 			t.Fatalf("wrong confirmation changed pending=%+v", got)
 		}
 	}
@@ -4678,7 +4691,7 @@ func TestLibrarySyncProtects101DeletionsBelowTenPercent(t *testing.T) {
 	if !errors.As(err, &required) {
 		t.Fatalf("101 deletion error=%v", err)
 	}
-	pending := readTestPendingPublication(t, clientDir, worktree)
+	pending := readTestSyncPublication(t, clientDir, worktree)
 	if pending.DeletionCount != 101 || pending.TrackedCount != 1111 || !pending.RequiresDeleteConfirmation ||
 		pending.DeleteConfirmed || pending.LegacyRevalidationRequired {
 		t.Fatalf("pending=%+v", pending)
@@ -4757,7 +4770,7 @@ func TestLibrarySyncConfirmedDeletionResumesUploadFailure(t *testing.T) {
 	if err := confirmTestDeletion(t, clientDir, worktree, candidate[:deleteCandidatePrefixLen], libraryClientConfig{}); err == nil {
 		t.Fatal("confirmation upload failure succeeded")
 	}
-	if pending := readTestPendingPublication(t, clientDir, worktree); !pending.DeleteConfirmed || pending.CandidateCommit != candidate {
+	if pending := readTestSyncPublication(t, clientDir, worktree); !pending.DeleteConfirmed || pending.CandidateCommit != candidate {
 		t.Fatalf("confirmed pending=%+v", pending)
 	}
 	if err := syncTestWorktree(t, clientDir, worktree); err != nil {
@@ -4785,7 +4798,7 @@ func TestLibrarySyncRevalidatesLegacyPendingDeletion(t *testing.T) {
 	if !errors.As(err, &required) || required.candidate != candidate {
 		t.Fatalf("legacy revalidation error=%v required=%+v", err, required)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 	if pending.CandidateCommit != candidate || pending.DeletionCount != 1 || pending.TrackedCount != 1 ||
 		!pending.RequiresDeleteConfirmation || pending.DeleteConfirmed || pending.LegacyRevalidationRequired {
 		t.Fatalf("revalidated pending=%+v", pending)
@@ -4860,8 +4873,8 @@ func TestLibrarySyncContinuousTrivialMergeCompetition(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(state.worktree, "local-change"), []byte("local"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var old pendingPublication
-	var replacements []pendingPublication
+	var old _syncPublicationState
+	var replacements []_syncPublicationState
 	injected := false
 	config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil },
 		now: func() time.Time { return time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) },
@@ -4870,12 +4883,12 @@ func TestLibrarySyncContinuousTrivialMergeCompetition(t *testing.T) {
 				return nil
 			}
 			injected = true
-			old = readTestPendingPublication(t, state.clientDir, state.worktree)
+			old = readTestSyncPublication(t, state.clientDir, state.worktree)
 			publishSameRootSuccessor(t, state, time.Date(2026, 8, 9, 12, 1, 0, 0, time.UTC))
 			return nil
 		},
 		afterPendingReplacement: func() error {
-			replacements = append(replacements, readTestPendingPublication(t, state.clientDir, state.worktree))
+			replacements = append(replacements, readTestSyncPublication(t, state.clientDir, state.worktree))
 			if len(replacements) == 1 {
 				publishSameRootSuccessor(t, state, time.Date(2026, 8, 9, 12, 2, 0, 0, time.UTC))
 			}
@@ -4915,7 +4928,7 @@ func TestLibrarySyncContinuousDivergentHeadConflictsReuseCapturedSeed(t *testing
 	if err := os.WriteFile(subscriberPath, []byte("local"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var replacements []pendingPublication
+	var replacements []_syncPublicationState
 	advances := 0
 	config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil },
 		now: func() time.Time { return time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) },
@@ -4930,7 +4943,7 @@ func TestLibrarySyncContinuousDivergentHeadConflictsReuseCapturedSeed(t *testing
 			return syncTestWorktree(t, publisherDir, publisherTree)
 		},
 		afterPendingReplacement: func() error {
-			replacements = append(replacements, readTestPendingPublication(t, subscriberDir, subscriberTree))
+			replacements = append(replacements, readTestSyncPublication(t, subscriberDir, subscriberTree))
 			return nil
 		}}
 	if err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", subscriberDir, "--worktree", subscriberTree},
@@ -4941,10 +4954,10 @@ func TestLibrarySyncContinuousDivergentHeadConflictsReuseCapturedSeed(t *testing
 		t.Fatalf("advances=%d replacements=%d", advances, len(replacements))
 	}
 	for index, pending := range replacements {
-		history, err := _decodeCandidateHistory(pending.CandidateHistory)
-		if err != nil || len(history) != index+1 || pending.CapturedCommit != replacements[0].CapturedCommit ||
+		history := pending.CandidateHistory
+		if len(history) != index+1 || pending.CapturedCommit != replacements[0].CapturedCommit ||
 			pending.CapturedRoot != replacements[0].CapturedRoot || !bytes.Equal(pending.CapturedData, replacements[0].CapturedData) {
-			t.Fatalf("replacement %d=%+v history=%d err=%v", index, pending, len(history), err)
+			t.Fatalf("replacement %d=%+v history=%d", index, pending, len(history))
 		}
 		if index > 0 && !bytes.Equal(history[len(history)-1], replacements[index-1].CandidateData) {
 			t.Fatalf("replacement %d did not replay prior Candidate", index)
@@ -4978,7 +4991,7 @@ func TestLibrarySyncResumesAfterPendingMergeReplacement(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "replacement crash boundary") {
 		t.Fatalf("replacement boundary error=%v", err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 	commit, verifyErr := object.VerifyCommit(pending.CandidateData, pending.CandidateCommit)
 	if verifyErr != nil || len(commit.Parents) != 2 || commit.Parents[0] != pending.ExpectedHead {
 		t.Fatalf("persisted replacement=%+v commit=%+v err=%v", pending, commit, verifyErr)
@@ -5007,7 +5020,7 @@ func TestLibrarySyncRejectsUnlinkedMergeCandidateChain(t *testing.T) {
 	if err == nil {
 		t.Fatal("merge replacement unexpectedly completed")
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 	base := mustServerURL(t, state.environment.server.URL)
 	orphanData, orphan, err := canonicalCommit(testClientUserID, testOtherDeviceID, pending.CandidateRoot, []string{},
 		func() time.Time { return time.Date(2026, 8, 9, 13, 31, 0, 0, time.UTC) })
@@ -5054,7 +5067,7 @@ func TestLibrarySyncMergeReplacementResetsDeleteConfirmation(t *testing.T) {
 	if !errors.As(err, &required) {
 		t.Fatalf("protected candidate error=%v", err)
 	}
-	old := readTestPendingPublication(t, state.clientDir, state.worktree)
+	old := readTestSyncPublication(t, state.clientDir, state.worktree)
 	injected := false
 	err = confirmTestDeletion(t, state.clientDir, state.worktree, required.candidate[:deleteCandidatePrefixLen], libraryClientConfig{
 		beforeHeadCAS: func() error {
@@ -5067,7 +5080,7 @@ func TestLibrarySyncMergeReplacementResetsDeleteConfirmation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "inspect replacement") {
 		t.Fatalf("replacement inspection error=%v", err)
 	}
-	next := readTestPendingPublication(t, state.clientDir, state.worktree)
+	next := readTestSyncPublication(t, state.clientDir, state.worktree)
 	if next.CandidateCommit == old.CandidateCommit || !next.RequiresDeleteConfirmation || next.DeleteConfirmed ||
 		next.LegacyRevalidationRequired {
 		t.Fatalf("replacement transferred deletion authorization: old=%+v next=%+v", old, next)
@@ -5085,7 +5098,7 @@ func TestLibrarySyncPendingBothRootsChangedMerges(t *testing.T) {
 	if err == nil {
 		t.Fatal("initial pending publication unexpectedly succeeded")
 	}
-	before := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	before := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	if err := os.WriteFile(filepath.Join(publisherTree, "remote-change"), []byte("remote"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -5338,7 +5351,7 @@ func TestLibrarySyncRecoversPublishedCandidateBeforeDiscardingMutatedWorktree(t 
 	if err := syncTestWorktree(t, clientDir, worktree); err == nil {
 		t.Fatal("expected unknown publication result")
 	}
-	pending := readTestPendingPublication(t, clientDir, worktree)
+	pending := readTestSyncPublication(t, clientDir, worktree)
 	if err := os.WriteFile(filepath.Join(worktree, "published"), []byte("local mutation"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -7646,25 +7659,42 @@ func assertTestConverged(t *testing.T, environment libraryCLIEnvironment, client
 
 func readPendingCandidate(t *testing.T, clientDir, worktree string) string {
 	t.Helper()
-	return readTestPendingPublication(t, clientDir, worktree).CandidateCommit
+	return readTestSyncPublication(t, clientDir, worktree).CandidateCommit
 }
 
-func readTestPendingPublication(t *testing.T, clientDir, worktree string) pendingPublication {
+func readTestSyncPublication(t *testing.T, clientDir, worktree string) _syncPublicationState {
 	t.Helper()
-	worktree = canonicalTestWorktree(t, worktree)
+	pending := readTestPublicationState(t, clientDir, worktree)
+	value, ok := pending.(_syncPublicationState)
+	if !ok {
+		t.Fatalf("pending publication type=%T, want Sync", pending)
+	}
+	return value
+}
+
+func readTestRestorePublication(t *testing.T, clientDir, worktree string) _restorePublicationState {
+	t.Helper()
+	pending := readTestPublicationState(t, clientDir, worktree)
+	value, ok := pending.(_restorePublicationState)
+	if !ok {
+		t.Fatalf("pending publication type=%T, want Restore", pending)
+	}
+	return value
+}
+
+func readTestPublicationState(t *testing.T, clientDir, worktree string) _pendingPublicationState {
+	t.Helper()
+	binding := readTestBinding(t, clientDir, worktree)
 	db, err := openClientDB(filepath.Join(clientDir, _clientDatabaseName), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	pending, err := loadPendingPublication(t.Context(), db, worktree)
+	pending, err := loadPendingPublication(t.Context(), db, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending == nil {
-		t.Fatal("pending publication is missing")
-	}
-	return *pending
+	return pending
 }
 
 func confirmTestDeletion(t *testing.T, clientDir, worktree, prefix string, config libraryClientConfig) error {

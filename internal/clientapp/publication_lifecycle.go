@@ -31,10 +31,12 @@ const (
 	_publicationOutcomeRerunSync
 	_publicationOutcomeRerunRestore
 	_publicationOutcomeSyncReplan
+	_publicationOutcomePending
 )
 
 type _publicationOutcome struct {
-	kind _publicationOutcomeKind
+	kind    _publicationOutcomeKind
+	pending _pendingPublicationState
 }
 
 // Kind classifies the lifecycle result without requiring error-string parsing.
@@ -76,7 +78,18 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 	}
 	switch request.(type) {
 	case _syncPublicationRequest, _restorePublicationRequest:
-		return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
+		checkout, pending, err := loadWorktreePendingPublication(ctx, s.db, s.binding)
+		if err != nil {
+			return noOutcome, err
+		}
+		switch {
+		case checkout != nil:
+			return _publicationOutcome{kind: _publicationOutcomeCheckoutPending}, nil
+		case pending != nil:
+			return _publicationOutcome{kind: _publicationOutcomePending, pending: pending}, nil
+		default:
+			return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
+		}
 	default:
 		return noOutcome, _errPublicationRequestInvalid
 	}

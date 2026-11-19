@@ -66,7 +66,7 @@ func TestLibrarySyncLongFallbackCandidateHistoryFixedReplayVector(t *testing.T) 
 	if err := os.Chtimes(subscriberPath, localMtime, localMtime); err != nil {
 		t.Fatal(err)
 	}
-	var replacements []pendingPublication
+	var replacements []_syncPublicationState
 	advances := 0
 	config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil },
 		now: func() time.Time { return time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) },
@@ -85,7 +85,7 @@ func TestLibrarySyncLongFallbackCandidateHistoryFixedReplayVector(t *testing.T) 
 			return fixedSync(publisherDir, publisherTree, time.Date(2026, 8, 9, 11, advances+1, 0, 0, time.UTC))
 		},
 		afterPendingReplacement: func() error {
-			replacements = append(replacements, readTestPendingPublication(t, subscriberDir, subscriberTree))
+			replacements = append(replacements, readTestSyncPublication(t, subscriberDir, subscriberTree))
 			if len(replacements) == 2 {
 				return errors.New("fixed pending replay seam")
 			}
@@ -100,17 +100,17 @@ func TestLibrarySyncLongFallbackCandidateHistoryFixedReplayVector(t *testing.T) 
 	wantRoots := []string{"db54d9f084bf9e726eff106a1fb4ba76892be6caf37e13e762a49b11726cc930", "6e5d2226217d4d85b756afbbd0dcb0c464f810ed0f39cd81f5f153c7a4369a6d"}
 	wantCommits := []string{"bd2a7a4c563532c8e122f5573946fa955d0368c6d1d0e1f2d649140862355eb0", "aa3bca72e2a915d8dd91a909badbd570a3fc80c829c08238d312259586bc62de"}
 	for index, pending := range replacements {
-		history, err := _decodeCandidateHistory(pending.CandidateHistory)
-		if err != nil || pending.CapturedCommit != captured || pending.CandidateRoot != wantRoots[index] ||
+		history := pending.CandidateHistory
+		if pending.CapturedCommit != captured || pending.CandidateRoot != wantRoots[index] ||
 			pending.CandidateCommit != wantCommits[index] || len(history) != index {
-			t.Fatalf("replacement %d captured=%s root=%s commit=%s history=%d err=%v", index,
-				pending.CapturedCommit, pending.CandidateRoot, pending.CandidateCommit, len(history), err)
+			t.Fatalf("replacement %d captured=%s root=%s commit=%s history=%d", index,
+				pending.CapturedCommit, pending.CandidateRoot, pending.CandidateCommit, len(history))
 		}
 		if index == 1 && !bytes.Equal(history[0], replacements[0].CandidateData) {
 			t.Fatal("second replacement did not preserve the first Candidate bytes")
 		}
 	}
-	persisted := readTestPendingPublication(t, subscriberDir, subscriberTree)
+	persisted := readTestSyncPublication(t, subscriberDir, subscriberTree)
 	if persisted.CandidateRoot != wantRoots[1] || persisted.CandidateCommit != wantCommits[1] {
 		t.Fatalf("persisted candidate=%s/%s", persisted.CandidateRoot, persisted.CandidateCommit)
 	}

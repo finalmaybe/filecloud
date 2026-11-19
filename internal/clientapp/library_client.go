@@ -901,6 +901,10 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 		return fmt.Errorf("read client binding: %w", err)
 	}
 	defer clear(token)
+	checkout, publication, err := loadWorktreePendingPublication(ctx, db, binding)
+	if err != nil {
+		return err
+	}
 	base, err := validateServerURL(binding.ServerURL)
 	if err != nil {
 		return err
@@ -936,7 +940,7 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 		}
 		options.scanConfig.trackedPaths = tracked
 	}
-	return syncLibrary(ctx, db, options, binding, stdout, config)
+	return syncLibrary(ctx, db, options, binding, checkout, publication, stdout, config)
 }
 
 func loadTrackedPaths(ctx context.Context, db *sql.DB, worktree string) (map[string]bool, error) {
@@ -1086,7 +1090,7 @@ func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return errors.Join(fmt.Errorf("count removed pending checkouts: %w", err), tx.Rollback())
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM pending_publications WHERE worktree = ?", canonicalWorktree); err != nil {
+	if err := _removePendingPublicationForUnbind(ctx, tx, canonicalWorktree); err != nil {
 		return errors.Join(fmt.Errorf("remove pending publication: %w", err), tx.Rollback())
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM checkout_paths WHERE worktree = ?", canonicalWorktree); err != nil {
@@ -2277,12 +2281,13 @@ func validateClientV22PendingRows(ctx context.Context, tx *sql.Tx) error {
 	}
 	for rows.Next() {
 		var worktree string
-		var value pendingPublication
+		var value _syncPublicationState
+		var encodedHistory []byte
 		var binding clientBinding
 		var hasBinding bool
 		if err := rows.Scan(&worktree, &value.BaseCommit, &value.BaseRoot, &value.ExpectedHead, &value.ExpectedETag,
 			&value.CandidateCommit, &value.CandidateRoot, &value.CandidateData, &value.CapturedCommit, &value.CapturedRoot,
-			&value.CapturedData, &value.CandidateHistory, &value.DeletionCount, &value.TrackedCount,
+			&value.CapturedData, &encodedHistory, &value.DeletionCount, &value.TrackedCount,
 			&value.RequiresDeleteConfirmation, &value.DeleteConfirmed, &value.LegacyRevalidationRequired, &hasBinding,
 			&binding.UserID, &binding.DeviceID, &binding.SyncBase, &binding.SyncBaseRoot); err != nil {
 			return errors.Join(fmt.Errorf("scan v22 pending publication row: %w", err), rows.Close())
@@ -2291,7 +2296,11 @@ func validateClientV22PendingRows(ctx context.Context, tx *sql.Tx) error {
 			return errors.Join(errors.New("v22 pending publication has no matching binding"), rows.Close())
 		}
 		binding.Worktree = worktree
-		if err := verifyPendingPublication(value, binding); err != nil {
+		value.CandidateHistory, err = _decodeCandidateHistory(encodedHistory)
+		if err == nil {
+			err = verifyLegacySyncPublication(&value, binding)
+		}
+		if err != nil {
 			return errors.Join(fmt.Errorf("validate v22 pending publication for worktree %q: %w", worktree, err), rows.Close())
 		}
 	}

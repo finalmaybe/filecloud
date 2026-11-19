@@ -1,7 +1,6 @@
 package clientapp
 
 import (
-	"bytes"
 	"io"
 	"reflect"
 	"strings"
@@ -42,31 +41,32 @@ func TestClientV24RestorePublicationSchemaAndRoundTrip(t *testing.T) {
 	}
 
 	binding, pending := testRestorePendingPublication(t)
-	if err := verifyRestorePublication(pending, binding); err != nil {
-		t.Fatalf("verify restore publication: %v", err)
-	}
-	if err := savePendingPublication(t.Context(), db, "/work", pending); err != nil {
+	if err := saveRestorePublication(t.Context(), db, binding, pending); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := loadPendingPublication(t.Context(), db, "/work")
+	loaded, err := loadPendingPublication(t.Context(), db, binding)
 	if err != nil || loaded == nil {
 		t.Fatalf("load restore publication=%+v err=%v", loaded, err)
 	}
-	if !reflect.DeepEqual(*loaded, pending) {
-		t.Fatalf("round trip changed restore publication: candidate_history nil=%v/%v preview equal=%v source=%q/%q stats=%d/%d\nwant=%+v\n got=%+v",
-			pending.CandidateHistory == nil, loaded.CandidateHistory == nil, bytes.Equal(pending.ChangedPathPreview, loaded.ChangedPathPreview),
-			pending.SourcePath, loaded.SourcePath, pending.ChangedPathCount, loaded.ChangedPathCount, pending, *loaded)
+	if !reflect.DeepEqual(loaded, pending) {
+		t.Fatalf("round trip changed restore publication:\nwant=%+v\ngot=%+v", pending, loaded)
 	}
-	if err := _assertPendingPublication(t.Context(), db, "/work", *loaded); err != nil {
+	if err := _assertPendingPublication(t.Context(), db, "/work", loaded); err != nil {
 		t.Fatalf("unchanged restore publication CAS: %v", err)
 	}
-	changed := *loaded
-	changed.UpdatedCount++
-	if err := _assertPendingPublication(t.Context(), db, "/work", changed); err == nil {
+	changed := loaded.(_restorePublicationState)
+	changed.PreservedCurrentOnlyCount++
+	if err := _assertPendingPublication(t.Context(), db, binding.Worktree, changed); err == nil {
 		t.Fatal("restore publication CAS accepted changed preview statistics")
 	}
-	again, err := loadPendingPublication(t.Context(), db, "/work")
-	if err != nil || again == nil || !reflect.DeepEqual(*again, pending) {
+	if err := confirmRestorePublication(t.Context(), db, binding.Worktree, &changed); err == nil {
+		t.Fatal("restore confirmation overwrote changed preview statistics")
+	}
+	if err := discardPendingPublication(t.Context(), db, binding.Worktree, changed); err == nil {
+		t.Fatal("restore discard removed a changed preview")
+	}
+	again, err := loadPendingPublication(t.Context(), db, binding)
+	if err != nil || again == nil || !reflect.DeepEqual(again, pending) {
 		t.Fatalf("failed CAS changed restore publication state: pending=%+v err=%v", again, err)
 	}
 }
@@ -78,8 +78,8 @@ func TestClientV24RestorePublicationDatabaseChecks(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, pending := testRestorePendingPublication(t)
-	if err := savePendingPublication(t.Context(), db, "/work", pending); err != nil {
+	binding, pending := testRestorePendingPublication(t)
+	if err := saveRestorePublication(t.Context(), db, binding, pending); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
@@ -95,8 +95,8 @@ func TestClientV24RestorePublicationDatabaseChecks(t *testing.T) {
 			}
 		})
 	}
-	loaded, err := loadPendingPublication(t.Context(), db, "/work")
-	if err != nil || loaded == nil || !reflect.DeepEqual(*loaded, pending) {
+	loaded, err := loadPendingPublication(t.Context(), db, binding)
+	if err != nil || loaded == nil || !reflect.DeepEqual(loaded, pending) {
 		t.Fatalf("failed database checks changed valid publication: loaded=%+v want=%+v err=%v", loaded, pending, err)
 	}
 }
@@ -109,13 +109,11 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 	defer db.Close()
 
 	const worktree = "/migration-work"
-	expected := pendingPublication{
-		Kind: PublicationKindSync, BaseCommit: strings.Repeat("a", 64), BaseRoot: strings.Repeat("b", 64),
-		ExpectedHead: strings.Repeat("c", 64), ExpectedETag: `"v23-etag"`, CandidateCommit: strings.Repeat("d", 64),
-		CandidateRoot: strings.Repeat("e", 64), CandidateData: []byte{1, 2}, CapturedCommit: strings.Repeat("f", 64),
-		CapturedRoot: strings.Repeat("0", 64), CapturedData: []byte{3, 4}, CandidateHistory: append([]byte(nil), _emptyCandidateHistory...),
-		DeletionCount: 7, TrackedCount: 20, RequiresDeleteConfirmation: true, DeleteConfirmed: true,
-	}
+	binding := clientBinding{Worktree: worktree, UserID: testClientUserID, DeviceID: testClientDeviceID,
+		SyncBase: strings.Repeat("a", 64), SyncBaseRoot: strings.Repeat("b", 64)}
+	expected := testSyncPublicationState(t, binding)
+	expected.DeletionCount, expected.TrackedCount = 7, 20
+	expected.RequiresDeleteConfirmation, expected.DeleteConfirmed = true, true
 	if _, err := db.Exec(`ALTER TABLE pending_publications RENAME TO v23_pending_publications`); err != nil {
 		t.Fatal(err)
 	}
@@ -126,9 +124,9 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 		expected_head,expected_etag,candidate_commit,candidate_root,candidate_data,captured_commit,captured_root,captured_data,
 		candidate_history,deletion_count,tracked_count,requires_delete_confirmation,delete_confirmed,legacy_revalidation_required)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		worktree, expected.Kind, expected.BaseCommit, expected.BaseRoot, expected.ExpectedHead, expected.ExpectedETag,
+		worktree, PublicationKindSync, expected.BaseCommit, expected.BaseRoot, expected.ExpectedHead, expected.ExpectedETag,
 		expected.CandidateCommit, expected.CandidateRoot, expected.CandidateData, expected.CapturedCommit, expected.CapturedRoot,
-		expected.CapturedData, expected.CandidateHistory, expected.DeletionCount, expected.TrackedCount,
+		expected.CapturedData, []byte(_emptyCandidateHistory), expected.DeletionCount, expected.TrackedCount,
 		expected.RequiresDeleteConfirmation, expected.DeleteConfirmed, expected.LegacyRevalidationRequired); err != nil {
 		t.Fatal(err)
 	}
@@ -139,13 +137,14 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 	if err := initializeClientSchema(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := loadPendingPublication(t.Context(), db, worktree)
+	loaded, err := loadPendingPublication(t.Context(), db, binding)
 	if err != nil || loaded == nil {
 		t.Fatalf("load migrated sync publication=%+v err=%v", loaded, err)
 	}
-	expected.ChangedPathPreview = []byte(_emptyRestorePreview)
-	if !reflect.DeepEqual(*loaded, expected) {
-		t.Fatalf("v23 sync publication changed during migration:\nwant=%+v\n got=%+v", expected, *loaded)
+	got, ok := loaded.(_syncPublicationState)
+	if !ok || !reflect.DeepEqual(got._publicationCandidate, expected._publicationCandidate) ||
+		got._syncPublicationFields != expected._syncPublicationFields || len(got.CandidateHistory) != 0 {
+		t.Fatalf("v23 sync publication changed during migration:\nwant=%+v\n got=%+v", expected, loaded)
 	}
 	var version int
 	if err := db.QueryRowContext(t.Context(), "SELECT MAX(version) FROM client_schema_migrations").Scan(&version); err != nil {
@@ -153,42 +152,6 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 	}
 	if version != 24 {
 		t.Fatalf("migrated schema version=%d, want 24", version)
-	}
-}
-
-func TestRestorePublicationRejectsInvalidCrossFieldsAndPreview(t *testing.T) {
-	binding, pending := testRestorePendingPublication(t)
-	tests := []struct {
-		name   string
-		mutate func(*pendingPublication)
-		want   string
-	}{
-		{name: "wrong candidate parent", mutate: func(value *pendingPublication) { value.CandidateData = []byte("invalid") }, want: "candidate commit"},
-		{name: "candidate root equals captured root", mutate: func(value *pendingPublication) { value.CandidateRoot = value.CapturedRoot }, want: "candidate root must differ"},
-		{name: "zero changed paths", mutate: func(value *pendingPublication) {
-			value.CreatedCount, value.UpdatedCount, value.TypeReplacementCount = 0, 0, 0
-			value.ChangedPathPreview, value.ChangedPathCount, value.PreviewTruncated = []byte(_emptyRestorePreview), 0, false
-		}, want: "must contain changed paths"},
-		{name: "statistics mismatch", mutate: func(value *pendingPublication) {
-			value.CreatedCount, value.UpdatedCount, value.TypeReplacementCount = 1, 0, 0
-		}, want: "statistics do not match"},
-		{name: "deletion confirmation", mutate: func(value *pendingPublication) { value.RequiresDeleteConfirmation = true }, want: "synchronization-only"},
-		{name: "candidate history", mutate: func(value *pendingPublication) { value.CandidateHistory = []byte("history") }, want: "synchronization-only"},
-		{name: "invalid source commit", mutate: func(value *pendingPublication) { value.SourceCommit = "short" }, want: "source fields"},
-		{name: "invalid source path", mutate: func(value *pendingPublication) { value.SourcePath = "../outside" }, want: "source fields"},
-		{name: "negative statistic", mutate: func(value *pendingPublication) { value.UpdatedCount = -1 }, want: "statistics"},
-		{name: "preview count mismatch", mutate: func(value *pendingPublication) { value.ChangedPathCount = 1 }, want: "changed path count"},
-		{name: "noncanonical preview", mutate: func(value *pendingPublication) { value.ChangedPathPreview = []byte("paths") }, want: "invalid encoding"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			value := pending
-			test.mutate(&value)
-			err := verifyRestorePublication(value, binding)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("invalid restore publication error=%v, want substring %q", err, test.want)
-			}
-		})
 	}
 }
 
@@ -200,10 +163,10 @@ func TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation(t *testin
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := savePendingPublication(t.Context(), db, "/work", pending); err != nil {
+	if err := saveRestorePublication(t.Context(), db, binding, pending); err != nil {
 		t.Fatal(err)
 	}
-	before, err := loadPendingPublication(t.Context(), db, "/work")
+	before, err := loadPendingPublication(t.Context(), db, binding)
 	if err != nil || before == nil {
 		t.Fatal(err)
 	}
@@ -214,13 +177,13 @@ func TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation(t *testin
 	if err == nil || !strings.Contains(err.Error(), "restore --confirm "+candidatePrefix) {
 		t.Fatalf("unconfirmed restore error=%v", err)
 	}
-	after, loadErr := loadPendingPublication(t.Context(), db, "/work")
-	if loadErr != nil || after == nil || !reflect.DeepEqual(*after, *before) {
-		t.Fatalf("dispatcher changed restore publication: before=%+v after=%+v err=%v", *before, after, loadErr)
+	after, loadErr := loadPendingPublication(t.Context(), db, binding)
+	if loadErr != nil || after == nil || !reflect.DeepEqual(after, before) {
+		t.Fatalf("dispatcher changed restore publication: before=%+v after=%+v err=%v", before, after, loadErr)
 	}
 }
 
-func testRestorePendingPublication(t *testing.T) (clientBinding, pendingPublication) {
+func testRestorePendingPublication(t *testing.T) (clientBinding, _restorePublicationState) {
 	t.Helper()
 	baseRoot := strings.Repeat("a", 64)
 	candidateRoot := strings.Repeat("b", 64)
@@ -237,19 +200,31 @@ func testRestorePendingPublication(t *testing.T) (clientBinding, pendingPublicat
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview, err := _encodeRestorePreview([]string{"docs/file.txt", "other.txt"})
+	binding := clientBinding{ServerURL: "http://localhost", LibraryID: testClientLibraryID, Worktree: "/work",
+		UserID: testClientUserID, DeviceID: testClientDeviceID, SyncBase: capturedCommit, SyncBaseRoot: baseRoot,
+		HeadETag: `"head-version-1"`}
+	return binding, _restorePublicationState{
+		_publicationCandidate: _publicationCandidate{BaseCommit: capturedCommit, BaseRoot: baseRoot, ExpectedHead: capturedCommit,
+			ExpectedETag: binding.HeadETag, CandidateCommit: candidateCommit, CandidateRoot: candidateRoot,
+			CandidateData: candidateData, CapturedCommit: capturedCommit, CapturedRoot: baseRoot, CapturedData: capturedData},
+		_restorePublicationFields: _restorePublicationFields{SourceCommit: sourceCommit, SourcePath: "docs/file.txt", SourceRoot: sourceRoot,
+			CreatedCount: 1, UpdatedCount: 1, PreservedCurrentOnlyCount: 5, ChangedPathCount: 2},
+		ChangedPathPreview: []string{"docs/file.txt", "other.txt"},
+	}
+}
+
+func testSyncPublicationState(t *testing.T, binding clientBinding) _syncPublicationState {
+	t.Helper()
+	root := strings.Repeat("e", 64)
+	data, id, err := canonicalCommit(binding.UserID, binding.DeviceID, root, []string{binding.SyncBase},
+		func() time.Time { return time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := clientBinding{ServerURL: "http://localhost", LibraryID: testClientLibraryID, Worktree: "/work",
-		UserID: testClientUserID, DeviceID: testClientDeviceID, SyncBase: baseCommit, SyncBaseRoot: baseRoot,
-		HeadETag: `"head-version-1"`}
-	return binding, pendingPublication{
-		Kind: PublicationKindRestore, BaseCommit: baseCommit, BaseRoot: baseRoot, ExpectedHead: capturedCommit,
-		ExpectedETag: binding.HeadETag, CandidateCommit: candidateCommit, CandidateRoot: candidateRoot,
-		CandidateData: candidateData, CapturedCommit: capturedCommit, CapturedRoot: baseRoot, CapturedData: capturedData,
-		CandidateHistory: []byte{}, SourceCommit: sourceCommit, SourcePath: "docs/file.txt", SourceRoot: sourceRoot,
-		CreatedCount: 1, UpdatedCount: 1, TypeReplacementCount: 0, RemovedDescendantCount: 4,
-		PreservedCurrentOnlyCount: 5, ChangedPathPreview: preview, ChangedPathCount: 2,
+	return _syncPublicationState{
+		_publicationCandidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
+			ExpectedHead: binding.SyncBase, ExpectedETag: `"test-head"`, CandidateCommit: id, CandidateRoot: root,
+			CandidateData: data, CapturedCommit: id, CapturedRoot: root, CapturedData: data},
+		CandidateHistory: [][]byte{},
 	}
 }

@@ -109,12 +109,15 @@ func _startRecursiveMerge(ctx context.Context, db *sql.DB, options bindOptions, 
 	}
 	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
 	protected := protectedDeletion(deleted, tracked)
-	pending := pendingPublication{Kind: PublicationKindSync, BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
-		ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID,
-		CandidateRoot: prepared.root, CandidateData: prepared.candidateData, CapturedCommit: capturedID,
-		CapturedRoot: snapshot.root, CapturedData: capturedData, CandidateHistory: _emptyCandidateHistory,
-		DeletionCount: deleted, TrackedCount: tracked, RequiresDeleteConfirmation: protected}
-	if err := savePendingPublication(ctx, db, binding.Worktree, pending); err != nil {
+	pending := _syncPublicationState{
+		_publicationCandidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
+			ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID,
+			CandidateRoot: prepared.root, CandidateData: prepared.candidateData, CapturedCommit: capturedID,
+			CapturedRoot: snapshot.root, CapturedData: capturedData},
+		_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
+			RequiresDeleteConfirmation: protected},
+	}
+	if err := saveSyncPublication(ctx, db, binding, &pending); err != nil {
 		return err
 	}
 	return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget,
@@ -149,18 +152,14 @@ type _rebuiltPendingMerge struct {
 }
 
 func _rebuildPendingMerge(ctx context.Context, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	pending pendingPublication, budget *_replayBudget) (_rebuiltPendingMerge, error) {
-	sequence, err := _pendingMergeSequence(pending, binding)
-	if err != nil || len(sequence) == 0 {
-		return _rebuiltPendingMerge{}, errors.Join(errors.New("pending recursive merge candidate is invalid"), err)
+	pending _syncPublicationState, budget *_replayBudget) (_rebuiltPendingMerge, error) {
+	sequence := pending.mergeSequence
+	if len(sequence) == 0 {
+		return _rebuiltPendingMerge{}, errors.New("pending recursive merge candidate is invalid")
 	}
 	working := snapshot
 	baseCommit, baseRoot, localRoot := binding.SyncBase, binding.SyncBaseRoot, pending.CapturedRoot
-	localSeedID := pending.CapturedCommit
-	localSeed, err := object.VerifyCommit(pending.CapturedData, localSeedID)
-	if err != nil || localSeed.AuthorUserID != binding.UserID || localSeed.DeviceID != binding.DeviceID || localSeed.Root != localRoot {
-		return _rebuiltPendingMerge{}, errors.New("pending captured conflict-name seed is invalid")
-	}
+	localSeedID, localSeed := pending.CapturedCommit, pending.captured
 	synthesized := make(map[string]scannedObject)
 	lineage := _capturedFileLineage(snapshot.paths)
 	var paths []checkoutPath

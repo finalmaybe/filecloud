@@ -1,11 +1,9 @@
 package clientapp
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,28 +21,11 @@ import (
 )
 
 const (
-	syncRecoveryPrefix        = ".filecloud-internal-sync-"
-	syncTombstonePrefix       = ".filecloud-internal-sync-trash-"
-	maxSyncParentWalk         = 1024
-	maxSyncJournalRows        = 1 << 20
-	deleteCandidatePrefixLen  = 12
-	_maxCandidateCommitBytes  = 64 << 10
-	_maxCandidateHistoryBytes = 8 + maxSyncParentWalk*(_maxCandidateCommitBytes+4)
-)
-
-var (
-	_candidateHistoryMagic = [4]byte{'F', 'C', 'H', '1'}
-	_emptyCandidateHistory = []byte{'F', 'C', 'H', '1', 0, 0, 0, 0}
-)
-
-// PublicationKind identifies the workflow that owns a pending publication.
-type PublicationKind string
-
-const (
-	// PublicationKindSync identifies an ordinary synchronization publication.
-	PublicationKindSync PublicationKind = "sync"
-	// PublicationKindRestore identifies a history restore publication.
-	PublicationKindRestore PublicationKind = "restore"
+	syncRecoveryPrefix       = ".filecloud-internal-sync-"
+	syncTombstonePrefix      = ".filecloud-internal-sync-trash-"
+	maxSyncParentWalk        = 1024
+	maxSyncJournalRows       = 1 << 20
+	deleteCandidatePrefixLen = 12
 )
 
 type _publicationDispatchMode uint8
@@ -53,132 +34,6 @@ const (
 	_publicationDispatchResume _publicationDispatchMode = iota
 	_publicationDispatchStart
 )
-
-type pendingPublication struct {
-	Kind                                             PublicationKind
-	BaseCommit, BaseRoot, ExpectedHead, ExpectedETag string
-	CandidateCommit, CandidateRoot                   string
-	CandidateData                                    []byte
-	CapturedCommit, CapturedRoot                     string
-	CapturedData, CandidateHistory                   []byte
-	DeletionCount, TrackedCount                      int64
-	RequiresDeleteConfirmation                       bool
-	DeleteConfirmed                                  bool
-	LegacyRevalidationRequired                       bool
-	SourceCommit, SourcePath, SourceRoot             string
-	CreatedCount, UpdatedCount                       int64
-	TypeReplacementCount, RemovedDescendantCount     int64
-	PreservedCurrentOnlyCount                        int64
-	ChangedPathPreview                               []byte
-	ChangedPathCount                                 int64
-	PreviewTruncated, RestoreConfirmed               bool
-}
-
-const _pendingPublicationWhere = `worktree = ? AND publication_kind = ? AND base_commit = ? AND base_root = ? AND expected_head = ?
-	AND expected_etag = ? AND candidate_commit = ? AND candidate_root = ? AND candidate_data = ?
-	AND captured_commit = ? AND captured_root = ? AND captured_data = ? AND candidate_history = ?
-	AND deletion_count = ? AND tracked_count = ? AND requires_delete_confirmation = ? AND delete_confirmed = ?
-	AND legacy_revalidation_required = ? AND source_commit = ? AND source_path = ? AND source_root = ?
-	AND created_count = ? AND updated_count = ? AND type_replacement_count = ? AND removed_descendant_count = ?
-	AND preserved_current_only_count = ? AND changed_path_preview = ? AND changed_path_count = ?
-	AND preview_truncated = ? AND restore_confirmed = ?`
-
-type _pendingPublicationExecer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-func _pendingPublicationArgs(worktree string, value pendingPublication) []any {
-	if value.Kind == PublicationKindSync && value.ChangedPathPreview == nil {
-		value.ChangedPathPreview = []byte(_emptyRestorePreview)
-	}
-	return []any{worktree, value.Kind, value.BaseCommit, value.BaseRoot, value.ExpectedHead, value.ExpectedETag,
-		value.CandidateCommit, value.CandidateRoot, value.CandidateData, value.CapturedCommit, value.CapturedRoot,
-		value.CapturedData, value.CandidateHistory, value.DeletionCount, value.TrackedCount,
-		value.RequiresDeleteConfirmation, value.DeleteConfirmed, value.LegacyRevalidationRequired,
-		value.SourceCommit, value.SourcePath, value.SourceRoot, value.CreatedCount, value.UpdatedCount,
-		value.TypeReplacementCount, value.RemovedDescendantCount, value.PreservedCurrentOnlyCount,
-		value.ChangedPathPreview, value.ChangedPathCount, value.PreviewTruncated, value.RestoreConfirmed}
-}
-
-func _execPendingPublicationCAS(ctx context.Context, execer _pendingPublicationExecer, statement string, statementArgs []any,
-	worktree string, old pendingPublication, changedMessage string) error {
-	result, err := execer.ExecContext(ctx, statement+" WHERE "+_pendingPublicationWhere,
-		append(statementArgs, _pendingPublicationArgs(worktree, old)...)...)
-	if err != nil {
-		return err
-	}
-	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-		return errors.Join(errors.New(changedMessage), err)
-	}
-	return nil
-}
-
-func _deletePendingPublication(ctx context.Context, execer _pendingPublicationExecer, worktree string,
-	old pendingPublication, changedMessage string) error {
-	return _execPendingPublicationCAS(ctx, execer, "DELETE FROM pending_publications", nil, worktree, old, changedMessage)
-}
-
-func _assertPendingPublication(ctx context.Context, execer _pendingPublicationExecer, worktree string,
-	old pendingPublication) error {
-	return _execPendingPublicationCAS(ctx, execer, "UPDATE pending_publications SET worktree = worktree", nil,
-		worktree, old, "pending publication changed before remote publication")
-}
-
-func _encodeCandidateHistory(commits [][]byte) ([]byte, error) {
-	if len(commits) > maxSyncParentWalk {
-		return nil, errors.New("candidate history exceeds synchronization budget")
-	}
-	size := 8
-	for _, data := range commits {
-		if len(data) == 0 || len(data) > _maxCandidateCommitBytes || size > _maxCandidateHistoryBytes-4-len(data) {
-			return nil, errors.New("candidate history metadata exceeds synchronization budget")
-		}
-		size += 4 + len(data)
-	}
-	result := make([]byte, size)
-	copy(result, _candidateHistoryMagic[:])
-	binary.BigEndian.PutUint32(result[4:8], uint32(len(commits)))
-	offset := 8
-	for _, data := range commits {
-		binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(data)))
-		offset += 4
-		copy(result[offset:], data)
-		offset += len(data)
-	}
-	return result, nil
-}
-
-func _decodeCandidateHistory(data []byte) ([][]byte, error) {
-	if len(data) < 8 || len(data) > _maxCandidateHistoryBytes || !bytes.Equal(data[:4], _candidateHistoryMagic[:]) {
-		return nil, errors.New("candidate history has an invalid encoding")
-	}
-	count := binary.BigEndian.Uint32(data[4:8])
-	if count > maxSyncParentWalk {
-		return nil, errors.New("candidate history exceeds synchronization budget")
-	}
-	result := make([][]byte, 0, int(count))
-	offset := 8
-	for range count {
-		if len(data)-offset < 4 {
-			return nil, errors.New("candidate history is truncated")
-		}
-		size := binary.BigEndian.Uint32(data[offset : offset+4])
-		offset += 4
-		if size == 0 || size > _maxCandidateCommitBytes || uint64(size) > uint64(len(data)-offset) {
-			return nil, errors.New("candidate history contains an invalid metadata length")
-		}
-		result = append(result, data[offset:offset+int(size)])
-		offset += int(size)
-	}
-	if offset != len(data) {
-		return nil, errors.New("candidate history has trailing data")
-	}
-	canonical, err := _encodeCandidateHistory(result)
-	if err != nil || !bytes.Equal(canonical, data) {
-		return nil, errors.New("candidate history is not canonical")
-	}
-	return result, nil
-}
 
 type syncRerunError struct{ cause error }
 
@@ -226,19 +81,12 @@ func syncRecoveryPromotionCASArgs(value syncRecoveryPromotion) []any {
 	return []any{value.worktree, value.recoveryPath, value.sourcePath, value.currentActionID, value.rollbackActionID}
 }
 
-func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, stdout io.Writer, config libraryClientConfig) error {
-	budget := _newReplayBudget()
-	checkout, err := loadPendingCheckout(ctx, db, binding.ServerURL, binding.LibraryID, binding.Worktree)
-	if err != nil {
-		return err
-	}
+func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, checkout *pendingCheckout,
+	pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig) error {
 	if checkout != nil {
 		return continueSyncCheckout(ctx, db, options, binding, *checkout, stdout, config)
 	}
-	pending, err := loadPendingPublication(ctx, db, binding.Worktree)
-	if err != nil {
-		return err
-	}
+	budget := _newReplayBudget()
 	if options.confirmDeleteSet && pending == nil {
 		return errors.New("--confirm-delete requires a protected pending deletion candidate for this worktree")
 	}
@@ -255,7 +103,7 @@ func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding c
 		return errors.New("bound library Head is empty")
 	}
 	if pending != nil {
-		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, *pending, stdout, config, budget,
+		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget,
 			_publicationDispatchResume)
 	}
 
@@ -285,192 +133,24 @@ func syncLibrary(ctx context.Context, db *sql.DB, options bindOptions, binding c
 		}
 		deleted, tracked := deletionStats(options.scanConfig.trackedPaths, snapshot.paths)
 		protected := protectedDeletion(deleted, tracked)
-		pending = &pendingPublication{Kind: PublicationKindSync, BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
-			ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: id, CandidateRoot: snapshot.root,
-			CandidateData: data, CapturedCommit: id, CapturedRoot: snapshot.root, CapturedData: data,
-			CandidateHistory: _emptyCandidateHistory, DeletionCount: deleted, TrackedCount: tracked,
-			RequiresDeleteConfirmation: protected}
-		if err := savePendingPublication(ctx, db, binding.Worktree, *pending); err != nil {
+		candidate := _syncPublicationState{
+			_publicationCandidate: _publicationCandidate{BaseCommit: binding.SyncBase, BaseRoot: binding.SyncBaseRoot,
+				ExpectedHead: *head.CommitID, ExpectedETag: head.ETag, CandidateCommit: id, CandidateRoot: snapshot.root,
+				CandidateData: data, CapturedCommit: id, CapturedRoot: snapshot.root, CapturedData: data},
+			_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
+				RequiresDeleteConfirmation: protected},
+		}
+		if err := saveSyncPublication(ctx, db, binding, &candidate); err != nil {
 			return err
 		}
-		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, *pending, stdout, config, budget,
+		return dispatchPendingPublication(ctx, db, options, binding, snapshot, head, candidate, stdout, config, budget,
 			_publicationDispatchStart)
 	}
 }
 
-func loadPendingPublication(ctx context.Context, db *sql.DB, worktree string) (*pendingPublication, error) {
-	var value pendingPublication
-	var candidateLength, capturedLength, historyLength, previewLength int
-	err := db.QueryRowContext(ctx, `SELECT publication_kind, base_commit, base_root, expected_head, expected_etag, candidate_commit, candidate_root,
-		length(candidate_data), CASE WHEN length(candidate_data) BETWEEN 1 AND 65536 THEN candidate_data END,
-		captured_commit, captured_root, length(captured_data),
-		CASE WHEN length(captured_data) BETWEEN 1 AND 65536 THEN captured_data END,
-		length(candidate_history), CASE WHEN length(candidate_history) = 0 OR length(candidate_history) BETWEEN 8 AND 67112968 THEN candidate_history END,
-		deletion_count, tracked_count, requires_delete_confirmation, delete_confirmed, legacy_revalidation_required,
-		CASE WHEN length(source_commit) <= 64 THEN source_commit END,
-		CASE WHEN length(source_path) <= 1024 THEN source_path END,
-		CASE WHEN length(source_root) <= 64 THEN source_root END,
-		created_count, updated_count, type_replacement_count, removed_descendant_count, preserved_current_only_count,
-		length(changed_path_preview), CASE WHEN length(changed_path_preview) BETWEEN 8 AND `+strconv.Itoa(_restorePreviewMaxBytes)+` THEN changed_path_preview END,
-		changed_path_count, preview_truncated, restore_confirmed
-		FROM pending_publications WHERE worktree = ?`, worktree).Scan(
-		&value.Kind, &value.BaseCommit, &value.BaseRoot, &value.ExpectedHead, &value.ExpectedETag, &value.CandidateCommit,
-		&value.CandidateRoot, &candidateLength, &value.CandidateData, &value.CapturedCommit, &value.CapturedRoot,
-		&capturedLength, &value.CapturedData, &historyLength, &value.CandidateHistory, &value.DeletionCount,
-		&value.TrackedCount, &value.RequiresDeleteConfirmation, &value.DeleteConfirmed, &value.LegacyRevalidationRequired,
-		&value.SourceCommit, &value.SourcePath, &value.SourceRoot, &value.CreatedCount, &value.UpdatedCount,
-		&value.TypeReplacementCount, &value.RemovedDescendantCount, &value.PreservedCurrentOnlyCount,
-		&previewLength, &value.ChangedPathPreview, &value.ChangedPathCount, &value.PreviewTruncated, &value.RestoreConfirmed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read pending publication: %w", err)
-	}
-	if candidateLength != len(value.CandidateData) || capturedLength != len(value.CapturedData) ||
-		historyLength != len(value.CandidateHistory) || previewLength != len(value.ChangedPathPreview) {
-		return nil, errors.New("pending publication metadata exceeds synchronization budget")
-	}
-	if historyLength == 0 && value.CandidateHistory == nil {
-		value.CandidateHistory = []byte{}
-	}
-	if value.Kind == PublicationKindRestore {
-		if err := validateRestorePublicationFields(value); err != nil {
-			return nil, fmt.Errorf("validate restore publication: %w", err)
-		}
-	} else if value.Kind == PublicationKindSync {
-		if !isEmptyRestoreFields(value) {
-			return nil, errors.New("sync publication contains restore state")
-		}
-	} else {
-		return nil, fmt.Errorf("unsupported pending publication kind %q", value.Kind)
-	}
-	return &value, nil
-}
-
-func savePendingPublication(ctx context.Context, execer _pendingPublicationExecer, worktree string, value pendingPublication) error {
-	if value.Kind == PublicationKindSync && value.ChangedPathPreview == nil {
-		value.ChangedPathPreview = []byte(_emptyRestorePreview)
-	}
-	if value.Kind == PublicationKindRestore && value.CandidateHistory == nil {
-		value.CandidateHistory = []byte{}
-	}
-	if value.Kind == PublicationKindRestore {
-		if err := validateRestorePublicationFields(value); err != nil {
-			return fmt.Errorf("validate restore publication: %w", err)
-		}
-	} else if value.Kind != PublicationKindSync {
-		return fmt.Errorf("unsupported pending publication kind %q", value.Kind)
-	}
-	_, err := execer.ExecContext(ctx, `INSERT INTO pending_publications(worktree, publication_kind, base_commit, base_root, expected_head,
-		expected_etag, candidate_commit, candidate_root, candidate_data, captured_commit, captured_root, captured_data,
-		candidate_history, deletion_count, tracked_count, requires_delete_confirmation, delete_confirmed,
-		legacy_revalidation_required, source_commit, source_path, source_root, created_count, updated_count,
-		type_replacement_count, removed_descendant_count, preserved_current_only_count, changed_path_preview,
-		changed_path_count, preview_truncated, restore_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, worktree,
-		value.Kind, value.BaseCommit, value.BaseRoot, value.ExpectedHead, value.ExpectedETag, value.CandidateCommit,
-		value.CandidateRoot, value.CandidateData, value.CapturedCommit, value.CapturedRoot, value.CapturedData,
-		value.CandidateHistory, value.DeletionCount, value.TrackedCount, value.RequiresDeleteConfirmation,
-		value.DeleteConfirmed, value.LegacyRevalidationRequired, value.SourceCommit, value.SourcePath, value.SourceRoot,
-		value.CreatedCount, value.UpdatedCount, value.TypeReplacementCount, value.RemovedDescendantCount,
-		value.PreservedCurrentOnlyCount, value.ChangedPathPreview, value.ChangedPathCount, value.PreviewTruncated,
-		value.RestoreConfirmed)
-	if err != nil {
-		return fmt.Errorf("save pending publication: %w", err)
-	}
-	return nil
-}
-
-type _pendingMergeCommit struct {
-	id     string
-	data   []byte
-	commit object.Commit
-}
-
-func _pendingMergeSequence(value pendingPublication, binding clientBinding) ([]_pendingMergeCommit, error) {
-	if len(value.CapturedData) == 0 || len(value.CapturedData) > _maxCandidateCommitBytes ||
-		len(value.CandidateData) == 0 || len(value.CandidateData) > _maxCandidateCommitBytes {
-		return nil, errors.New("pending publication commit metadata exceeds synchronization budget")
-	}
-	captured, err := object.VerifyCommit(value.CapturedData, value.CapturedCommit)
-	capturedLocal := len(captured.Parents) == 1 && captured.Parents[0] == binding.SyncBase
-	capturedMerge := len(captured.Parents) == 2 && captured.Parents[0] != captured.Parents[1] &&
-		captured.Parents[0] != value.CapturedCommit && captured.Parents[1] != value.CapturedCommit
-	if err != nil || captured.AuthorUserID != binding.UserID || captured.DeviceID != binding.DeviceID ||
-		captured.Root != value.CapturedRoot || (!capturedLocal && !capturedMerge) {
-		return nil, errors.New("pending publication captured commit is invalid")
-	}
-	history, err := _decodeCandidateHistory(value.CandidateHistory)
-	if err != nil {
-		return nil, err
-	}
-	candidate, err := object.VerifyCommit(value.CandidateData, value.CandidateCommit)
-	if err != nil || candidate.AuthorUserID != binding.UserID || candidate.DeviceID != binding.DeviceID ||
-		candidate.Root != value.CandidateRoot {
-		return nil, errors.New("pending publication candidate commit is invalid")
-	}
-	sequence := make([]_pendingMergeCommit, 0, len(history)+2)
-	if capturedMerge {
-		sequence = append(sequence, _pendingMergeCommit{id: value.CapturedCommit, data: value.CapturedData, commit: captured})
-	}
-	if value.CandidateCommit == value.CapturedCommit {
-		if len(history) != 0 || !bytes.Equal(value.CandidateData, value.CapturedData) ||
-			(capturedLocal && (value.BaseCommit != binding.SyncBase || value.BaseRoot != binding.SyncBaseRoot ||
-				value.ExpectedHead != binding.SyncBase)) || (capturedMerge && captured.Parents[0] != value.ExpectedHead) {
-			return nil, errors.New("pending local publication has an invalid history")
-		}
-		return sequence, nil
-	}
-	if len(history)+len(sequence)+1 > maxSyncParentWalk {
-		return nil, errors.New("pending publication merge history exceeds synchronization budget")
-	}
-	seen := map[string]bool{value.CapturedCommit: true}
-	if capturedMerge {
-		seen[captured.Parents[0]] = true
-	}
-	previous := value.CapturedCommit
-	for index, data := range append(history, value.CandidateData) {
-		id := object.ID(data)
-		commit, verifyErr := object.VerifyCommit(data, id)
-		if verifyErr != nil || commit.AuthorUserID != binding.UserID || commit.DeviceID != binding.DeviceID ||
-			len(commit.Parents) != 2 || commit.Parents[1] != previous || seen[id] || seen[commit.Parents[0]] {
-			return nil, fmt.Errorf("pending publication candidate chain is not linked to the binding Sync Base: merge history entry %d is invalid", index)
-		}
-		if index == len(history) && id != value.CandidateCommit {
-			return nil, errors.New("pending publication current candidate does not match its history")
-		}
-		seen[id] = true
-		seen[commit.Parents[0]] = true
-		sequence = append(sequence, _pendingMergeCommit{id: id, data: data, commit: commit})
-		previous = id
-	}
-	if sequence[len(sequence)-1].commit.Parents[0] != value.ExpectedHead {
-		return nil, errors.New("pending publication candidate does not match expected Head")
-	}
-	if len(sequence) > 1 && value.BaseCommit != sequence[len(sequence)-2].commit.Parents[0] ||
-		len(sequence) == 1 && !capturedMerge && value.BaseCommit != binding.SyncBase {
-		return nil, errors.New("pending publication Base does not match merge history")
-	}
-	return sequence, nil
-}
-
-func verifyPendingPublication(value pendingPublication, binding clientBinding) error {
-	if _, err := _pendingMergeSequence(value, binding); err != nil || value.DeletionCount < 0 ||
-		value.TrackedCount < value.DeletionCount || value.DeleteConfirmed && !value.RequiresDeleteConfirmation ||
-		(value.LegacyRevalidationRequired && (value.DeletionCount != 0 || value.TrackedCount != 0 ||
-			value.RequiresDeleteConfirmation || value.DeleteConfirmed)) ||
-		(!value.LegacyRevalidationRequired && value.RequiresDeleteConfirmation != protectedDeletion(value.DeletionCount, value.TrackedCount)) {
-		return errors.Join(errors.New("pending publication is corrupt or does not match the binding"), err)
-	}
-	return nil
-}
-
-func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, value pendingPublication, binding clientBinding,
+func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, value _syncPublicationState, binding clientBinding,
 	budget *_replayBudget) error {
-	sequence, err := _pendingMergeSequence(value, binding)
-	if err != nil {
-		return err
-	}
+	sequence := value.mergeSequence
 	if len(sequence) == 0 {
 		return nil
 	}
@@ -521,36 +201,30 @@ func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, va
 }
 
 func dispatchPendingPublication(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending pendingPublication, stdout io.Writer, config libraryClientConfig, budget *_replayBudget,
+	head remoteHead, pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget,
 	mode _publicationDispatchMode) error {
-	switch pending.Kind {
-	case PublicationKindRestore:
+	switch pending := pending.(type) {
+	case _restorePublicationState:
 		return dispatchRestorePublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget, mode)
-	case PublicationKindSync:
-	default:
-		return fmt.Errorf("unsupported pending publication kind %q", pending.Kind)
-	}
-	switch mode {
-	case _publicationDispatchStart:
-		if err := verifyPendingPublication(pending, binding); err != nil {
-			return err
+	case _syncPublicationState:
+		switch mode {
+		case _publicationDispatchResume:
+			return resumeSyncPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
+		case _publicationDispatchStart:
+		default:
+			return errors.New("pending publication dispatcher has an invalid mode")
 		}
 		if pending.RequiresDeleteConfirmation && !pending.DeleteConfirmed {
 			return deletionConfirmationError(pending)
 		}
 		return uploadAndPublishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
-	case _publicationDispatchResume:
-		return resumeSyncPublication(ctx, db, options, binding, snapshot, head, pending, stdout, config, budget)
 	default:
-		return errors.New("pending publication dispatcher has an invalid mode")
+		return errors.New("unsupported pending publication kind")
 	}
 }
 
 func resumeSyncPublication(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending pendingPublication, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
-	if err := verifyPendingPublication(pending, binding); err != nil {
-		return err
-	}
+	head remoteHead, pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
 	if options.confirmDeleteSet && !pending.RequiresDeleteConfirmation && !pending.LegacyRevalidationRequired {
 		return errors.New("--confirm-delete requires a protected pending deletion candidate for this worktree")
 	}
@@ -592,15 +266,9 @@ func resumeSyncPublication(ctx context.Context, db *sql.DB, options bindOptions,
 			return errors.New("worktree changed after legacy pending publication was created; stale candidate discarded, rerun sync")
 		}
 		deleted, tracked := deletionStats(options.scanConfig.trackedPaths, snapshot.paths)
-		protected := protectedDeletion(deleted, tracked)
-		if err := _execPendingPublicationCAS(ctx, db, `UPDATE pending_publications SET deletion_count = ?, tracked_count = ?,
-			requires_delete_confirmation = ?, delete_confirmed = 0, legacy_revalidation_required = 0`,
-			[]any{deleted, tracked, protected}, binding.Worktree, pending,
-			"legacy pending publication changed during revalidation"); err != nil {
-			return fmt.Errorf("revalidate legacy pending publication: %w", err)
+		if err := revalidateLegacySyncPublication(ctx, db, binding.Worktree, &pending, deleted, tracked); err != nil {
+			return err
 		}
-		pending.DeletionCount, pending.TrackedCount = deleted, tracked
-		pending.RequiresDeleteConfirmation, pending.DeleteConfirmed, pending.LegacyRevalidationRequired = protected, false, false
 	}
 	if snapshot.root != pending.CapturedRoot {
 		if err := discardPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
@@ -620,28 +288,17 @@ func resumeSyncPublication(ctx context.Context, db *sql.DB, options bindOptions,
 		if len(options.confirmDelete) != deleteCandidatePrefixLen || options.confirmDelete != pending.CandidateCommit[:deleteCandidatePrefixLen] {
 			return errors.New("--confirm-delete must exactly match the 12-character prefix of this worktree's protected candidate")
 		}
-		if err := _execPendingPublicationCAS(ctx, db, "UPDATE pending_publications SET delete_confirmed = 1", nil,
-			binding.Worktree, pending, "protected deletion candidate changed before confirmation"); err != nil {
-			return fmt.Errorf("confirm pending deletion: %w", err)
+		if err := confirmSyncPublication(ctx, db, binding.Worktree, &pending); err != nil {
+			return err
 		}
-		pending.DeleteConfirmed = true
 	} else if options.confirmDeleteSet && (len(options.confirmDelete) != deleteCandidatePrefixLen || options.confirmDelete != pending.CandidateCommit[:deleteCandidatePrefixLen]) {
 		return errors.New("--confirm-delete must exactly match the 12-character prefix of this worktree's protected candidate")
 	}
 	return uploadAndPublishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
 }
 
-func refreshPendingETag(ctx context.Context, db *sql.DB, worktree string, pending *pendingPublication, etag string) error {
-	if err := _execPendingPublicationCAS(ctx, db, "UPDATE pending_publications SET expected_etag = ?", []any{etag},
-		worktree, *pending, "pending publication changed before ETag refresh"); err != nil {
-		return fmt.Errorf("refresh pending publication ETag: %w", err)
-	}
-	pending.ExpectedETag = etag
-	return nil
-}
-
 func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, head remoteHead, old pendingPublication, stdout io.Writer, config libraryClientConfig,
+	snapshot worktreeSnapshot, head remoteHead, old _syncPublicationState, stdout io.Writer, config libraryClientConfig,
 	budget *_replayBudget) error {
 	if head.CommitID == nil {
 		return errors.New("remote merge Head is empty")
@@ -665,13 +322,8 @@ func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bind
 	if err != nil || remote.AuthorUserID != binding.UserID {
 		return errors.Join(errors.New("verify latest Head for merge"), err)
 	}
-	localSeed, err := object.VerifyCommit(old.CandidateData, old.CandidateCommit)
-	if err != nil || localSeed.AuthorUserID != binding.UserID || localSeed.DeviceID != binding.DeviceID ||
-		localSeed.Root != old.CandidateRoot {
-		return errors.New("pending Candidate conflict-name seed is invalid")
-	}
 	prepared, err := _prepareRecursiveMerge(ctx, options, rebuilt.snapshot, base.Root, old.CandidateRoot, remote.Root,
-		*head.CommitID, old.CandidateCommit, localSeed, binding, config, budget)
+		*head.CommitID, old.CandidateCommit, old.candidate, binding, config, budget)
 	if err != nil {
 		return err
 	}
@@ -684,34 +336,21 @@ func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bind
 		return fmt.Errorf("verify replacement Base snapshot: %w", err)
 	}
 	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
-	history, err := _decodeCandidateHistory(old.CandidateHistory)
-	if err != nil {
-		return err
+	next := _syncPublicationState{
+		_publicationCandidate: _publicationCandidate{BaseCommit: old.ExpectedHead, BaseRoot: base.Root, ExpectedHead: *head.CommitID,
+			ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID, CandidateRoot: prepared.root,
+			CandidateData: prepared.candidateData, CapturedCommit: old.CapturedCommit, CapturedRoot: old.CapturedRoot,
+			CapturedData: old.CapturedData},
+		_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
+			RequiresDeleteConfirmation: protectedDeletion(deleted, tracked)},
+		CandidateHistory: old.CandidateHistory,
 	}
 	if old.CandidateCommit != old.CapturedCommit {
-		history = append(history, old.CandidateData)
+		history := old.CandidateHistory
+		next.CandidateHistory = append(history[:len(history):len(history)], old.CandidateData)
 	}
-	encodedHistory, err := _encodeCandidateHistory(history)
-	if err != nil {
+	if err := replaceSyncPublication(ctx, db, binding, old, &next); err != nil {
 		return err
-	}
-	next := pendingPublication{Kind: PublicationKindSync, BaseCommit: old.ExpectedHead, BaseRoot: base.Root, ExpectedHead: *head.CommitID,
-		ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID, CandidateRoot: prepared.root,
-		CandidateData: prepared.candidateData, CapturedCommit: old.CapturedCommit, CapturedRoot: old.CapturedRoot,
-		CapturedData: old.CapturedData, CandidateHistory: encodedHistory, DeletionCount: deleted, TrackedCount: tracked,
-		RequiresDeleteConfirmation: protectedDeletion(deleted, tracked)}
-	if err := verifyPendingPublication(next, binding); err != nil {
-		return fmt.Errorf("verify replacement pending publication: %w", err)
-	}
-	if err := _execPendingPublicationCAS(ctx, db, `UPDATE pending_publications SET base_commit = ?, base_root = ?, expected_head = ?,
-		expected_etag = ?, candidate_commit = ?, candidate_root = ?, candidate_data = ?, captured_commit = ?,
-		captured_root = ?, captured_data = ?, candidate_history = ?, deletion_count = ?, tracked_count = ?,
-		requires_delete_confirmation = ?, delete_confirmed = 0, legacy_revalidation_required = 0`,
-		[]any{next.BaseCommit, next.BaseRoot, next.ExpectedHead, next.ExpectedETag, next.CandidateCommit,
-			next.CandidateRoot, next.CandidateData, next.CapturedCommit, next.CapturedRoot, next.CapturedData,
-			next.CandidateHistory, next.DeletionCount, next.TrackedCount, next.RequiresDeleteConfirmation},
-		binding.Worktree, old, "pending publication changed before conflict replacement"); err != nil {
-		return fmt.Errorf("replace pending publication after Head conflict: %w", err)
 	}
 	if config.afterPendingReplacement != nil {
 		if err := config.afterPendingReplacement(); err != nil {
@@ -725,7 +364,7 @@ func replacePendingForTrivialMerge(ctx context.Context, db *sql.DB, options bind
 	return _uploadAndPublishPrepared(ctx, db, options, binding, snapshot, next, directories, stdout, config, budget)
 }
 
-func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending pendingPublication) error {
+func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending _pendingPublicationState) error {
 	if err := _deletePendingPublication(ctx, db, worktree, pending, "pending publication changed before discard"); err != nil {
 		return fmt.Errorf("discard changed pending publication: %w", err)
 	}
@@ -733,7 +372,7 @@ func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string,
 }
 
 func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	head remoteHead, pending pendingPublication) error {
+	head remoteHead, pending _syncPublicationState) error {
 	cacheRoot, err := openVerifiedCacheRoot(options.clientDir)
 	if err != nil {
 		return err
@@ -786,7 +425,7 @@ func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOpti
 }
 
 func uploadAndPublishPending(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	pending pendingPublication, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+	pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
 	if pending.LegacyRevalidationRequired {
 		return errors.New("legacy pending publication requires deletion revalidation before publication")
 	}
@@ -802,7 +441,7 @@ func uploadAndPublishPending(ctx context.Context, db *sql.DB, options bindOption
 }
 
 func _uploadAndPublishPrepared(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	snapshot worktreeSnapshot, pending pendingPublication, directories []scannedObject, stdout io.Writer,
+	snapshot worktreeSnapshot, pending _syncPublicationState, directories []scannedObject, stdout io.Writer,
 	config libraryClientConfig, budget *_replayBudget) error {
 	if err := uploadSnapshot(ctx, options, snapshot); err != nil {
 		return err
@@ -826,11 +465,7 @@ func _uploadAndPublishPrepared(ctx context.Context, db *sql.DB, options bindOpti
 	return publishPending(ctx, db, options, binding, snapshot, pending, stdout, config, budget)
 }
 
-func _uploadCandidateHistory(ctx context.Context, options bindOptions, encoded []byte) error {
-	history, err := _decodeCandidateHistory(encoded)
-	if err != nil {
-		return err
-	}
+func _uploadCandidateHistory(ctx context.Context, options bindOptions, history [][]byte) error {
 	if len(history) == 0 {
 		return nil
 	}
@@ -881,7 +516,7 @@ func protectedDeletion(deleted, tracked int64) bool {
 	return deleted >= threshold
 }
 
-func deletionConfirmationError(pending pendingPublication) error {
+func deletionConfirmationError(pending _syncPublicationState) error {
 	return &deleteConfirmationRequiredError{candidate: pending.CandidateCommit, deleted: pending.DeletionCount, tracked: pending.TrackedCount}
 }
 
@@ -935,7 +570,7 @@ func _remoteCommitDescendsFrom(ctx context.Context, options bindOptions, head, a
 }
 
 func transitionPublishedSuccessor(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending pendingPublication, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+	head remoteHead, pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
 	if head.CommitID == nil {
 		return errors.New("remote successor Head is empty")
 	}
@@ -1001,14 +636,16 @@ func transitionPublishedSuccessor(ctx context.Context, db *sql.DB, options bindO
 }
 
 func publishPending(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	pending pendingPublication, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+	pending _pendingPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
+	candidate := pending.publicationCandidate()
+	syncState, isSync := pending.(_syncPublicationState)
 	if config.beforeHeadCAS != nil {
 		if err := config.beforeHeadCAS(); err != nil {
 			return fmt.Errorf("prepare Head publication: %w", err)
 		}
 	}
 	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
-	if err != nil || verified.root != pending.CapturedRoot {
+	if err != nil || verified.root != candidate.CapturedRoot {
 		return errors.New("worktree changed before Head publication")
 	}
 	current, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
@@ -1018,26 +655,27 @@ func publishPending(ctx context.Context, db *sql.DB, options bindOptions, bindin
 	if current.CommitID == nil {
 		return errors.New("library Head is empty before publication")
 	}
-	if *current.CommitID != pending.ExpectedHead {
+	if *current.CommitID != candidate.ExpectedHead {
 		return dispatchPendingPublication(ctx, db, options, binding, snapshot, current, pending, stdout, config, budget,
 			_publicationDispatchResume)
 	}
-	if current.ETag != pending.ExpectedETag {
-		if pending.Kind == PublicationKindRestore {
+	if current.ETag != candidate.ExpectedETag {
+		if !isSync {
 			return dispatchPendingPublication(ctx, db, options, binding, snapshot, current, pending, stdout, config, budget,
 				_publicationDispatchResume)
 		}
-		if err := refreshPendingETag(ctx, db, binding.Worktree, &pending, current.ETag); err != nil {
+		if err := refreshPendingETag(ctx, db, binding.Worktree, &syncState, current.ETag); err != nil {
 			return err
 		}
+		pending, candidate = syncState, syncState._publicationCandidate
 	}
 	if err := _assertPendingPublication(ctx, db, binding.Worktree, pending); err != nil {
 		return err
 	}
 	var publishErr error
-	if pending.Kind == PublicationKindRestore {
+	if !isSync {
 		conflictingHead, conflict, err := updateRemoteHeadOnce(ctx, options.base, options.libraryID, options.token,
-			pending.ExpectedETag, pending.CandidateCommit)
+			candidate.ExpectedETag, candidate.CandidateCommit)
 		publishErr = err
 		if conflict {
 			observed, scanErr := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
@@ -1049,7 +687,7 @@ func publishPending(ctx context.Context, db *sql.DB, options bindOptions, bindin
 		}
 	} else {
 		_, _, publishErr = updateRemoteHead(ctx, options.base, options.libraryID, options.token,
-			pending.ExpectedETag, pending.CandidateCommit)
+			candidate.ExpectedETag, candidate.CandidateCommit)
 	}
 	published, getErr := getRemoteHead(ctx, options.base, options.libraryID, options.token)
 	if getErr != nil {
@@ -1059,18 +697,18 @@ func publishPending(ctx context.Context, db *sql.DB, options bindOptions, bindin
 	if scanErr != nil {
 		return errors.Join(publishErr, fmt.Errorf("rescan worktree after publish: %w", scanErr))
 	}
-	if published.CommitID != nil && *published.CommitID == pending.CandidateCommit {
+	if published.CommitID != nil && *published.CommitID == candidate.CandidateCommit {
 		return dispatchPendingPublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
 			_publicationDispatchResume)
 	}
-	if published.CommitID != nil && *published.CommitID == pending.ExpectedHead {
-		if published.ETag != pending.ExpectedETag {
-			if pending.Kind == PublicationKindRestore {
+	if published.CommitID != nil && *published.CommitID == candidate.ExpectedHead {
+		if published.ETag != candidate.ExpectedETag {
+			if !isSync {
 				resumeErr := dispatchPendingPublication(ctx, db, options, binding, observed, published, pending, stdout, config, budget,
 					_publicationDispatchResume)
 				return errors.Join(publishErr, resumeErr)
 			}
-			if err := refreshPendingETag(ctx, db, binding.Worktree, &pending, published.ETag); err != nil {
+			if err := refreshPendingETag(ctx, db, binding.Worktree, &syncState, published.ETag); err != nil {
 				return errors.Join(publishErr, err)
 			}
 		}
@@ -1088,7 +726,7 @@ func publishPending(ctx context.Context, db *sql.DB, options bindOptions, bindin
 }
 
 func finalizePublished(ctx context.Context, db *sql.DB, binding clientBinding, snapshot worktreeSnapshot, head remoteHead,
-	pending pendingPublication, stdout io.Writer) error {
+	pending _syncPublicationState, stdout io.Writer) error {
 	if head.CommitID == nil || *head.CommitID != pending.CandidateCommit {
 		return errors.New("published Head does not match pending publication")
 	}
@@ -1125,7 +763,11 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 		if err := clearApplyingCheckout(ctx, db, binding.Worktree); err != nil {
 			return err
 		}
-		return syncLibrary(ctx, db, options, binding, stdout, config)
+		publication, err := loadPendingPublication(ctx, db, binding)
+		if err != nil {
+			return err
+		}
+		return syncLibrary(ctx, db, options, binding, nil, publication, stdout, config)
 	}
 	if pending.ApplyState != "pending" && pending.ApplyState != "applying" {
 		return errors.New("pending checkout has invalid apply state")

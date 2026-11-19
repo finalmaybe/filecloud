@@ -321,7 +321,7 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 
 	directoryPreview := runBlackBoxCLI(t, binary, nil, "library", "restore", "--client-dir", clientB,
 		"--worktree", worktreeB, "--commit", sourceBinding.SyncBase, "--path", "docs")
-	directoryPending := readTestPendingPublication(t, clientB, worktreeB)
+	directoryPending := readTestRestorePublication(t, clientB, worktreeB)
 	if directoryPending.CreatedCount != 1 || directoryPending.UpdatedCount != 3 ||
 		directoryPending.PreservedCurrentOnlyCount != 4 || directoryPending.TypeReplacementCount != 0 ||
 		outputValue(string(directoryPreview), "candidate: ") != directoryPending.CandidateCommit[:deleteCandidatePrefixLen] {
@@ -374,7 +374,7 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	setBlackBoxMtime(t, worktreeB, time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC))
 	rootPreview := runBlackBoxCLI(t, binary, nil, "library", "restore", "--client-dir", clientB,
 		"--worktree", worktreeB, "--commit", sourceBinding.SyncBase, "--path", ".")
-	rootPending := readTestPendingPublication(t, clientB, worktreeB)
+	rootPending := readTestRestorePublication(t, clientB, worktreeB)
 	if rootPending.UpdatedCount != 102 || rootPending.PreservedCurrentOnlyCount != 5 || rootPending.CreatedCount != 3 ||
 		rootPending.TypeReplacementCount != 2 || rootPending.RemovedDescendantCount != 3 || rootPending.ChangedPathCount != 107 ||
 		!rootPending.PreviewTruncated || outputValue(string(rootPreview), "candidate: ") != rootPending.CandidateCommit[:deleteCandidatePrefixLen] ||
@@ -386,9 +386,8 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		outputValue(string(rootPreview), "truncated: ") != "true" {
 		t.Fatalf("built root preview=%s pending=%+v, want 107 changes with a 100-path preview", rootPreview, rootPending)
 	}
-	previewPaths, err := _decodeRestorePreview(rootPending.ChangedPathPreview)
-	if err != nil || len(previewPaths) != _restorePreviewPathLimit {
-		t.Fatalf("built root preview paths=%d err=%v, want %d paths", len(previewPaths), err, _restorePreviewPathLimit)
+	if len(rootPending.ChangedPathPreview) != _restorePreviewPathLimit {
+		t.Fatalf("built root preview paths=%d, want %d paths", len(rootPending.ChangedPathPreview), _restorePreviewPathLimit)
 	}
 	for _, content := range []string{"source-root", "current-root-only"} {
 		if bytes.Contains(rootPreview, []byte(content)) {
@@ -401,8 +400,8 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open built restore candidate for tampering: %v", err)
 	}
-	if _, err := db.ExecContext(t.Context(), "UPDATE pending_publications SET candidate_data = ? WHERE worktree = ?",
-		[]byte("{}"), canonicalTestWorktree(t, worktreeB)); err != nil {
+	if _, err := db.ExecContext(t.Context(), "UPDATE pending_publications SET source_root = ? WHERE worktree = ?",
+		rootPending.CandidateRoot, canonicalTestWorktree(t, worktreeB)); err != nil {
 		t.Fatalf("tamper built restore candidate: %v", errors.Join(err, db.Close()))
 	}
 	if err := db.Close(); err != nil {
@@ -423,7 +422,7 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 
 	rereview := runBlackBoxCLI(t, binary, nil, "library", "restore", "--client-dir", clientB,
 		"--worktree", worktreeB, "--commit", sourceBinding.SyncBase, "--path", ".")
-	rootPending = readTestPendingPublication(t, clientB, worktreeB)
+	rootPending = readTestRestorePublication(t, clientB, worktreeB)
 	if rootPending.CandidateRoot != staleResultRoot ||
 		outputValue(string(rereview), "candidate: ") != rootPending.CandidateCommit[:deleteCandidatePrefixLen] {
 		t.Fatalf("built restore repreviews root=%s output=%q, want root=%s and current candidate prefix",
@@ -833,7 +832,7 @@ type blackBoxRestoreProofInput struct {
 	clientDir string
 	worktree  string
 	scenario  string
-	pending   pendingPublication
+	pending   _restorePublicationState
 	binding   clientBinding
 	confirmed []platformConfirmedInput
 }

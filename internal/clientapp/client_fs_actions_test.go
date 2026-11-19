@@ -599,7 +599,7 @@ func TestPendingPublicationBlobLimits(t *testing.T) {
 			if _, err := db.Exec(statement); err != nil {
 				t.Fatal(err)
 			}
-			if pending, err := loadPendingPublication(t.Context(), db, "/work"); err == nil || pending != nil ||
+			if pending, err := loadPendingPublication(t.Context(), db, clientBinding{Worktree: "/work"}); err == nil || pending != nil ||
 				!strings.Contains(err.Error(), "exceeds synchronization budget") {
 				t.Fatalf("oversized pending load=%+v err=%v", pending, err)
 			}
@@ -730,7 +730,7 @@ func TestPendingPublicationV18ThroughV20CapturedDataMigration(t *testing.T) {
 				FROM pending_publications WHERE worktree=?`, worktree).Scan(&migratedCommit, &migratedRoot, &migratedCandidateData,
 				&capturedData, &history); err != nil || migratedCommit != candidateCommit || migratedRoot != candidateRoot ||
 				!bytes.Equal(migratedCandidateData, candidateData) || !bytes.Equal(capturedData, candidateData) ||
-				!bytes.Equal(history, _emptyCandidateHistory) {
+				string(history) != _emptyCandidateHistory {
 				t.Fatalf("v%d migration got captured=%q/%q data=%x/%x history=%x err=%v, want captured=%q/%q data=%x history=%x err=nil",
 					fixture.version, migratedCommit, migratedRoot, migratedCandidateData, capturedData, history, err,
 					candidateCommit, candidateRoot, candidateData, _emptyCandidateHistory)
@@ -772,9 +772,14 @@ func TestClientV22PendingPublicationMigrationRejectsInvalidRowsAtomically(t *tes
 		t.Fatal(err)
 	}
 
-	readLegacy := func(t *testing.T, db *sql.DB) pendingPublication {
+	type legacyRow struct {
+		_publicationCandidate
+		_syncPublicationFields
+		CandidateHistory []byte
+	}
+	readLegacy := func(t *testing.T, db *sql.DB) legacyRow {
 		t.Helper()
-		var value pendingPublication
+		var value legacyRow
 		if err := db.QueryRow(`SELECT base_commit,base_root,expected_head,expected_etag,candidate_commit,candidate_root,
 			candidate_data,captured_commit,captured_root,captured_data,candidate_history,deletion_count,tracked_count,
 			requires_delete_confirmation,delete_confirmed,legacy_revalidation_required
@@ -828,7 +833,7 @@ func TestClientV22PendingPublicationMigrationRejectsInvalidRowsAtomically(t *tes
 				candidate_commit,candidate_root,candidate_data,captured_commit,captured_root,captured_data,candidate_history,
 				deletion_count,tracked_count,requires_delete_confirmation,delete_confirmed,legacy_revalidation_required)
 				VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,0,0)`, worktree, baseCommit, baseRoot, baseCommit, "etag",
-				candidateCommit, baseRoot, candidateData, candidateCommit, baseRoot, candidateData, _emptyCandidateHistory); err != nil {
+				candidateCommit, baseRoot, candidateData, candidateCommit, baseRoot, candidateData, []byte(_emptyCandidateHistory)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.Exec(test.statement, test.args...); err != nil {

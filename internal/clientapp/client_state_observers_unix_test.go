@@ -60,5 +60,5 @@ func TestClientStateObserversCanonicalizeWorktreeAlias(t *testing.T) {
 	if !errors.Is(err, stopErr) {
 		t.Fatalf("sync before Head publication error=%v, want %v", err, stopErr)
 	}
-	readTestPendingPublication(t, clientDir, aliasWorktree)
+	readTestSyncPublication(t, clientDir, aliasWorktree)
 }

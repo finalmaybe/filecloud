@@ -60,14 +60,14 @@ func TestLibrarySyncBlocksOnUnconfirmedRestoreWithoutMutation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	before := readTestPendingPublication(t, state.clientDir, state.worktree)
+	before := readTestRestorePublication(t, state.clientDir, state.worktree)
 	beforeBinding := readTestBinding(t, state.clientDir, state.worktree)
 	err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir, "--worktree", state.worktree}, nil, io.Discard, io.Discard,
 		libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }})
 	if err == nil || !strings.Contains(err.Error(), "restore --confirm "+before.CandidateCommit[:deleteCandidatePrefixLen]) {
 		t.Fatalf("sync unconfirmed restore error=%v", err)
 	}
-	after := readTestPendingPublication(t, state.clientDir, state.worktree)
+	after := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if after.CandidateCommit != before.CandidateCommit || after.RestoreConfirmed || readTestBinding(t, state.clientDir, state.worktree) != beforeBinding {
 		t.Fatalf("sync changed unconfirmed restore: before=%+v after=%+v binding=%+v", before, after, readTestBinding(t, state.clientDir, state.worktree))
 	}
@@ -88,7 +88,7 @@ func TestLibraryWatchBlocksOnUnconfirmedRestoreWithoutMutation(t *testing.T) {
 
 	err := runLibraryWithConfig(t.Context(), []string{"watch", "--client-dir", state.clientDir,
 		"--worktree", state.worktree, "--interval", "1h"}, nil, io.Discard, io.Discard, config)
-	afterPending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	afterPending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if err == nil || !strings.Contains(err.Error(), "restore --confirm "+pending.CandidateCommit[:deleteCandidatePrefixLen]) ||
 		puts.Load() != 0 || !reflect.DeepEqual(afterPending, pending) {
 		t.Fatalf("watch unconfirmed restore error=%v PUTs=%d before=%+v after=%+v",
@@ -110,10 +110,7 @@ func TestLibraryRestoreRejectsSyncPublicationWithoutMutation(t *testing.T) {
 		"--worktree", state.worktree}, nil, io.Discard, io.Discard, config); err == nil {
 		t.Fatal("sync publication unexpectedly completed")
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
-	if pending.Kind != PublicationKindSync {
-		t.Fatalf("pending publication kind=%q, want sync", pending.Kind)
-	}
+	pending := readTestSyncPublication(t, state.clientDir, state.worktree)
 	config.beforeHeadCAS = nil
 	beforeBinding := readTestBinding(t, state.clientDir, state.worktree)
 	beforeIndex := captureTestPathIndex(t, state.clientDir, state.worktree)
@@ -126,7 +123,7 @@ func TestLibraryRestoreRejectsSyncPublicationWithoutMutation(t *testing.T) {
 			"--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]},
 	} {
 		err := runLibraryWithConfig(t.Context(), args, nil, io.Discard, io.Discard, config)
-		after := readTestPendingPublication(t, state.clientDir, state.worktree)
+		after := readTestSyncPublication(t, state.clientDir, state.worktree)
 		if err == nil || !strings.Contains(err.Error(), "sync publication is pending; run sync first") ||
 			!reflect.DeepEqual(after, pending) || readTestBinding(t, state.clientDir, state.worktree) != beforeBinding ||
 			!reflect.DeepEqual(captureTestPathIndex(t, state.clientDir, state.worktree), beforeIndex) ||
@@ -200,7 +197,7 @@ func TestLibraryRestorePreviewReplaysPersistedCandidateAfterOutputFailure(t *tes
 	if err := runLibraryWithConfig(t.Context(), args, nil, failingWriter{}, io.Discard, config); err == nil {
 		t.Fatal("restore preview output failure succeeded")
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if pending.RestoreConfirmed {
 		t.Fatalf("failed preview output confirmed restore candidate=%+v, want unconfirmed", pending)
 	}
@@ -210,7 +207,7 @@ func TestLibraryRestorePreviewReplaysPersistedCandidateAfterOutputFailure(t *tes
 	if err := runLibraryWithConfig(t.Context(), args, nil, &output, io.Discard, config); err != nil {
 		t.Fatalf("replay persisted restore preview: %v", err)
 	}
-	after := readTestPendingPublication(t, state.clientDir, state.worktree)
+	after := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if !reflect.DeepEqual(after, pending) || !strings.Contains(output.String(), "candidate: "+pending.CandidateCommit[:deleteCandidatePrefixLen]) {
 		t.Fatalf("replayed preview changed candidate: before=%+v after=%+v output=%q", pending, after, output.String())
 	}
@@ -242,7 +239,7 @@ func TestLibraryRestoreUnavailableCASRetriesOnlyAfterHeadResolution(t *testing.T
 	err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir,
 		"--worktree", state.worktree, "--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil,
 		io.Discard, io.Discard, config)
-	confirmed := readTestPendingPublication(t, state.clientDir, state.worktree)
+	confirmed := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if err == nil || headPUTs.Load() != 1 || !confirmed.RestoreConfirmed || confirmed.CandidateCommit != pending.CandidateCommit {
 		t.Fatalf("unavailable restore CAS error=%v head PUTs=%d pending=%+v, want one CAS and fixed confirmed candidate",
 			err, headPUTs.Load(), confirmed)
@@ -308,7 +305,7 @@ func TestLibraryRestoreConfirmedObjectPUTFailuresResumeFixedCandidate(t *testing
 			err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir,
 				"--worktree", state.worktree, "--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil,
 				io.Discard, io.Discard, config)
-			confirmed := readTestPendingPublication(t, state.clientDir, state.worktree)
+			confirmed := readTestRestorePublication(t, state.clientDir, state.worktree)
 			candidatePath := "/v1/libraries/" + testClientLibraryID + "/objects/commits/" + pending.CandidateCommit
 			mu.Lock()
 			firstAttempts := make(map[string]int, len(attempts))
@@ -533,7 +530,7 @@ func TestLibraryRestoreConfirmResumesAlreadyPublishedCandidate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }}
 	restoreState, err := openRestoreClientState(t.Context(), state.clientDir, state.worktree, io.Discard, config)
 	if err != nil {
@@ -618,7 +615,7 @@ func TestLibraryRestoreConfirmationDiscardsStaleHead(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	data, id, err := canonicalCommit(testClientUserID, testOtherDeviceID, pending.CapturedRoot,
 		[]string{pending.ExpectedHead}, func() time.Time { return time.Date(2026, 8, 9, 1, 2, 4, 0, time.UTC) })
 	if err != nil {
@@ -644,7 +641,7 @@ func TestLibraryRestoreConfirmationDiscardsStaleHead(t *testing.T) {
 	}
 }
 
-func TestLibraryRestoreConfirmationDiscardsTamperedPendingWithoutMutation(t *testing.T) {
+func TestLibraryRestoreConfirmationSeparatesCorruptAndStalePending(t *testing.T) {
 	otherPreview, err := _encodeRestorePreview([]string{"other"})
 	if err != nil {
 		t.Fatal(err)
@@ -654,18 +651,19 @@ func TestLibraryRestoreConfirmationDiscardsTamperedPendingWithoutMutation(t *tes
 		name      string
 		statement string
 		args      []any
+		corrupt   bool
 	}{
-		{name: "candidate data", statement: "UPDATE pending_publications SET candidate_data = ? WHERE worktree = ?", args: []any{[]byte("{}")}},
-		{name: "candidate ID", statement: "UPDATE pending_publications SET candidate_commit = ? WHERE worktree = ?", args: []any{otherID}},
-		{name: "result root", statement: "UPDATE pending_publications SET candidate_root = ? WHERE worktree = ?", args: []any{otherID}},
-		{name: "captured data", statement: "UPDATE pending_publications SET captured_data = ? WHERE worktree = ?", args: []any{[]byte("{}")}},
-		{name: "source commit", statement: "UPDATE pending_publications SET source_commit = ? WHERE worktree = ?", args: []any{otherID}},
+		{name: "candidate data", statement: "UPDATE pending_publications SET candidate_data = ? WHERE worktree = ?", args: []any{[]byte("{}")}, corrupt: true},
+		{name: "candidate ID", statement: "UPDATE pending_publications SET candidate_commit = ? WHERE worktree = ?", args: []any{otherID}, corrupt: true},
+		{name: "result root", statement: "UPDATE pending_publications SET candidate_root = ? WHERE worktree = ?", args: []any{otherID}, corrupt: true},
+		{name: "captured data", statement: "UPDATE pending_publications SET captured_data = ? WHERE worktree = ?", args: []any{[]byte("{}")}, corrupt: true},
+		{name: "source commit", statement: "UPDATE pending_publications SET source_commit = ? WHERE worktree = ?", args: []any{otherID}, corrupt: true},
 		{name: "source root", statement: "UPDATE pending_publications SET source_root = ? WHERE worktree = ?", args: []any{otherID}},
 		{name: "statistics", statement: "UPDATE pending_publications SET created_count = updated_count, updated_count = created_count WHERE worktree = ?"},
 		{name: "preview", statement: "UPDATE pending_publications SET changed_path_preview = ? WHERE worktree = ?", args: []any{otherPreview}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			state, _, config := prepareRestoreConfirmationTest(t)
+			state, pending, config := prepareRestoreConfirmationTest(t)
 			before := captureRestoreConfirmationTestState(t, state)
 
 			db, err := openClientDB(filepath.Join(state.clientDir, _clientDatabaseName), false)
@@ -679,16 +677,19 @@ func TestLibraryRestoreConfirmationDiscardsTamperedPendingWithoutMutation(t *tes
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			pending := readTestPendingPublication(t, state.clientDir, state.worktree)
 
 			err = runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir,
 				"--worktree", state.worktree, "--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil,
 				io.Discard, io.Discard, config)
-			if err == nil || !strings.Contains(err.Error(), "stale restore candidate discarded") {
-				t.Fatalf("tampered %s restore confirmation error=%v, want stale candidate discarded", test.name, err)
-			}
 			want := before
-			want.pendingRows = 0
+			message := "validate restore publication"
+			if !test.corrupt {
+				want.pendingRows = 0
+				message = "stale restore candidate discarded"
+			}
+			if err == nil || !strings.Contains(err.Error(), message) {
+				t.Fatalf("tampered %s restore confirmation error=%v, want %q", test.name, err, message)
+			}
 			assertRestoreConfirmationTestState(t, "tampered "+test.name, state, want)
 		})
 	}
@@ -698,18 +699,18 @@ func TestLibraryRestoreConfirmationDiscardsStaleSourceWithoutMutation(t *testing
 	for _, test := range []struct {
 		name      string
 		status    int
-		intercept func(pending pendingPublication, request *http.Request) bool
+		intercept func(pending _restorePublicationState, request *http.Request) bool
 	}{
-		{name: "source commit", intercept: func(pending pendingPublication, request *http.Request) bool {
+		{name: "source commit", intercept: func(pending _restorePublicationState, request *http.Request) bool {
 			return request.URL.Path == "/v1/libraries/"+testClientLibraryID+"/history/"+pending.SourceCommit
 		}},
-		{name: "source directory", intercept: func(pending pendingPublication, request *http.Request) bool {
+		{name: "source directory", intercept: func(pending _restorePublicationState, request *http.Request) bool {
 			return request.URL.Path == "/v1/libraries/"+testClientLibraryID+"/objects/directories/"+pending.SourceRoot
 		}},
-		{name: "captured commit", intercept: func(pending pendingPublication, request *http.Request) bool {
+		{name: "captured commit", intercept: func(pending _restorePublicationState, request *http.Request) bool {
 			return request.URL.Path == "/v1/libraries/"+testClientLibraryID+"/objects/commits/"+pending.ExpectedHead
 		}},
-		{name: "missing source directory", status: http.StatusNotFound, intercept: func(pending pendingPublication, request *http.Request) bool {
+		{name: "missing source directory", status: http.StatusNotFound, intercept: func(pending _restorePublicationState, request *http.Request) bool {
 			return request.URL.Path == "/v1/libraries/"+testClientLibraryID+"/objects/directories/"+pending.SourceRoot
 		}},
 	} {
@@ -796,13 +797,13 @@ func TestLibraryRestoreConfirmationRetainsPendingOnTransientSourceFailure(t *tes
 					t.Fatal(err)
 				}
 			}
-			beforePending := readTestPendingPublication(t, state.clientDir, state.worktree)
+			beforePending := readTestRestorePublication(t, state.clientDir, state.worktree)
 			before := captureRestoreConfirmationTestState(t, state)
 
 			err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir,
 				"--worktree", state.worktree, "--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil,
 				io.Discard, io.Discard, config)
-			afterPending := readTestPendingPublication(t, state.clientDir, state.worktree)
+			afterPending := readTestRestorePublication(t, state.clientDir, state.worktree)
 			if err == nil || !reflect.DeepEqual(afterPending, beforePending) || afterPending.RestoreConfirmed != test.confirmed {
 				t.Fatalf("transient %s confirmation pending error=%v got=%+v, want nonnil error and pending=%+v",
 					test.name, err, afterPending, beforePending)
@@ -912,7 +913,7 @@ type restoreConfirmationTestState struct {
 	pendingRows int
 }
 
-func prepareRestoreConfirmationTest(t *testing.T) (importedBinding, pendingPublication, libraryClientConfig) {
+func prepareRestoreConfirmationTest(t *testing.T) (importedBinding, _restorePublicationState, libraryClientConfig) {
 	t.Helper()
 	state := newImportedBinding(t)
 	sourceCommit := state.binding.SyncBase
@@ -925,10 +926,10 @@ func prepareRestoreConfirmationTest(t *testing.T) (importedBinding, pendingPubli
 		"--worktree", state.worktree, "--commit", sourceCommit, "--path", "local"}, nil, io.Discard, io.Discard, config); err != nil {
 		t.Fatal(err)
 	}
-	return state, readTestPendingPublication(t, state.clientDir, state.worktree), config
+	return state, readTestRestorePublication(t, state.clientDir, state.worktree), config
 }
 
-func interruptPublishedRestoreCAS(t *testing.T, failResolution bool) (importedBinding, pendingPublication,
+func interruptPublishedRestoreCAS(t *testing.T, failResolution bool) (importedBinding, _restorePublicationState,
 	libraryClientConfig, *atomic.Int32, error) {
 	t.Helper()
 	state, pending, config := prepareRestoreConfirmationTest(t)
@@ -969,7 +970,7 @@ func interruptPublishedRestoreCAS(t *testing.T, failResolution bool) (importedBi
 			head, headPUTs.Load(), headErr, pending.CandidateCommit)
 	}
 	if failResolution {
-		confirmed := readTestPendingPublication(t, state.clientDir, state.worktree)
+		confirmed := readTestRestorePublication(t, state.clientDir, state.worktree)
 		if err == nil || !confirmed.RestoreConfirmed || confirmed.CandidateCommit != pending.CandidateCommit {
 			t.Fatalf("interrupted unresolved restore error=%v pending=%+v, want fixed confirmed candidate", err, confirmed)
 		}
@@ -1027,7 +1028,7 @@ func TestLibraryRestoreConfirmDiscardsETagOnlyChangeBeforeHeadCAS(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	beforeBinding := readTestBinding(t, state.clientDir, state.worktree)
 	beforeRoot := scanTestRoot(t, state.worktree)
 	beforeIndex := captureTestPathIndex(t, state.clientDir, state.worktree)
@@ -1091,7 +1092,7 @@ func TestLibraryRestoreConfirmationIsolationAndStaleWorktree(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	beforeBinding := readTestBinding(t, state.clientDir, state.worktree)
 	if err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir, "--worktree", state.worktree,
 		"--confirm", strings.Repeat("0", deleteCandidatePrefixLen)}, nil, io.Discard, io.Discard, libraryClientConfig{
@@ -1099,7 +1100,7 @@ func TestLibraryRestoreConfirmationIsolationAndStaleWorktree(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "exactly match") {
 		t.Fatalf("wrong restore confirmation error=%v", err)
 	}
-	afterWrong := readTestPendingPublication(t, state.clientDir, state.worktree)
+	afterWrong := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if afterWrong.CandidateCommit != pending.CandidateCommit || afterWrong.RestoreConfirmed || readTestBinding(t, state.clientDir, state.worktree) != beforeBinding {
 		t.Fatalf("wrong confirmation changed state: before=%+v after=%+v", pending, afterWrong)
 	}
@@ -1199,12 +1200,9 @@ func TestLibraryRestoreDirectoryOverlayPreservesCurrentOnlyAndConverges(t *testi
 		"--commit", sourceCommit, "--path", "docs"}, nil, &preview, io.Discard, config); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	wantChanged := []string{"docs", "docs/deleted.txt", "docs/mtime-only.txt", "docs/overwritten.txt"}
-	changed, err := _decodeRestorePreview(pending.ChangedPathPreview)
-	if err != nil {
-		t.Fatal(err)
-	}
+	changed := pending.ChangedPathPreview
 	if pending.SourceRoot != sourceRoot || pending.CreatedCount != 1 || pending.UpdatedCount != 3 ||
 		pending.PreservedCurrentOnlyCount != 4 || pending.TypeReplacementCount != 0 || pending.RemovedDescendantCount != 0 ||
 		pending.ChangedPathCount != int64(len(wantChanged)) || !equalStrings(changed, wantChanged) {
@@ -1289,7 +1287,7 @@ func TestLibraryRestoreRootOverlayAndNoOpIgnoreFilesystemRootMtime(t *testing.T)
 		"--commit", sourceCommit, "--path", "."}, nil, &preview, io.Discard, config); err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if pending.SourcePath != "." || pending.UpdatedCount != 1 || pending.PreservedCurrentOnlyCount != 1 ||
 		pending.CreatedCount != 0 || pending.TypeReplacementCount != 0 || puts.Load() != 0 {
 		t.Fatalf("root preview pending=%+v puts=%d", pending, puts.Load())
@@ -1362,11 +1360,8 @@ func TestLibraryRestoreTypeReplacementRequiresPreviewAndExactConfirmation(t *tes
 		"--commit", sourceCommit, "--path", "target"}, nil, &output, io.Discard, config); err != nil {
 		t.Fatalf("preview type replacement error=%v, want nil", err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
-	changed, err := _decodeRestorePreview(pending.ChangedPathPreview)
-	if err != nil {
-		t.Fatalf("decode type replacement preview error=%v, want nil", err)
-	}
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
+	changed := pending.ChangedPathPreview
 	if pending.TypeReplacementCount != 1 || pending.CreatedCount != 1 || pending.UpdatedCount != 0 ||
 		pending.RemovedDescendantCount != 0 || pending.PreservedCurrentOnlyCount != 0 || pending.ChangedPathCount != 2 ||
 		!equalStrings(changed, []string{"target", "target/child.txt"}) || pending.PreviewTruncated ||
@@ -1389,7 +1384,7 @@ func TestLibraryRestoreTypeReplacementRequiresPreviewAndExactConfirmation(t *tes
 		!strings.Contains(err.Error(), "must exactly match") {
 		t.Fatalf("wrong type replacement confirmation error=%v, want exact-candidate mismatch", err)
 	}
-	if after := readTestPendingPublication(t, state.clientDir, state.worktree); !reflect.DeepEqual(after, pending) ||
+	if after := readTestRestorePublication(t, state.clientDir, state.worktree); !reflect.DeepEqual(after, pending) ||
 		puts.Load() != 0 || beforeBinding != readTestBinding(t, state.clientDir, state.worktree) ||
 		beforeHead != restoreTestHead(t, state) || !reflect.DeepEqual(beforeIndex, captureTestPathIndex(t, state.clientDir, state.worktree)) ||
 		!reflect.DeepEqual(beforeWorktree, captureHistoryInspectWorktree(t, state.worktree)) {
@@ -1488,7 +1483,7 @@ func TestLibraryRestorePlannerBudgetsRejectBeforeWrites(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	confirmed := readTestPendingPublication(t, state.clientDir, state.worktree)
+	confirmed := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if !confirmed.RestoreConfirmed {
 		t.Fatalf("confirmed restore state=%+v, want RestoreConfirmed=true", confirmed)
 	}
@@ -1501,7 +1496,7 @@ func TestLibraryRestorePlannerBudgetsRejectBeforeWrites(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "object budget") {
 		t.Fatalf("resume restore budget error=%v, want object budget rejection", err)
 	}
-	afterResume := readTestPendingPublication(t, state.clientDir, state.worktree)
+	afterResume := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if !reflect.DeepEqual(afterResume, confirmed) || puts.Load() != 0 ||
 		beforeBinding != readTestBinding(t, state.clientDir, state.worktree) || beforeHead != restoreTestHead(t, state) ||
 		!reflect.DeepEqual(beforeIndex, captureTestPathIndex(t, state.clientDir, state.worktree)) ||
@@ -1593,7 +1588,7 @@ func TestLibraryRestoreConfirmPublishesFileRestoreAndConverges(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	candidate := readTestPendingPublication(t, state.clientDir, state.worktree)
+	candidate := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir, "--worktree", state.worktree,
 		"--confirm", candidate.CandidateCommit[:deleteCandidatePrefixLen]}, nil, io.Discard, io.Discard, libraryClientConfig{
 		checkFilesystem: func(*os.File) error { return nil },
@@ -1656,7 +1651,7 @@ func TestLibraryRestoreAcceptsPublishedMergeSource(t *testing.T) {
 		"--commit", sourceCommit, "--path", "local"}, nil, &preview, io.Discard, config); err != nil {
 		t.Fatalf("preview merge-source restore: %v", err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
 	if pending.SourceCommit != sourceCommit || !strings.Contains(preview.String(), "source commit: "+sourceCommit) {
 		t.Fatalf("merge-source preview=%q pending=%+v", preview.String(), pending)
 	}
@@ -1704,8 +1699,8 @@ func TestLibraryRestorePreviewPersistsFixedCandidateWithoutMutation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := readTestPendingPublication(t, state.clientDir, state.worktree)
-	if pending.Kind != PublicationKindRestore || pending.SourceCommit != sourceCommit || pending.SourcePath != "local" ||
+	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
+	if pending.SourceCommit != sourceCommit || pending.SourcePath != "local" ||
 		pending.ExpectedHead != beforeBinding.SyncBase || pending.CapturedRoot != beforeBinding.SyncBaseRoot || !bytes.Contains(output.Bytes(), []byte("source commit: "+sourceCommit)) ||
 		!bytes.Contains(output.Bytes(), []byte("confirm: filecloud library restore")) {
 		t.Fatalf("preview output=%q pending=%+v binding=%+v", output.String(), pending, beforeBinding)
