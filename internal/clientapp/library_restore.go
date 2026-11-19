@@ -1,19 +1,11 @@
 package clientapp
 
 import (
-	"bytes"
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
-	"path/filepath"
-	"slices"
-	"strings"
-	"time"
 
 	"github.com/mingming-cn/filecloud/internal/object"
 )
@@ -46,10 +38,10 @@ func runLibraryRestore(ctx context.Context, args []string, stdout, stderr io.Wri
 		if commitSet || pathSet {
 			return errors.New("restore --confirm cannot combine with --commit or --path")
 		}
-		if len(*confirm) != deleteCandidatePrefixLen || strings.ToLower(*confirm) != *confirm || !isLowerHex(*confirm) {
+		if len(*confirm) != deleteCandidatePrefixLen || !isLowerHex(*confirm) {
 			return errors.New("restore --confirm must be a 12-character lowercase hexadecimal prefix")
 		}
-		return runLibraryRestoreConfirm(ctx, *clientDir, *worktree, *confirm, stdout, stderr, config)
+		return runRestorePublication(ctx, *clientDir, *worktree, _confirmRestorePublicationRequest{prefix: *confirm, warning: stderr}, stdout, stderr, config)
 	}
 	if !commitSet {
 		return errors.New("restore preview requires --commit")
@@ -60,7 +52,36 @@ func runLibraryRestore(ctx context.Context, args []string, stdout, stderr io.Wri
 	if !pathSet || !object.ValidPath(*sourcePath) {
 		return errors.New("restore preview requires a canonical --path")
 	}
-	return runLibraryRestorePreview(ctx, *clientDir, *worktree, *commitID, *sourcePath, stdout, stderr, config)
+	return runRestorePublication(ctx, *clientDir, *worktree, _previewRestorePublicationRequest{sourceCommit: *commitID, sourcePath: *sourcePath, warning: stderr}, stdout, stderr, config)
+}
+
+func runRestorePublication(ctx context.Context, clientDir, worktree string, request _publicationRequester,
+	stdout, stderr io.Writer, config libraryClientConfig) (retErr error) {
+	session, err := openLockedBoundWorktreeSession(ctx, clientDir, worktree, config)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, session.Close()) }()
+	var lifecycle _publicationLifecycle
+	outcome, err := lifecycle.Advance(ctx, session, request)
+	if err != nil {
+		return err
+	}
+	switch outcome.Kind() {
+	case _publicationOutcomePreviewReady:
+		return writeRestorePreview(stdout, clientDir, worktree, *outcome.restorePreview)
+	case _publicationOutcomeRestoreNoOp:
+		return writeRestoreNoOp(stdout, outcome.restorePreview.sourceCommit, outcome.restorePreview.sourcePath)
+	case _publicationOutcomeCheckoutPending:
+		options := session.bindOptions()
+		options.scanConfig, err = session.loadScanConfig(ctx, stderr)
+		if err != nil {
+			return err
+		}
+		return continueSyncCheckout(ctx, session.db, options, session.binding, *outcome.checkout, stdout, session.config)
+	default:
+		return _errPublicationRequestInvalid
+	}
 }
 
 func isLowerHex(value string) bool {
@@ -72,435 +93,6 @@ func isLowerHex(value string) bool {
 	return true
 }
 
-type restoreClientState struct {
-	locks    *clientLocks
-	db       *sql.DB
-	root     *openedWorktree
-	binding  clientBinding
-	options  bindOptions
-	config   libraryClientConfig
-	checkout *pendingCheckout
-	pending  _pendingPublicationState
-}
-
-func openRestoreClientState(ctx context.Context, clientDir, worktree string, stderr io.Writer, config libraryClientConfig) (state *restoreClientState, retErr error) {
-	config = normalizeLibraryClientConfig(config)
-	canonicalClientDir, err := canonicalStateDir(clientDir)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkStateDirFilesystem(canonicalClientDir, config.checkFilesystem); err != nil {
-		return nil, err
-	}
-	canonicalWorktree, err := canonicalExistingPath(worktree)
-	if err != nil {
-		return nil, err
-	}
-	databasePath := filepath.Join(canonicalClientDir, _clientDatabaseName)
-	locks, err := tryLockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
-	if err != nil {
-		return nil, err
-	}
-	state = &restoreClientState{locks: locks, config: config}
-	var token []byte
-	defer func(opened *restoreClientState) {
-		if retErr != nil {
-			clear(token)
-			retErr = errors.Join(retErr, opened.Close())
-		}
-	}(state)
-	db, err := openClientDB(databasePath, false)
-	if err != nil {
-		return nil, err
-	}
-	state.db = db
-	if err := initializeClientSchema(ctx, db); err != nil {
-		return nil, err
-	}
-	if err := db.QueryRowContext(ctx, `SELECT server_url, library_id, worktree, user_id, device_id, sync_base_commit,
-		sync_base_root, head_etag, access_token FROM bindings WHERE worktree = ?`, canonicalWorktree).Scan(
-		&state.binding.ServerURL, &state.binding.LibraryID, &state.binding.Worktree, &state.binding.UserID,
-		&state.binding.DeviceID, &state.binding.SyncBase, &state.binding.SyncBaseRoot, &state.binding.HeadETag, &token); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("worktree is not bound")
-		}
-		return nil, fmt.Errorf("read client binding: %w", err)
-	}
-	state.checkout, state.pending, err = loadWorktreePendingPublication(ctx, db, state.binding)
-	if err != nil {
-		return nil, err
-	}
-	base, err := validateServerURL(state.binding.ServerURL)
-	if err != nil {
-		clear(token)
-		return nil, err
-	}
-	authorityOptions := bindOptions{clientDir: canonicalClientDir, serverURL: state.binding.ServerURL,
-		libraryID: state.binding.LibraryID, worktree: state.binding.Worktree, deviceID: state.binding.DeviceID,
-		base: base, token: token}
-	if err := rehydratePendingPromotionSeedAuthority(ctx, db, authorityOptions, state.binding); err != nil {
-		clear(token)
-		return nil, fmt.Errorf("rehydrate checkout promotion authority: %w", err)
-	}
-	root, err := openWorktreeRoot(canonicalWorktree, config.checkFilesystem)
-	if err != nil {
-		clear(token)
-		return nil, err
-	}
-	state.root = root
-	if err := validatePendingPromotionTargets(ctx, db, state.binding.Worktree); err != nil {
-		return nil, fmt.Errorf("validate checkout promotion targets: %w", err)
-	}
-	if err := recoverFSActions(ctx, db, state.binding.Worktree, root, config.fsActionFault); err != nil {
-		return nil, fmt.Errorf("recover checkout filesystem actions: %w", err)
-	}
-	tracked, err := loadTrackedPaths(ctx, db, state.binding.Worktree)
-	if err != nil {
-		return nil, err
-	}
-	state.options = bindOptions{clientDir: canonicalClientDir, serverURL: state.binding.ServerURL,
-		libraryID: state.binding.LibraryID, worktree: state.binding.Worktree, deviceID: state.binding.DeviceID,
-		base: base, token: token, worktreeRoot: root, fallbackOccupied: config.fallbackOccupied,
-		scanConfig: worktreeScanConfig{trackedPaths: tracked, warning: stderr, fault: config.scanFault,
-			ignoreUntrackedUnsupported: true}}
-	if len(tracked) == 0 {
-		tracked, err = loadRemoteTrackedPaths(ctx, state.options, state.binding)
-		if err != nil {
-			return nil, err
-		}
-		state.options.scanConfig.trackedPaths = tracked
-	}
-	return state, nil
-}
-
-func (state *restoreClientState) Close() error {
-	if state == nil {
-		return nil
-	}
-	var err error
-	if state.root != nil {
-		err = errors.Join(err, state.root.Close())
-		state.root = nil
-	}
-	if state.db != nil {
-		err = errors.Join(err, state.db.Close())
-		state.db = nil
-	}
-	clear(state.options.token)
-	state.options.token = nil
-	if state.locks != nil {
-		err = errors.Join(err, state.locks.Close())
-		state.locks = nil
-	}
-	return err
-}
-
-func runLibraryRestorePreview(ctx context.Context, clientDir, worktree, sourceCommit, sourcePath string,
-	stdout, stderr io.Writer, config libraryClientConfig) (retErr error) {
-	state, err := openRestoreClientState(ctx, clientDir, worktree, stderr, config)
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, state.Close()) }()
-	if state.checkout != nil {
-		return errors.New("restore cannot continue while a checkout is pending; run sync first")
-	}
-	switch pending := state.pending.(type) {
-	case _syncPublicationState:
-		return errors.New("restore cannot start while a sync publication is pending; run sync first")
-	case _restorePublicationState:
-		if !restorePublicationMatchesBinding(pending, state.binding) {
-			return errors.New("verify pending restore preview: restore publication does not match the binding")
-		}
-		if pending.RestoreConfirmed || pending.SourceCommit != sourceCommit || pending.SourcePath != sourcePath {
-			prefix := pending.CandidateCommit[:deleteCandidatePrefixLen]
-			return fmt.Errorf("restore candidate is already pending; rerun restore --confirm %s", prefix)
-		}
-		return writeRestorePreview(stdout, clientDir, worktree, pending)
-	}
-	snapshot, err := scanWorktreeWithConfig(state.root, state.options.scanConfig)
-	if err != nil {
-		return fmt.Errorf("scan worktree: %w", err)
-	}
-	head, err := getRemoteHead(ctx, state.options.base, state.binding.LibraryID, state.options.token)
-	if err != nil {
-		return err
-	}
-	if head.CommitID == nil {
-		return errors.New("bound library Head is empty")
-	}
-	if snapshot.root != state.binding.SyncBaseRoot || *head.CommitID != state.binding.SyncBase {
-		return errors.New("worktree is not converged with Sync Base and Head; run sync first")
-	}
-	source, err := fetchRestoreSource(ctx, state, sourceCommit)
-	if err != nil {
-		return err
-	}
-	plan, err := planRestoreSnapshot(ctx, state, snapshot, source, sourcePath)
-	if errors.Is(err, _errRestoreSourcePathNotFound) {
-		return errors.New("restore source path not found")
-	}
-	if err != nil {
-		return err
-	}
-	if plan.resultRoot == snapshot.root {
-		return writeRestoreNoOp(stdout, sourceCommit, sourcePath)
-	}
-	capturedData, _, err := fetchRestoreHeadCommit(ctx, state, *head.CommitID, snapshot.root)
-	if err != nil {
-		return err
-	}
-	createdAt := config.now()
-	candidateData, candidateID, err := canonicalRestoreCommit(state.binding.UserID, state.binding.DeviceID,
-		plan.resultRoot, sourceCommit, sourcePath, []string{*head.CommitID}, createdAt)
-	if err != nil {
-		return err
-	}
-	candidate := _restorePublicationState{
-		_publicationCandidate: _publicationCandidate{BaseCommit: state.binding.SyncBase,
-			BaseRoot: state.binding.SyncBaseRoot, ExpectedHead: *head.CommitID, ExpectedETag: head.ETag,
-			CandidateCommit: candidateID, CandidateRoot: plan.resultRoot, CandidateData: candidateData,
-			CapturedCommit: *head.CommitID, CapturedRoot: snapshot.root, CapturedData: capturedData},
-		_restorePublicationFields: _restorePublicationFields{SourceCommit: sourceCommit, SourcePath: sourcePath,
-			SourceRoot: source.Root, CreatedCount: plan.createdCount, UpdatedCount: plan.updatedCount,
-			TypeReplacementCount: plan.typeReplacementCount, RemovedDescendantCount: plan.removedDescendantCount,
-			PreservedCurrentOnlyCount: plan.preservedCurrentOnlyCount, ChangedPathCount: plan.changedPathCount,
-			PreviewTruncated: plan.previewTruncated},
-		ChangedPathPreview: plan.changedPaths,
-	}
-	if !restorePublicationMatchesBinding(candidate, state.binding) {
-		return errors.New("verify restore candidate: restore publication does not match the binding")
-	}
-	tx, err := state.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := saveRestorePublication(ctx, tx, state.binding, candidate); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("save restore candidate: %w", err)
-	}
-	return writeRestorePreview(stdout, clientDir, worktree, candidate)
-}
-
-func runLibraryRestoreConfirm(ctx context.Context, clientDir, worktree, prefix string,
-	stdout, stderr io.Writer, config libraryClientConfig) (retErr error) {
-	state, err := openRestoreClientState(ctx, clientDir, worktree, stderr, config)
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, state.Close()) }()
-	if state.checkout != nil {
-		return errors.New("restore cannot continue while a checkout is pending; run sync first")
-	}
-	if state.pending == nil {
-		return errors.New("restore confirmation requires a pending restore candidate")
-	}
-	pending, ok := state.pending.(_restorePublicationState)
-	if !ok {
-		return errors.New("restore cannot continue while a sync publication is pending; run sync first")
-	}
-	if prefix != pending.CandidateCommit[:deleteCandidatePrefixLen] {
-		return errors.New("restore --confirm must exactly match this worktree's pending restore candidate")
-	}
-	if !restorePublicationMatchesBinding(pending, state.binding) {
-		return discardStaleRestore(ctx, state, pending)
-	}
-	head, err := getRemoteHead(ctx, state.options.base, state.binding.LibraryID, state.options.token)
-	if err != nil {
-		return err
-	}
-	snapshot, err := scanWorktreeWithConfig(state.root, state.options.scanConfig)
-	if err != nil {
-		return fmt.Errorf("scan worktree: %w", err)
-	}
-	if head.CommitID == nil {
-		return discardStaleRestore(ctx, state, pending)
-	}
-	if *head.CommitID != pending.ExpectedHead {
-		published, err := restoreCandidatePublished(ctx, state.options, *head.CommitID, pending.CandidateCommit,
-			state.binding.UserID, _newReplayBudget())
-		if err != nil {
-			return handleRestoreRevalidationFailure(ctx, state, pending, err)
-		}
-		if published {
-			return dispatchRestorePublication(ctx, state.db, state.options, state.binding, snapshot, head, pending,
-				stdout, state.config, _newReplayBudget(), _publicationDispatchResume)
-		}
-		return discardStaleRestore(ctx, state, pending)
-	}
-	if head.ETag != pending.ExpectedETag || snapshot.root != pending.CapturedRoot {
-		return discardStaleRestore(ctx, state, pending)
-	}
-	source, err := fetchRestoreSource(ctx, state, pending.SourceCommit)
-	if err != nil {
-		return handleRestoreRevalidationFailure(ctx, state, pending, err)
-	}
-	plan, err := planRestoreSnapshot(ctx, state, snapshot, source, pending.SourcePath)
-	if err != nil {
-		return handleRestoreRevalidationFailure(ctx, state, pending, err)
-	}
-	capturedData, _, err := fetchRestoreHeadCommit(ctx, state, pending.ExpectedHead, pending.CapturedRoot)
-	if err != nil {
-		return handleRestoreRevalidationFailure(ctx, state, pending, err)
-	}
-	if !bytes.Equal(capturedData, pending.CapturedData) ||
-		plan.resultRoot != pending.CandidateRoot || plan.createdCount != pending.CreatedCount || plan.updatedCount != pending.UpdatedCount ||
-		plan.typeReplacementCount != pending.TypeReplacementCount || plan.removedDescendantCount != pending.RemovedDescendantCount ||
-		plan.preservedCurrentOnlyCount != pending.PreservedCurrentOnlyCount || plan.changedPathCount != pending.ChangedPathCount ||
-		plan.previewTruncated != pending.PreviewTruncated || !slices.Equal(plan.changedPaths, pending.ChangedPathPreview) ||
-		source.Root != pending.SourceRoot {
-		return discardStaleRestore(ctx, state, pending)
-	}
-	if !pending.RestoreConfirmed {
-		if err := confirmRestorePublication(ctx, state.db, state.binding.Worktree, &pending); err != nil {
-			return err
-		}
-	}
-	return dispatchRestorePublication(ctx, state.db, state.options, state.binding, snapshot, head, pending, stdout,
-		state.config, _newReplayBudget(), _publicationDispatchStart)
-}
-
-func restoreCandidatePublished(ctx context.Context, options bindOptions, head, candidate, owner string, budget *_replayBudget) (bool, error) {
-	if head == candidate {
-		return true, nil
-	}
-	return _remoteCommitDescendsFrom(ctx, options, head, candidate, owner, budget)
-}
-
-func discardStaleRestore(ctx context.Context, state *restoreClientState, pending _restorePublicationState) error {
-	if err := discardPendingPublication(ctx, state.db, state.binding.Worktree, pending); err != nil {
-		return err
-	}
-	return errors.New("stale restore candidate discarded; rerun restore")
-}
-
-func handleRestoreRevalidationFailure(ctx context.Context, state *restoreClientState,
-	pending _restorePublicationState, err error) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	if _, transient := errors.AsType[*transientRemoteError](err); transient {
-		return err
-	}
-	if statusErr, remote := errors.AsType[*remoteStatusError](err); remote &&
-		statusErr.status != http.StatusNotFound && statusErr.status != http.StatusGone {
-		return err
-	}
-	return discardStaleRestore(ctx, state, pending)
-}
-
-func fetchRestoreSource(ctx context.Context, state *restoreClientState, sourceID string) (historyInspectCommit, error) {
-	return fetchRestoreSourceWithOptions(ctx, state.options, state.binding, sourceID)
-}
-
-func fetchRestoreSourceWithOptions(ctx context.Context, options bindOptions, binding clientBinding, sourceID string) (historyInspectCommit, error) {
-	client := historyInspectClient{binding: binding, base: options.base, token: options.token}
-	commit, err := client.fetchCommit(ctx, sourceID)
-	if err != nil {
-		return historyInspectCommit{}, err
-	}
-	if commit.Role != "mainline" && commit.Role != "merge-source" {
-		return historyInspectCommit{}, errors.New("restore source commit does not have a supported published history role")
-	}
-	return commit, nil
-}
-
-func fetchRestoreObject(ctx context.Context, options bindOptions, kind, id string) ([]byte, error) {
-	if !object.ValidID(id) || (kind != "commits" && kind != "directories" && kind != "files") {
-		return nil, errors.New("restore object reference is invalid")
-	}
-	request, err := authenticatedRequest(ctx, http.MethodGet,
-		options.base.JoinPath("v1/libraries", options.libraryID, "objects", kind, id).String(), options.token, nil)
-	if err != nil {
-		return nil, err
-	}
-	status, data, _, err := doClientRequest(request)
-	if err != nil {
-		message := fmt.Sprintf("read restore %s object", kind)
-		return nil, &transientRemoteError{message: message, cause: err}
-	}
-	if status != http.StatusOK {
-		message := fmt.Sprintf("read restore %s object failed: server returned %s", kind, http.StatusText(status))
-		return nil, remoteResponseError(message, status)
-	}
-	var verifyErr error
-	switch kind {
-	case "commits":
-		_, verifyErr = object.VerifyCommit(data, id)
-	case "directories":
-		_, verifyErr = object.VerifyDirectory(data, id)
-	case "files":
-		_, verifyErr = object.VerifyFile(data, id)
-	}
-	if verifyErr != nil {
-		return nil, fmt.Errorf("restore %s object is not canonical: %w", kind, verifyErr)
-	}
-	return data, nil
-}
-
-func restoreLocalObjectMap(snapshot worktreeSnapshot) map[string][]byte {
-	objects := make(map[string][]byte, len(snapshot.objects))
-	for _, value := range snapshot.objects {
-		objects[value.kind+"\x00"+value.id] = append([]byte(nil), value.data...)
-	}
-	return objects
-}
-
-func planRestoreSnapshot(ctx context.Context, state *restoreClientState, snapshot worktreeSnapshot,
-	source historyInspectCommit, sourcePath string) (restorePlan, error) {
-	return planRestoreSnapshotWithBudget(ctx, state.options, snapshot, source, sourcePath, state.config.restorePlanBudget)
-}
-
-func planRestoreSnapshotWithBudget(ctx context.Context, options bindOptions, snapshot worktreeSnapshot,
-	source historyInspectCommit, sourcePath string, budget *restorePlanBudget) (restorePlan, error) {
-	local := restoreLocalObjectMap(snapshot)
-	loader := func(kind, id string) ([]byte, error) {
-		if data, ok := local[kind+"\x00"+id]; ok {
-			return append([]byte(nil), data...), nil
-		}
-		return fetchRestoreObject(ctx, options, kind, id)
-	}
-	return planRestoreOverlay(restorePlanInput{CurrentRoot: snapshot.root, SourceRoot: source.Root,
-		SourcePath: sourcePath, Load: loader, Budget: budget})
-}
-
-func fetchRestoreHeadCommit(ctx context.Context, state *restoreClientState, commitID, rootID string) ([]byte, object.Commit, error) {
-	data, err := fetchRestoreObject(ctx, state.options, "commits", commitID)
-	if err != nil {
-		return nil, object.Commit{}, err
-	}
-	commit, err := object.VerifyCommit(data, commitID)
-	if err != nil || commit.AuthorUserID != state.binding.UserID || commit.Root != rootID {
-		return nil, object.Commit{}, errors.New("restore Head commit is not canonical for the binding")
-	}
-	return data, commit, nil
-}
-
-func canonicalRestoreCommit(owner, device, root, source, path string, parents []string, now time.Time) ([]byte, string, error) {
-	message := "restore " + source + " " + path
-	input, err := json.Marshal(struct {
-		AuthorUserID string   `json:"AuthorUserId"`
-		CreatedAt    string   `json:"CreatedAt"`
-		DeviceID     string   `json:"DeviceId"`
-		Message      string   `json:"Message"`
-		Parents      []string `json:"Parents"`
-		Root         string   `json:"Root"`
-		Type         string   `json:"Type"`
-		Version      int      `json:"Version"`
-	}{AuthorUserID: owner, CreatedAt: canonicalProtocolMtime(now), DeviceID: device, Message: message,
-		Parents: parents, Root: root, Type: "Commit", Version: 1})
-	if err != nil {
-		return nil, "", fmt.Errorf("construct restore commit: %w", err)
-	}
-	data, id, err := object.Canonicalize("commits", input)
-	if err != nil {
-		return nil, "", fmt.Errorf("construct restore commit: %w", err)
-	}
-	return data, id, nil
-}
-
 func writeRestoreNoOp(output io.Writer, source, path string) error {
 	_, err := fmt.Fprintf(output, "restore no-op: source commit=%s path=%s already matches current state\n", source, path)
 	if err != nil {
@@ -509,16 +101,16 @@ func writeRestoreNoOp(output io.Writer, source, path string) error {
 	return nil
 }
 
-func writeRestorePreview(output io.Writer, clientDir, worktree string, pending _restorePublicationState) error {
-	if _, err := fmt.Fprintf(output, "source commit: %s\nsource path: %s\nexpected head: %s\ncandidate: %s\ncreated paths: %d\nupdated paths: %d\ntype replacements: %d\nremoved descendants by type replacement: %d\npreserved current-only paths: %d\nchanged paths:\n", pending.SourceCommit, pending.SourcePath, pending.ExpectedHead, pending.CandidateCommit[:deleteCandidatePrefixLen], pending.CreatedCount, pending.UpdatedCount, pending.TypeReplacementCount, pending.RemovedDescendantCount, pending.PreservedCurrentOnlyCount); err != nil {
+func writeRestorePreview(output io.Writer, clientDir, worktree string, preview restorePreview) error {
+	if _, err := fmt.Fprintf(output, "source commit: %s\nsource path: %s\nexpected head: %s\ncandidate: %s\ncreated paths: %d\nupdated paths: %d\ntype replacements: %d\nremoved descendants by type replacement: %d\npreserved current-only paths: %d\nchanged paths:\n", preview.sourceCommit, preview.sourcePath, preview.expectedHead, preview.confirmationPrefix(), preview.createdCount, preview.updatedCount, preview.typeReplacementCount, preview.removedDescendantCount, preview.preservedCurrentOnlyCount); err != nil {
 		return fmt.Errorf("write restore preview: %w", err)
 	}
-	for _, path := range pending.ChangedPathPreview {
+	for _, path := range preview.changedPaths {
 		if _, err := fmt.Fprintf(output, "%s\n", path); err != nil {
 			return fmt.Errorf("write restore preview path: %w", err)
 		}
 	}
-	if _, err := fmt.Fprintf(output, "truncated: %t\nconfirm: filecloud library restore --client-dir %s --worktree %s --confirm %s\n", pending.PreviewTruncated, clientDir, worktree, pending.CandidateCommit[:deleteCandidatePrefixLen]); err != nil {
+	if _, err := fmt.Fprintf(output, "truncated: %t\nconfirm: filecloud library restore --client-dir %s --worktree %s --confirm %s\n", preview.truncated, clientDir, worktree, preview.confirmationPrefix()); err != nil {
 		return fmt.Errorf("write restore confirmation: %w", err)
 	}
 	return nil

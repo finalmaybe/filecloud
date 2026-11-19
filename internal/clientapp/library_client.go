@@ -882,18 +882,10 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := recoverFSActions(ctx, db, binding.Worktree, root, config.fsActionFault); err != nil {
 		return fmt.Errorf("recover checkout filesystem actions: %w", err)
 	}
-	tracked, err := loadTrackedPaths(ctx, db, binding.Worktree)
+	options.confirmDelete, options.confirmDeleteSet = *confirmDelete, confirmDeleteSet
+	options.scanConfig, err = session.loadScanConfig(ctx, stderr)
 	if err != nil {
 		return err
-	}
-	options.confirmDelete, options.confirmDeleteSet = *confirmDelete, confirmDeleteSet
-	options.scanConfig = worktreeScanConfig{trackedPaths: tracked, warning: stderr, fault: config.scanFault, ignoreUntrackedUnsupported: true}
-	if len(tracked) == 0 {
-		tracked, err = loadRemoteTrackedPaths(ctx, options, binding)
-		if err != nil {
-			return err
-		}
-		options.scanConfig.trackedPaths = tracked
 	}
 	return syncLibrary(ctx, session, options, checkout, publication, stdout)
 }

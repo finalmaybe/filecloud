@@ -43,10 +43,7 @@ type _syncPublicationRound struct {
 func newSyncPublicationRound(session *_lockedBoundWorktreeSession, round _syncPublicationRoundOptions) _syncPublicationRound {
 	options := session.bindOptions()
 	options.confirmDelete, options.confirmDeleteSet = round.confirmDelete, round.confirmDeleteSet
-	options.scanConfig = round.scanConfig
-	options.scanConfig.trackedPaths = maps.Clone(round.scanConfig.trackedPaths)
-	options.scanConfig.ignoredRootNames = maps.Clone(round.scanConfig.ignoredRootNames)
-	options.scanConfig.ignoredPaths = maps.Clone(round.scanConfig.ignoredPaths)
+	options.scanConfig = clonePublicationScanConfig(round.scanConfig)
 	return _syncPublicationRound{_lockedBoundWorktreeSession: session, options: options, budget: round.budget}
 }
 

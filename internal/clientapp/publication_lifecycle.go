@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"sync"
@@ -26,6 +28,7 @@ const (
 	_publicationOutcomeIdle _publicationOutcomeKind = iota + 1
 	_publicationOutcomeConfirmationRequired
 	_publicationOutcomePreviewReady
+	_publicationOutcomeRestoreNoOp
 	_publicationOutcomeFinalized
 	_publicationOutcomeCheckoutPending
 	_publicationOutcomeRerunSync
@@ -35,10 +38,11 @@ const (
 )
 
 type _publicationOutcome struct {
-	kind     _publicationOutcomeKind
-	pending  _pendingPublicationState
-	replan   *_syncReplanChallenge
-	checkout *pendingCheckout
+	kind           _publicationOutcomeKind
+	pending        _pendingPublicationState
+	replan         *_syncReplanChallenge
+	checkout       *pendingCheckout
+	restorePreview *restorePreview
 }
 
 // Kind classifies the lifecycle result without requiring error-string parsing.
@@ -67,10 +71,6 @@ type _resumeSyncPublicationRequest struct {
 
 func (_resumeSyncPublicationRequest) publicationRequest() {}
 
-type _restorePublicationRequest struct{}
-
-func (r _restorePublicationRequest) publicationRequest() {}
-
 type _publicationLifecycle struct{}
 
 // Advance validates the session scope before advancing one sealed lifecycle request.
@@ -83,7 +83,8 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 	}
 	defer release()
 	switch request.(type) {
-	case _inspectPublicationRequest, _restorePublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest, _replaceSyncPublicationRequest:
+	case _inspectPublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest, _replaceSyncPublicationRequest,
+		_previewRestorePublicationRequest, _confirmRestorePublicationRequest, _resumeRestorePublicationRequest:
 	default:
 		return noOutcome, _errPublicationRequestInvalid
 	}
@@ -93,9 +94,26 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 	}
 	if checkout != nil {
 		s.challenge = nil
-		return _publicationOutcome{kind: _publicationOutcomeCheckoutPending, checkout: checkout}, nil
+		outcome := _publicationOutcome{kind: _publicationOutcomeCheckoutPending, checkout: checkout}
+		switch request.(type) {
+		case _previewRestorePublicationRequest, _confirmRestorePublicationRequest:
+			return outcome, errors.New("restore cannot continue while a checkout is pending; run sync first")
+		}
+		return outcome, nil
 	}
 	switch request := request.(type) {
+	case _previewRestorePublicationRequest:
+		return newRestorePublicationRound(s).preview(ctx, pending, request)
+	case _confirmRestorePublicationRequest:
+		return newRestorePublicationRound(s).confirm(ctx, pending, request)
+	case _resumeRestorePublicationRequest:
+		value, ok := pending.(_restorePublicationState)
+		if !ok {
+			return noOutcome, _errPublicationRequestInvalid
+		}
+		round := newRestorePublicationRound(s)
+		round.options.scanConfig = clonePublicationScanConfig(request.scanConfig)
+		return round.resumeCurrent(ctx, value)
 	case _startSyncPublicationRequest:
 		if pending != nil || request.prepared.session != s {
 			return noOutcome, _errPublicationRequestInvalid
@@ -330,6 +348,27 @@ func (s *_lockedBoundWorktreeSession) bindOptions() bindOptions {
 	return bindOptions{clientDir: s.clientDir, serverURL: s.binding.ServerURL, libraryID: s.binding.LibraryID,
 		worktree: s.binding.Worktree, deviceID: s.binding.DeviceID, base: s.base, token: s.token,
 		worktreeRoot: s.root, fallbackOccupied: s.config.fallbackOccupied}
+}
+
+func (s *_lockedBoundWorktreeSession) loadScanConfig(ctx context.Context, warning io.Writer) (worktreeScanConfig, error) {
+	tracked, err := loadTrackedPaths(ctx, s.db, s.binding.Worktree)
+	if err != nil {
+		return worktreeScanConfig{}, err
+	}
+	if len(tracked) == 0 {
+		tracked, err = loadRemoteTrackedPaths(ctx, s.bindOptions(), s.binding)
+		if err != nil {
+			return worktreeScanConfig{}, err
+		}
+	}
+	return worktreeScanConfig{trackedPaths: tracked, warning: warning, fault: s.config.scanFault, ignoreUntrackedUnsupported: true}, nil
+}
+
+func clonePublicationScanConfig(config worktreeScanConfig) worktreeScanConfig {
+	config.trackedPaths = maps.Clone(config.trackedPaths)
+	config.ignoredRootNames = maps.Clone(config.ignoredRootNames)
+	config.ignoredPaths = maps.Clone(config.ignoredPaths)
+	return config
 }
 
 func headBeforePublication(ctx context.Context, options bindOptions, config libraryClientConfig, candidate _publicationCandidate) (remoteHead, error) {

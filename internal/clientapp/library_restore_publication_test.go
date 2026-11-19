@@ -1,7 +1,6 @@
 package clientapp
 
 import (
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -156,30 +155,22 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 }
 
 func TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation(t *testing.T) {
-	binding, pending := testRestorePendingPublication(t)
-	candidatePrefix := pending.CandidateCommit[:deleteCandidatePrefixLen]
-	db, err := initializeClientDB(t.Context(), t.TempDir(), syncDirectory)
+	state, pending, _ := prepareRestoreConfirmationTest(t)
+	before := captureRestoreConfirmationTestState(t, state)
+	session := openTestPublicationSession(t, state)
+	scanConfig, err := session.loadScanConfig(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	if err := saveRestorePublication(t.Context(), db, binding, pending); err != nil {
-		t.Fatal(err)
+	outcome, err := advanceTestPublication(t, session, _resumeRestorePublicationRequest{scanConfig: scanConfig})
+	if outcome.Kind() != _publicationOutcomeConfirmationRequired || err == nil ||
+		!strings.Contains(err.Error(), "restore --confirm "+pending.CandidateCommit[:deleteCandidatePrefixLen]) {
+		t.Fatalf("unconfirmed restore outcome=%v, error=%v", outcome.Kind(), err)
 	}
-	before, err := loadPendingPublication(t.Context(), db, binding)
-	if err != nil || before == nil {
-		t.Fatal(err)
-	}
-	headID := pending.ExpectedHead
-	err = dispatchRestorePublication(t.Context(), db, bindOptions{}, binding, worktreeSnapshot{},
-		remoteHead{CommitID: &headID, ETag: pending.ExpectedETag}, pending, io.Discard,
-		normalizeLibraryClientConfig(libraryClientConfig{}), _newReplayBudget(), _publicationDispatchResume)
-	if err == nil || !strings.Contains(err.Error(), "restore --confirm "+candidatePrefix) {
-		t.Fatalf("unconfirmed restore error=%v", err)
-	}
-	after, loadErr := loadPendingPublication(t.Context(), db, binding)
-	if loadErr != nil || after == nil || !reflect.DeepEqual(after, before) {
-		t.Fatalf("dispatcher changed restore publication: before=%+v after=%+v err=%v", before, after, loadErr)
+	assertRestoreConfirmationTestState(t, "unconfirmed restore", state, before)
+	after, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
+	if err != nil || !reflect.DeepEqual(after.pending, pending) {
+		t.Fatalf("resume changed unconfirmed restore: after=%+v error=%v", after.pending, err)
 	}
 }
 

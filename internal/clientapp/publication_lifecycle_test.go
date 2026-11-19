@@ -13,16 +13,9 @@ func TestPublicationLifecycleAdvanceAcceptsLockedBoundWorktreeSession(t *testing
 	state := newImportedBinding(t)
 	session := openTestPublicationSession(t, state)
 	var module _publicationLifecycle
-	var syncRequest _inspectPublicationRequest
-	var restoreRequest _restorePublicationRequest
-	for _, request := range []_publicationRequester{syncRequest, restoreRequest} {
-		outcome, err := module.Advance(t.Context(), session, request)
-		if err != nil {
-			t.Fatalf("Advance(%T) error = %v", request, err)
-		}
-		if outcome.Kind() != _publicationOutcomeIdle {
-			t.Fatalf("Advance(%T) outcome = %v, want %v", request, outcome.Kind(), _publicationOutcomeIdle)
-		}
+	outcome, err := module.Advance(t.Context(), session, _inspectPublicationRequest{})
+	if err != nil || outcome.Kind() != _publicationOutcomeIdle {
+		t.Fatalf("Advance() outcome = %v, error = %v; want idle", outcome.Kind(), err)
 	}
 }
 
@@ -175,7 +168,7 @@ func TestPublicationLifecycleAdvanceRejectsClosedAndConcurrentSession(t *testing
 		}
 		defer release()
 
-		_, err = advanceTestRestorePublication(t, session)
+		_, err = advanceTestPublication(t, session, _confirmRestorePublicationRequest{})
 		if !errors.Is(err, _errPublicationSessionConcurrentUse) {
 			t.Fatalf("Advance() error = %v, want classification %v", err, _errPublicationSessionConcurrentUse)
 		}
@@ -207,12 +200,6 @@ func TestOpenLockedBoundWorktreeSessionRejectsUnboundWorktree(t *testing.T) {
 func advanceTestSyncPublication(t *testing.T, session *_lockedBoundWorktreeSession) (_publicationOutcome, error) {
 	t.Helper()
 	var request _inspectPublicationRequest
-	return advanceTestPublication(t, session, request)
-}
-
-func advanceTestRestorePublication(t *testing.T, session *_lockedBoundWorktreeSession) (_publicationOutcome, error) {
-	t.Helper()
-	var request _restorePublicationRequest
 	return advanceTestPublication(t, session, request)
 }
 

@@ -28,13 +28,6 @@ const (
 	deleteCandidatePrefixLen = 12
 )
 
-type _publicationDispatchMode uint8
-
-const (
-	_publicationDispatchResume _publicationDispatchMode = iota
-	_publicationDispatchStart
-)
-
 type syncRerunError struct{ cause error }
 
 func (value *syncRerunError) Error() string {
@@ -103,8 +96,11 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	budget := _newReplayBudget()
 	round := _syncPublicationRoundOptions{scanConfig: options.scanConfig, confirmDelete: options.confirmDelete,
 		confirmDeleteSet: options.confirmDeleteSet, budget: budget}
-	if _, ok := pending.(_syncPublicationState); ok {
+	switch pending.(type) {
+	case _syncPublicationState:
 		return runSyncPublication(ctx, session, options, _resumeSyncPublicationRequest{round: round}, stdout)
+	case _restorePublicationState:
+		return runSyncPublication(ctx, session, options, _resumeRestorePublicationRequest{scanConfig: options.scanConfig}, stdout)
 	}
 
 	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
@@ -118,11 +114,6 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	if head.CommitID == nil {
 		return errors.New("bound library Head is empty")
 	}
-	if restore, ok := pending.(_restorePublicationState); ok {
-		return dispatchRestorePublication(ctx, db, options, binding, snapshot, head, restore, stdout, config, budget,
-			_publicationDispatchResume)
-	}
-
 	localChanged := snapshot.root != binding.SyncBaseRoot
 	remoteChanged := *head.CommitID != binding.SyncBase
 	if !localChanged {

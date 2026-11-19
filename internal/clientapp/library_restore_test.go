@@ -515,83 +515,13 @@ func TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex(t *testing
 }
 
 func TestLibraryRestoreConfirmResumesAlreadyPublishedCandidate(t *testing.T) {
-	state := newImportedBinding(t)
-	sourceCommit := state.binding.SyncBase
-	if err := os.WriteFile(filepath.Join(state.worktree, "local"), []byte("current"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir, "--worktree", state.worktree}, nil, io.Discard, io.Discard,
-		libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir, "--worktree", state.worktree,
-		"--commit", sourceCommit, "--path", "local"}, nil, io.Discard, io.Discard, libraryClientConfig{
-		checkFilesystem: func(*os.File) error { return nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
-	pending := readTestRestorePublication(t, state.clientDir, state.worktree)
-	config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }}
-	restoreState, err := openRestoreClientState(t.Context(), state.clientDir, state.worktree, io.Discard, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := scanWorktreeWithConfig(restoreState.root, restoreState.options.scanConfig)
-	if err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	source, err := fetchRestoreSource(t.Context(), restoreState, pending.SourceCommit)
-	if err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	plan, err := planRestoreSnapshot(t.Context(), restoreState, snapshot, source, pending.SourcePath)
-	if err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	references := make([]clientObjectReference, 0, len(plan.directories)+1)
-	for _, directory := range plan.directories {
-		references = append(references, clientObjectReference{ObjectID: directory.id, ObjectType: "Directory"})
-	}
-	references = append(references, clientObjectReference{ObjectID: pending.CandidateCommit, ObjectType: "Commit"})
-	missing, err := checkRemoteObjects(t.Context(), restoreState.options, references)
-	if err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	for _, directory := range plan.directories {
-		if missing["directories\x00"+directory.id] {
-			if err := putMetadata(t.Context(), restoreState.options.base, restoreState.binding.LibraryID, restoreState.options.token,
-				"directories", directory.id, directory.data); err != nil {
-				restoreState.Close()
-				t.Fatal(err)
-			}
-		}
-	}
-	if missing["commits\x00"+pending.CandidateCommit] {
-		if err := putMetadata(t.Context(), restoreState.options.base, restoreState.binding.LibraryID, restoreState.options.token,
-			"commits", pending.CandidateCommit, pending.CandidateData); err != nil {
-			restoreState.Close()
-			t.Fatal(err)
-		}
-	}
-	if _, _, err := updateRemoteHead(t.Context(), restoreState.options.base, restoreState.binding.LibraryID, restoreState.options.token,
-		pending.ExpectedETag, pending.CandidateCommit); err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	if _, err := restoreState.db.ExecContext(t.Context(), "UPDATE pending_publications SET restore_confirmed = 1 WHERE worktree = ?", state.worktree); err != nil {
-		restoreState.Close()
-		t.Fatal(err)
-	}
-	if err := restoreState.Close(); err != nil {
-		t.Fatal(err)
-	}
+	state, pending, config, headPUTs, _ := interruptPublishedRestoreCAS(t, true)
 	if err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir, "--worktree", state.worktree,
 		"--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil, io.Discard, io.Discard, config); err != nil {
 		t.Fatal(err)
+	}
+	if headPUTs.Load() != 1 {
+		t.Fatalf("already-published restore sent %d CAS requests, want 1", headPUTs.Load())
 	}
 	if data, err := os.ReadFile(filepath.Join(state.worktree, "local")); err != nil || string(data) != "data" {
 		t.Fatalf("already-published restore file=%q err=%v", data, err)

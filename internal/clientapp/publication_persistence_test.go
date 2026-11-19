@@ -26,7 +26,7 @@ func TestPublicationLifecycleLoadsTypedPendingState(t *testing.T) {
 	t.Run("restore", func(t *testing.T) {
 		state, want, _ := prepareRestoreConfirmationTest(t)
 		session := openTestPublicationSession(t, state)
-		outcome, err := advanceTestRestorePublication(t, session)
+		outcome, err := advanceTestPublication(t, session, _inspectPublicationRequest{})
 		got, ok := outcome.pending.(_restorePublicationState)
 		if err != nil || outcome.Kind() != _publicationOutcomePending || !ok || !reflect.DeepEqual(got, want) {
 			t.Fatalf("Advance Restore: kind=%v value=%T matches=%v err=%v", outcome.Kind(), outcome.pending, reflect.DeepEqual(got, want), err)
@@ -57,9 +57,9 @@ func TestPublicationLifecyclePreservesCorruptPendingState(t *testing.T) {
 			var session *_lockedBoundWorktreeSession
 			var request _publicationRequester = _inspectPublicationRequest{}
 			if test.restore {
-				state, _, _ := prepareRestoreConfirmationTest(t)
+				state, pending, _ := prepareRestoreConfirmationTest(t)
 				session = openTestPublicationSession(t, state)
-				request = _restorePublicationRequest{}
+				request = _confirmRestorePublicationRequest{prefix: pending.CandidateCommit[:deleteCandidatePrefixLen]}
 			} else {
 				session = openTestPublicationSession(t, newImportedBinding(t))
 				pending := testSyncPublicationState(t, session.binding)
@@ -96,7 +96,7 @@ func TestPublicationLifecycleRejectsRestoreCandidateWithDifferentDevice(t *testi
 		id, data, session.binding.Worktree); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := advanceTestRestorePublication(t, session)
+	outcome, err := advanceTestPublication(t, session, _confirmRestorePublicationRequest{prefix: id[:deleteCandidatePrefixLen]})
 	if err == nil || !strings.Contains(err.Error(), "restore publication candidate commit is invalid") || outcome.pending != nil {
 		t.Fatalf("Advance with mismatched device: kind=%v value=%T err=%v", outcome.Kind(), outcome.pending, err)
 	}
