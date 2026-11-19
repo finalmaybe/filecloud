@@ -101,12 +101,10 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	}
 
 	budget := _newReplayBudget()
-	publication := _publicationLifecycle{}
 	round := _syncPublicationRoundOptions{scanConfig: options.scanConfig, confirmDelete: options.confirmDelete,
-		confirmDeleteSet: options.confirmDeleteSet, budget: budget, stdout: stdout}
+		confirmDeleteSet: options.confirmDeleteSet, budget: budget}
 	if _, ok := pending.(_syncPublicationState); ok {
-		outcome, err := publication.Advance(ctx, session, _resumeSyncPublicationRequest{round: round})
-		return reportSyncPublication(outcome, err, stdout)
+		return runSyncPublication(ctx, session, options, _resumeSyncPublicationRequest{round: round}, stdout)
 	}
 
 	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
@@ -153,18 +151,32 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	if err != nil {
 		return err
 	}
-	outcome, err := publication.Advance(ctx, session, _startSyncPublicationRequest{prepared: prepared, round: round})
-	return reportSyncPublication(outcome, err, stdout)
+	return runSyncPublication(ctx, session, options, _startSyncPublicationRequest{prepared: prepared, round: round}, stdout)
 }
 
-func reportSyncPublication(outcome _publicationOutcome, err error, stdout io.Writer) error {
-	if err != nil {
-		return err
+func runSyncPublication(ctx context.Context, session *_lockedBoundWorktreeSession, options bindOptions, request _publicationRequester, stdout io.Writer) error {
+	var lifecycle _publicationLifecycle
+	for {
+		outcome, err := lifecycle.Advance(ctx, session, request)
+		if err != nil {
+			return err
+		}
+		switch outcome.Kind() {
+		case _publicationOutcomeSyncReplan:
+			plan, err := outcome.replan.prepare(ctx)
+			if err != nil {
+				return err
+			}
+			request = plan
+		case _publicationOutcomeCheckoutPending:
+			return continueSyncCheckout(ctx, session.db, options, session.binding, *outcome.checkout, stdout, session.config)
+		case _publicationOutcomeFinalized:
+			_, err := fmt.Fprintln(stdout, "library synchronized")
+			return err
+		default:
+			return _errPublicationRequestInvalid
+		}
 	}
-	if outcome.Kind() == _publicationOutcomeFinalized {
-		_, err = fmt.Fprintln(stdout, "library synchronized")
-	}
-	return err
 }
 
 func prepareDirectSyncPublication(session *_lockedBoundWorktreeSession, trackedPaths map[string]bool,
@@ -235,130 +247,11 @@ func _verifyPendingPublicationChain(ctx context.Context, options bindOptions, va
 	return nil
 }
 
-func (r _syncPublicationRound) replacePendingForTrivialMerge(ctx context.Context, snapshot worktreeSnapshot, head remoteHead,
-	old _syncPublicationState) (_publicationOutcome, error) {
-	if head.CommitID == nil {
-		return _publicationOutcome{}, errors.New("remote merge Head is empty")
-	}
-	verified, err := scanWorktreeWithConfig(r.options.worktreeRoot, r.options.scanConfig)
-	if err != nil || verified.root != old.CapturedRoot {
-		return _publicationOutcome{}, errors.New("worktree changed before pending merge replacement")
-	}
-	rebuilt := _rebuiltPendingMerge{snapshot: verified, paths: verified.paths}
-	if old.CandidateCommit != old.CapturedCommit {
-		rebuilt, err = _rebuildPendingMerge(ctx, r.options, r.binding, verified, old, r.budget)
-		if err != nil {
-			return _publicationOutcome{}, fmt.Errorf("rebuild pending recursive merge before replacement: %w", err)
-		}
-	}
-	base, err := _budgetedRemoteCommit(ctx, r.options, old.ExpectedHead, r.budget)
-	if err != nil || base.AuthorUserID != r.binding.UserID {
-		return _publicationOutcome{}, errors.Join(errors.New("verify previous expected Head for merge"), err)
-	}
-	remote, err := _budgetedRemoteCommit(ctx, r.options, *head.CommitID, r.budget)
-	if err != nil || remote.AuthorUserID != r.binding.UserID {
-		return _publicationOutcome{}, errors.Join(errors.New("verify latest Head for merge"), err)
-	}
-	prepared, err := _prepareRecursiveMerge(ctx, r.options, rebuilt.snapshot, base.Root, old.CandidateRoot, remote.Root,
-		*head.CommitID, old.CandidateCommit, old.candidate, r.binding, r.config, r.budget)
-	if err != nil {
-		return _publicationOutcome{}, err
-	}
-	verified, err = scanWorktreeWithConfig(r.options.worktreeRoot, r.options.scanConfig)
-	if err != nil || verified.root != old.CapturedRoot {
-		return _publicationOutcome{}, errors.New("worktree changed while preparing pending merge replacement")
-	}
-	basePaths, err := _verifiedRemotePaths(ctx, r.options, base.Root, r.budget)
-	if err != nil {
-		return _publicationOutcome{}, fmt.Errorf("verify replacement Base snapshot: %w", err)
-	}
-	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
-	next := _syncPublicationState{
-		_publicationCandidate: _publicationCandidate{BaseCommit: old.ExpectedHead, BaseRoot: base.Root, ExpectedHead: *head.CommitID,
-			ExpectedETag: head.ETag, CandidateCommit: prepared.candidateID, CandidateRoot: prepared.root,
-			CandidateData: prepared.candidateData, CapturedCommit: old.CapturedCommit, CapturedRoot: old.CapturedRoot,
-			CapturedData: old.CapturedData},
-		_syncPublicationFields: _syncPublicationFields{DeletionCount: deleted, TrackedCount: tracked,
-			RequiresDeleteConfirmation: protectedDeletion(deleted, tracked)},
-		CandidateHistory: old.CandidateHistory,
-	}
-	if old.CandidateCommit != old.CapturedCommit {
-		history := old.CandidateHistory
-		next.CandidateHistory = append(history[:len(history):len(history)], old.CandidateData)
-	}
-	if err := replaceSyncPublication(ctx, r.db, r.binding, old, &next); err != nil {
-		return _publicationOutcome{}, err
-	}
-	if r.config.afterPendingReplacement != nil {
-		if err := r.config.afterPendingReplacement(); err != nil {
-			return _publicationOutcome{}, fmt.Errorf("after pending publication replacement: %w", err)
-		}
-	}
-	if next.RequiresDeleteConfirmation {
-		return _publicationOutcome{kind: _publicationOutcomeConfirmationRequired}, deletionConfirmationError(next)
-	}
-	directories := append(rebuilt.directories, prepared.directories...)
-	return r.uploadPrepared(ctx, snapshot, next, directories)
-}
-
 func discardPendingPublication(ctx context.Context, db *sql.DB, worktree string, pending _pendingPublicationState) error {
 	if err := _deletePendingPublication(ctx, db, worktree, pending, "pending publication changed before discard"); err != nil {
 		return fmt.Errorf("discard changed pending publication: %w", err)
 	}
 	return nil
-}
-
-func recoverPublishedCandidate(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding,
-	head remoteHead, pending _syncPublicationState) error {
-	cacheRoot, err := openVerifiedCacheRoot(options.clientDir)
-	if err != nil {
-		return err
-	}
-	defer cacheRoot.Close()
-	options.cacheRoot = cacheRoot
-	commit, err := downloadTargetCommit(ctx, options, pending.CapturedCommit, binding.UserID)
-	if err != nil {
-		return fmt.Errorf("recover captured publication metadata: %w", err)
-	}
-	if commit.Root != pending.CapturedRoot {
-		return errors.New("captured publication commit has a different root")
-	}
-	paths, err := deriveRemotePaths(ctx, options, commit.Root, false)
-	if err != nil {
-		return fmt.Errorf("recover published candidate paths: %w", err)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE bindings SET sync_base_commit = ?, sync_base_root = ?, head_etag = ?
-		WHERE server_url = ? AND library_id = ? AND worktree = ? AND user_id = ? AND device_id = ?
-		AND sync_base_commit = ? AND sync_base_root = ? AND head_etag = ?`, pending.CapturedCommit,
-		pending.CapturedRoot, head.ETag, binding.ServerURL, binding.LibraryID, binding.Worktree, binding.UserID,
-		binding.DeviceID, binding.SyncBase, binding.SyncBaseRoot, binding.HeadETag)
-	if err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-		return errors.Join(errors.New("published candidate recovery did not advance the expected binding"), err, tx.Rollback())
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM path_index WHERE worktree = ?", binding.Worktree); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	for _, path := range paths {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO path_index(worktree, path, type, object_id, canonical_mtime, actual_mtime, size)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, binding.Worktree, path.path, path.kind, path.id, path.mtime, path.mtime, path.size); err != nil {
-			return errors.Join(err, tx.Rollback())
-		}
-	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
-		"published candidate recovery did not clear the expected pending publication"); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("recover published candidate: %w", err)
-	}
-	return errors.New("published candidate recovered as Sync Base while preserving local changes; rerun sync")
 }
 
 func deletionStats(trackedPaths map[string]bool, paths []checkoutPath) (deleted, tracked int64) {
@@ -440,72 +333,6 @@ func _remoteCommitDescendsFrom(ctx context.Context, options bindOptions, head, a
 		pending = append(pending, commit.Parents...)
 	}
 	return false, nil
-}
-
-func transitionPublishedSuccessor(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, snapshot worktreeSnapshot,
-	head remoteHead, pending _syncPublicationState, stdout io.Writer, config libraryClientConfig, budget *_replayBudget) error {
-	if head.CommitID == nil {
-		return errors.New("remote successor Head is empty")
-	}
-	var promotions []_conflictPromotion
-	if pending.CandidateCommit != pending.CapturedCommit {
-		rebuilt, err := _rebuildPendingMerge(ctx, options, binding, snapshot, pending, budget)
-		if err != nil {
-			return fmt.Errorf("rebuild conflict provenance before checkout transition: %w", err)
-		}
-		promotions = rebuilt.promotions
-		if err := _validatePromotionTargets(promotions, rebuilt.paths); err != nil {
-			return err
-		}
-	}
-	encodedPromotions, err := _encodeConflictPromotions(promotions)
-	if err != nil {
-		return err
-	}
-	if len(promotions) != 0 {
-		cacheRoot, err := openVerifiedCacheRoot(options.clientDir)
-		if err != nil {
-			return err
-		}
-		options.cacheRoot = cacheRoot
-		capturedBinding := binding
-		capturedBinding.SyncBase, capturedBinding.SyncBaseRoot = pending.CapturedCommit, pending.CapturedRoot
-		authorityErr := _authoritativePromotionReplay(ctx, options, capturedBinding, *head.CommitID, promotions, budget)
-		closeErr := cacheRoot.Close()
-		if authorityErr != nil || closeErr != nil {
-			return errors.Join(authorityErr, closeErr)
-		}
-	}
-	checkout := pendingCheckout{ServerURL: binding.ServerURL, LibraryID: binding.LibraryID, Worktree: binding.Worktree,
-		UserID: binding.UserID, DeviceID: binding.DeviceID, TargetCommit: *head.CommitID, HeadETag: head.ETag,
-		ApplyState: "pending", ConflictPromotions: encodedPromotions}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := updateBindingAndIndex(ctx, tx, binding, pending.CapturedCommit, pending.CapturedRoot, head.ETag, snapshot.paths); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pending_checkouts(server_url, library_id, worktree, user_id, device_id,
-		target_commit, target_root, head_etag, apply_state, conflict_promotions)
-		VALUES (?, ?, ?, ?, ?, ?, '', ?, 'pending', ?)`, checkout.ServerURL, checkout.LibraryID, checkout.Worktree,
-		checkout.UserID, checkout.DeviceID, checkout.TargetCommit, checkout.HeadETag, checkout.ConflictPromotions); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
-		"publication changed during checkout transition"); err != nil {
-		return errors.Join(err, tx.Rollback())
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("transition superseded publication: %w", err)
-	}
-	binding.SyncBase, binding.SyncBaseRoot, binding.HeadETag = pending.CapturedCommit, pending.CapturedRoot, head.ETag
-	if config.afterSyncCheckoutTransition != nil {
-		if err := config.afterSyncCheckoutTransition(); err != nil {
-			return fmt.Errorf("after sync checkout transition: %w", err)
-		}
-	}
-	return continueSyncCheckout(ctx, db, options, binding, checkout, stdout, config)
 }
 
 func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, binding clientBinding, pending pendingCheckout,

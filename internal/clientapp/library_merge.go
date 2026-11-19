@@ -116,6 +116,43 @@ func prepareSyncMergePublication(ctx context.Context, session *_lockedBoundWorkt
 	}, nil
 }
 
+func prepareSyncReplacementMerge(ctx context.Context, r _syncPublicationRound, old _syncPublicationState,
+	snapshot worktreeSnapshot, observedHead string) (_syncReplacementPlan, error) {
+	rebuilt := _rebuiltPendingMerge{snapshot: snapshot}
+	if old.CandidateCommit != old.CapturedCommit {
+		var err error
+		rebuilt, err = _rebuildPendingMerge(ctx, r.options, r.binding, snapshot, old, r.budget)
+		if err != nil {
+			return _syncReplacementPlan{}, fmt.Errorf("rebuild pending recursive merge before replacement: %w", err)
+		}
+	}
+	base, err := _budgetedRemoteCommit(ctx, r.options, old.ExpectedHead, r.budget)
+	if err != nil || base.AuthorUserID != r.binding.UserID {
+		return _syncReplacementPlan{}, errors.Join(errors.New("verify previous expected Head for merge"), err)
+	}
+	remote, err := _budgetedRemoteCommit(ctx, r.options, observedHead, r.budget)
+	if err != nil || remote.AuthorUserID != r.binding.UserID {
+		return _syncReplacementPlan{}, errors.Join(errors.New("verify latest Head for merge"), err)
+	}
+	prepared, err := _prepareRecursiveMerge(ctx, r.options, rebuilt.snapshot, base.Root, old.CandidateRoot, remote.Root,
+		observedHead, old.CandidateCommit, old.candidate, r.binding, r.config, r.budget)
+	if err != nil {
+		return _syncReplacementPlan{}, err
+	}
+	basePaths, err := _verifiedRemotePaths(ctx, r.options, base.Root, r.budget)
+	if err != nil {
+		return _syncReplacementPlan{}, fmt.Errorf("verify replacement Base snapshot: %w", err)
+	}
+	history := old.CandidateHistory
+	if old.CandidateCommit != old.CapturedCommit {
+		history = append(history[:len(history):len(history)], old.CandidateData)
+	}
+	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
+	return _syncReplacementPlan{baseRoot: base.Root, root: prepared.root, commit: prepared.candidateID, data: prepared.candidateData,
+		directories: append(rebuilt.directories, prepared.directories...), history: history,
+		deleted: deleted, tracked: tracked, protected: protectedDeletion(deleted, tracked)}, nil
+}
+
 func _prepareRecursiveMerge(ctx context.Context, options bindOptions, snapshot worktreeSnapshot, baseRoot, localRoot,
 	remoteRoot, remoteHead, localCommit string, localSeed object.Commit, binding clientBinding, config libraryClientConfig,
 	budget *_replayBudget) (_preparedMerge, error) {

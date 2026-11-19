@@ -1126,7 +1126,7 @@ func TestLibrarySyncProtectedRecursiveMergeSurvivesRepeatedHeadAdvances(t *testi
 	budget := &_replayBudget{commitLimit: 2, treeLimit: _mergeMaxObjects, pathLimit: _mergeMaxObjects,
 		commits: make(map[string]object.Commit), walked: make(map[string]bool)}
 	puts.Store(0)
-	_, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: _syncPublicationRoundOptions{budget: budget, stdout: io.Discard}})
+	_, err := advanceTestPublication(t, session, _resumeSyncPublicationRequest{round: _syncPublicationRoundOptions{budget: budget}})
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}

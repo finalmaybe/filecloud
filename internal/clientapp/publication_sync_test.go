@@ -245,7 +245,7 @@ func prepareTestSyncPublication(t *testing.T, session *_lockedBoundWorktreeSessi
 		t.Fatal(err)
 	}
 	return _startSyncPublicationRequest{prepared: prepared,
-		round: _syncPublicationRoundOptions{scanConfig: scanConfig, budget: _newReplayBudget(), stdout: io.Discard}}
+		round: _syncPublicationRoundOptions{scanConfig: scanConfig, budget: _newReplayBudget()}}
 }
 
 func assertTestSyncPublicationFinalized(t *testing.T, state importedBinding, id string) {

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"sort"
@@ -33,16 +32,12 @@ type _syncPublicationRoundOptions struct {
 	confirmDelete    string
 	confirmDeleteSet bool
 	budget           *_replayBudget
-	stdout           io.Writer // Used by the legacy checkout path until it has its own handoff.
 }
 
 type _syncPublicationRound struct {
-	db      *sql.DB
-	binding clientBinding
+	*_lockedBoundWorktreeSession
 	options bindOptions
-	config  libraryClientConfig
 	budget  *_replayBudget
-	stdout  io.Writer
 }
 
 func newSyncPublicationRound(session *_lockedBoundWorktreeSession, round _syncPublicationRoundOptions) _syncPublicationRound {
@@ -52,8 +47,7 @@ func newSyncPublicationRound(session *_lockedBoundWorktreeSession, round _syncPu
 	options.scanConfig.trackedPaths = maps.Clone(round.scanConfig.trackedPaths)
 	options.scanConfig.ignoredRootNames = maps.Clone(round.scanConfig.ignoredRootNames)
 	options.scanConfig.ignoredPaths = maps.Clone(round.scanConfig.ignoredPaths)
-	return _syncPublicationRound{db: session.db, binding: session.binding, options: options,
-		config: session.config, budget: round.budget, stdout: round.stdout}
+	return _syncPublicationRound{_lockedBoundWorktreeSession: session, options: options, budget: round.budget}
 }
 
 func (r _syncPublicationRound) start(ctx context.Context, prepared _preparedSyncPublication) (_publicationOutcome, error) {
@@ -111,30 +105,15 @@ func (r _syncPublicationRound) resume(ctx context.Context, snapshot worktreeSnap
 	if err := _verifyPendingPublicationChain(ctx, r.options, pending, r.binding, r.budget); err != nil {
 		return _publicationOutcome{}, err
 	}
-	if *head.CommitID == pending.CandidateCommit {
-		if snapshot.root != pending.CapturedRoot {
-			return _publicationOutcome{kind: _publicationOutcomeRerunSync}, recoverPublishedCandidate(ctx, r.db, r.options, r.binding, head, pending)
-		}
-		if pending.CandidateRoot == pending.CapturedRoot {
-			if err := finalizePublished(ctx, r.db, r.binding, snapshot, head, pending); err != nil {
-				return _publicationOutcome{}, err
-			}
-			return _publicationOutcome{kind: _publicationOutcomeFinalized}, nil
-		}
-		return _publicationOutcome{kind: _publicationOutcomeCheckoutPending}, transitionPublishedSuccessor(ctx, r.db, r.options, r.binding, snapshot, head, pending, r.stdout, r.config, r.budget)
-	}
-	ancestor, err := _remoteCommitDescendsFrom(ctx, r.options, *head.CommitID, pending.CandidateCommit, r.binding.UserID, r.budget)
+	published, err := _remoteCommitDescendsFrom(ctx, r.options, *head.CommitID, pending.CandidateCommit, r.binding.UserID, r.budget)
 	if err != nil {
 		return _publicationOutcome{}, err
 	}
-	if ancestor {
-		if snapshot.root == pending.CapturedRoot {
-			return _publicationOutcome{kind: _publicationOutcomeCheckoutPending}, transitionPublishedSuccessor(ctx, r.db, r.options, r.binding, snapshot, head, pending, r.stdout, r.config, r.budget)
-		}
-		return _publicationOutcome{kind: _publicationOutcomeRerunSync}, recoverPublishedCandidate(ctx, r.db, r.options, r.binding, head, pending)
+	if published {
+		return r.settlePublished(ctx, snapshot, head, pending)
 	}
 	if *head.CommitID != pending.ExpectedHead {
-		return r.replacePendingForTrivialMerge(ctx, snapshot, head, pending)
+		return r.requestReplan(pending, head), nil
 	}
 	if head.ETag != pending.ExpectedETag {
 		if err := refreshPendingETag(ctx, r.db, r.binding.Worktree, &pending, head.ETag); err != nil {

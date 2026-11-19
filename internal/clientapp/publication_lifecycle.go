@@ -35,8 +35,10 @@ const (
 )
 
 type _publicationOutcome struct {
-	kind    _publicationOutcomeKind
-	pending _pendingPublicationState
+	kind     _publicationOutcomeKind
+	pending  _pendingPublicationState
+	replan   *_syncReplanChallenge
+	checkout *pendingCheckout
 }
 
 // Kind classifies the lifecycle result without requiring error-string parsing.
@@ -75,22 +77,13 @@ type _publicationLifecycle struct{}
 func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWorktreeSession,
 	request _publicationRequester) (_publicationOutcome, error) {
 	var noOutcome _publicationOutcome
-	if s == nil {
-		return noOutcome, _errPublicationSessionClosed
-	}
-	release, err := s.beginAdvance()
+	release, err := s.acquire(ctx)
 	if err != nil {
 		return noOutcome, err
 	}
 	defer release()
-	if err := ctx.Err(); err != nil {
-		return noOutcome, err
-	}
-	if err := s.validate(ctx); err != nil {
-		return noOutcome, err
-	}
 	switch request.(type) {
-	case _inspectPublicationRequest, _restorePublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest:
+	case _inspectPublicationRequest, _restorePublicationRequest, _startSyncPublicationRequest, _resumeSyncPublicationRequest, _replaceSyncPublicationRequest:
 	default:
 		return noOutcome, _errPublicationRequestInvalid
 	}
@@ -98,27 +91,36 @@ func (m *_publicationLifecycle) Advance(ctx context.Context, s *_lockedBoundWork
 	if err != nil {
 		return noOutcome, err
 	}
+	if checkout != nil {
+		s.challenge = nil
+		return _publicationOutcome{kind: _publicationOutcomeCheckoutPending, checkout: checkout}, nil
+	}
 	switch request := request.(type) {
 	case _startSyncPublicationRequest:
-		if checkout != nil || pending != nil || request.prepared.session != s {
+		if pending != nil || request.prepared.session != s {
 			return noOutcome, _errPublicationRequestInvalid
 		}
+		s.challenge = nil
 		return newSyncPublicationRound(s, request.round).start(ctx, request.prepared)
 	case _resumeSyncPublicationRequest:
 		value, ok := pending.(_syncPublicationState)
-		if checkout != nil || !ok {
+		if !ok {
 			return noOutcome, _errPublicationRequestInvalid
 		}
+		s.challenge = nil
 		return newSyncPublicationRound(s, request.round).resumeCurrent(ctx, value)
-	default:
-		switch {
-		case checkout != nil:
-			return _publicationOutcome{kind: _publicationOutcomeCheckoutPending}, nil
-		case pending != nil:
-			return _publicationOutcome{kind: _publicationOutcomePending, pending: pending}, nil
-		default:
-			return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
+	case _replaceSyncPublicationRequest:
+		c := request.challenge
+		if c == nil || c != s.challenge || c.binding != s.binding || c.replacement == nil {
+			return noOutcome, _errPublicationRequestInvalid
 		}
+		s.challenge = nil
+		return c.replace(ctx)
+	default:
+		if pending != nil {
+			return _publicationOutcome{kind: _publicationOutcomePending, pending: pending}, nil
+		}
+		return _publicationOutcome{kind: _publicationOutcomeIdle}, nil
 	}
 }
 
@@ -138,6 +140,7 @@ type _lockedBoundWorktreeSession struct {
 	root      *openedWorktree
 	clientDir string
 	config    libraryClientConfig
+	challenge *_syncReplanChallenge
 }
 
 func openLockedBoundWorktreeSession(ctx context.Context, clientDir, worktree string,
@@ -222,6 +225,26 @@ func readLockedSessionBinding(ctx context.Context, db *sql.DB, worktree string) 
 	return binding, token, nil
 }
 
+// Planning reads the same worktree and consumes the same replay budget as Advance.
+func (s *_lockedBoundWorktreeSession) acquire(ctx context.Context) (func(), error) {
+	if s == nil {
+		return nil, _errPublicationSessionClosed
+	}
+	release, err := s.beginAdvance()
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+	if err := s.validate(ctx); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
 func (s *_lockedBoundWorktreeSession) beginAdvance() (func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -282,6 +305,7 @@ func (s *_lockedBoundWorktreeSession) Close() error {
 		return nil
 	}
 	s.closed = true
+	s.challenge = nil
 	s.mu.Unlock()
 
 	var err error
