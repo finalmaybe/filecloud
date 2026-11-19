@@ -130,23 +130,21 @@ func (r _restorePublicationRound) confirm(ctx context.Context, current _pendingP
 	if err != nil {
 		return _publicationOutcome{}, fmt.Errorf("scan worktree: %w", err)
 	}
-	if head.CommitID == nil {
-		return r.discardStalePreview(ctx, pending)
+	relation, err := r.classifyHead(ctx, head, pending)
+	if err != nil {
+		// Failed ancestry verification does not prove that the candidate is unpublished.
+		return _publicationOutcome{}, err
 	}
-	if *head.CommitID != pending.ExpectedHead {
-		published, err := r.isPublished(ctx, *head.CommitID, pending)
-		if err != nil {
-			return r.revalidationFailed(ctx, pending, err)
-		}
-		if !published {
-			return r.discardStalePreview(ctx, pending)
-		}
+	switch relation {
+	case _restoreHeadCandidate, _restoreHeadSuccessor:
 		if !pending.RestoreConfirmed {
 			return restoreConfirmationRequired(pending)
 		}
 		return r.settlePublished(ctx, snapshot, head, pending)
+	case _restoreHeadEmpty, _restoreHeadUnrelated:
+		return r.discardStalePreview(ctx, pending)
 	}
-	if head.ETag != pending.ExpectedETag || snapshot.root != pending.CapturedRoot {
+	if snapshot.root != pending.CapturedRoot {
 		return r.discardStalePreview(ctx, pending)
 	}
 	source, plan, err := r.plan(ctx, snapshot, pending.SourceCommit, pending.SourcePath)

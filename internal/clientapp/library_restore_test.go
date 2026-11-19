@@ -484,12 +484,23 @@ func TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex(t *testing
 	state, pending, config := prepareRestoreConfirmationTest(t)
 	beforeBinding := readTestBinding(t, state.clientDir, state.worktree)
 	beforeIndex := captureTestPathIndex(t, state.clientDir, state.worktree)
-	config.afterSyncCheckoutTransition = func() error { return errors.New("restore checkout transition boundary") }
-	err := runLibraryWithConfig(t.Context(), []string{"restore", "--client-dir", state.clientDir,
-		"--worktree", state.worktree, "--confirm", pending.CandidateCommit[:deleteCandidatePrefixLen]}, nil,
-		io.Discard, io.Discard, config)
-	if err == nil || !strings.Contains(err.Error(), "restore checkout transition boundary") {
+	session := openTestPublicationSession(t, state)
+	interrupted := errors.New("restore checkout transition boundary")
+	session.config.afterSyncCheckoutTransition = func() error { return interrupted }
+	confirm := _confirmRestorePublicationRequest{prefix: pending.CandidateCommit[:deleteCandidatePrefixLen]}
+	if _, err := advanceTestPublication(t, session, confirm); !errors.Is(err, interrupted) {
 		t.Fatalf("restore checkout transition error=%v, want injected boundary", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	session = openTestPublicationSession(t, state)
+	outcome, err := advanceTestPublication(t, session, _resumeRestorePublicationRequest{})
+	if err != nil || outcome.Kind() != _publicationOutcomeCheckoutPending || outcome.checkout.TargetCommit != pending.CandidateCommit {
+		t.Fatalf("reopen after restore checkout transition: outcome=%v checkout=%+v err=%v", outcome.Kind(), outcome.checkout, err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if after := readTestBinding(t, state.clientDir, state.worktree); after != beforeBinding ||
 		!reflect.DeepEqual(captureTestPathIndex(t, state.clientDir, state.worktree), beforeIndex) ||
@@ -502,14 +513,15 @@ func TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex(t *testing
 			countClientRows(t, state.clientDir, "pending_checkouts", state.worktree))
 	}
 
-	config.afterSyncCheckoutTransition = nil
+	headBeforeCheckout := restoreTestHead(t, state)
 	if err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", state.clientDir,
 		"--worktree", state.worktree}, nil, io.Discard, io.Discard, config); err != nil {
 		t.Fatalf("resume restore checkout transition: %v", err)
 	}
 	binding := assertTestConverged(t, state.environment, state.clientDir, state.worktree)
-	if binding.SyncBase != pending.CandidateCommit || binding.SyncBaseRoot != pending.CandidateRoot {
-		t.Fatalf("resumed restore checkout binding=%+v, want candidate=%s root=%s",
+	if binding.SyncBase != pending.CandidateCommit || binding.SyncBaseRoot != pending.CandidateRoot ||
+		restoreTestHead(t, state) != headBeforeCheckout || countClientRows(t, state.clientDir, "pending_publications", state.worktree) != 0 {
+		t.Fatalf("resumed restore checkout binding=%+v, want candidate=%s root=%s, unchanged Head, and no Publication",
 			binding, pending.CandidateCommit, pending.CandidateRoot)
 	}
 }

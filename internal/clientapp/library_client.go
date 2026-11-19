@@ -2969,11 +2969,12 @@ func updateRemoteHeadWithAttempts(ctx context.Context, base *url.URL, libraryID 
 		if status != http.StatusOK && status != http.StatusPreconditionFailed {
 			return remoteHead{}, false, fmt.Errorf("publish library Head failed: server returned %s", http.StatusText(status))
 		}
+		conflict := status == http.StatusPreconditionFailed
 		var envelope struct{ Head remoteHead }
 		if err := json.Unmarshal(data, &envelope); err != nil {
-			return remoteHead{}, false, fmt.Errorf("decode published library Head: %w", err)
+			return remoteHead{}, conflict, fmt.Errorf("decode published library Head: %w", err)
 		}
-		return envelope.Head, status == http.StatusPreconditionFailed, nil
+		return envelope.Head, conflict, nil
 	}
 	return remoteHead{}, false, errors.New("publish library Head exhausted retry attempts")
 }
