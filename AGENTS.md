@@ -14,4 +14,4 @@
 
 ### Cross-platform acceptance hosts
 
-需要在 macOS/APFS 或 Windows/NTFS 实机验收时，先读取本地文件 `.pi/acceptance-hosts.md`。该文件包含当前环境的 SSH 地址和操作命令，仅用于本机 agent，不提交到仓库。
+在 macOS/APFS 或 Windows/NTFS 上验收前，先按[跨平台验收主机指南](docs/agents/acceptance-hosts.md)连接目标系统，再在目标系统的本地磁盘上运行测试。
