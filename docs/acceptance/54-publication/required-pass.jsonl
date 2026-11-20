@@ -1,0 +1,117 @@
+{"category":"fixed vectors","package":"internal/object","test":"TestCanonicalMetadataVectors","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/object","test":"TestBlockVectors","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/object","test":"TestCanonicalMetadataRejectsCollectionPastLimit","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestCanonicalProtocolObjectIDs","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestConflictCopyNameAttestedNormalVectors","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestConflictCopyNameLongExtensionOrdinalOneFixedVector","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestConflictFallbackAttestedVectors","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestLibrarySyncLongFallbackCandidateHistoryFixedReplayVector","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestCrossPlatformFixedObjectIDs","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed vectors","package":"internal/clientapp","test":"TestRestorePlannerDirectoryOverlayFixedVector","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"fixed convergence","package":"internal/clientapp","test":"TestCrossPlatformDeterministicConvergence","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"correctness oracle","package":"internal/clientapp","test":"TestPlatformCorrectnessLoop","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"real process acceptance","package":"internal/clientapp","test":"TestBuiltBinaryEndToEndAcceptance","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"real process acceptance","package":"internal/clientapp","test":"TestBuiltBinaryHistoryInspectReadOnlyAcceptance","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"real process acceptance","package":"internal/clientapp","test":"TestBuiltBinaryDirectoryRestoreAcceptance","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestListHistoryUsesHeadFirstParentOrderAndStableCursor","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestListHistoryValidationAndAuthenticationOrder","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestListHistoryRejectsExpiredAndCrossBoundTokens","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestListHistoryLimiterReleasesOnDeadline","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestGetHistoryCommitReturnsPublishedRolesAndImmutableMetadata","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history HTTP contract","package":"internal/library","test":"TestGetHistoryCommitValidationAndVisibility","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/library","test":"TestDefaultHeadValidationProtocolBudgets","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history merge sources","package":"internal/clientapp","test":"TestLibraryHistoryListIncludesVerifiedMergedLineage","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history merge sources","package":"internal/clientapp","test":"TestLibraryHistoryListMergedSourceBudgetIsAtomic","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history merge sources","package":"internal/clientapp","test":"TestLibraryRestoreAcceptsPublishedMergeSource","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history read only","package":"internal/clientapp","test":"TestLibraryHistoryInspectDirectoryPaginates500Of501Entries","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history read only","package":"internal/clientapp","test":"TestLibraryHistoryInspectDiagnosticsDoNotExposeCanaries","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history read only","package":"internal/clientapp","test":"TestLibraryHistoryListTransportErrorDoesNotExposePageToken","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history role migration","package":"internal/storage","test":"TestPublishedCommitsMigrationBackfillsExistingHead","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"history role migration","package":"internal/storage","test":"TestPublishedCommitRolesMigrationRollsBackOnUnprovableHistory","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerRestoresFileAndMtimeOnlyChange","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerNoOpAndMissingSourcePath","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerFileReplacesDirectoryAndCountsRemovedDescendants","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerNestedDirectoryOverlayPreservesCurrentOnlySubtrees","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerRootOverlayIsDeterministicWithoutRootMtime","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerPreviewCapAndDeterminism","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerRejectsBudgetsAndNonCanonicalObjects","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore planner","package":"internal/clientapp","test":"TestRestorePlannerDirectoryReplacesFileAtSelectedAncestor","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/clientapp","test":"TestDefaultRestorePlannerProtocolBudgets","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore migration","package":"internal/clientapp","test":"TestClientV23ToV24SyncPendingMigrationPreservesFields","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore dispatcher","package":"internal/clientapp","test":"TestRestorePublicationDispatcherRejectsUnconfirmedWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore dispatcher","package":"internal/clientapp","test":"TestLibraryRestoreRejectsSyncPublicationWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore dispatcher","package":"internal/clientapp","test":"TestLibraryRestoreRejectsPendingCheckoutWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore rejection","package":"internal/clientapp","test":"TestLibraryRestoreNoOpCreatesNoPendingOrPublication","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore rejection","package":"internal/clientapp","test":"TestLibraryRestoreTypeReplacementRequiresPreviewAndExactConfirmation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore rejection","package":"internal/clientapp","test":"TestLibraryRestorePlannerBudgetsRejectBeforeWrites","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore rejection","package":"internal/clientapp","test":"TestLibraryRestoreConfirmationIsolationAndStaleWorktree","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestorePreviewReplaysPersistedCandidateAfterOutputFailure","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryWatchBlocksOnUnconfirmedRestoreWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreConfirmedObjectPUTFailuresResumeFixedCandidate","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreUnavailableCASRetriesOnlyAfterHeadResolution","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreLostCASResponseResolvesWithoutRepublish","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreHeadConflictClearsCandidateWithoutFollowUpHeadRead","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestorePublishedAncestorCheckoutsLatestHeadWithoutRepublish","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestorePublishedDirtyPreservesWorktreeForOrdinarySync","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreCheckoutTransitionDoesNotAdvanceBindingOrIndex","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore recovery","package":"internal/clientapp","test":"TestLibraryRestoreExpectedHeadSkipsPublishedAncestorWalk","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"restore fault injection","package":"internal/clientapp","test":"TestLibrarySyncRestorePromotionCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"log privacy","package":"internal/clientapp","test":"TestRunLogsStructuredCommandLifecycleWithoutSensitivePaths","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindDoubleEmptyConvergesAndUnbindIsLocalOnly","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindConcurrentInitializationAdoptsWinner","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindImportsLocalSnapshotAndSyncNoOps","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindChecksOutRemoteHeadWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindCheckoutRejectsBothNonEmptyWithoutMutation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"first binding","package":"internal/clientapp","test":"TestLibraryBindRejectsUnsupportedOrNonEmptyAndBindingConflicts","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncStructuralConflictsPreserveCompleteLocalObject","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncMtimeOnlyChangesConvergeWithoutCommitLoop","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncContinuousTrivialMergeCompetition","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncContinuousDivergentHeadConflictsReuseCapturedSeed","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncRecursiveMergeResolvesLostCASResponse","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncRecoversPublishedCandidateBeforeDiscardingMutatedWorktree","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"sync convergence","package":"internal/clientapp","test":"TestLibrarySyncPendingPublicationTransitionsToSuccessor","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"scan races","package":"internal/clientapp","test":"TestScanRegularFileRetriesConcurrentRewrite","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"scan races","package":"internal/clientapp","test":"TestScanDirectoryEnumerationChangeFailsRound","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"scan races","package":"internal/clientapp","test":"TestScanFinalValidationCatchesEarlierFileChange","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"scan races","package":"internal/clientapp","test":"TestSyncUnstableScanDoesNotPublishOrChangeClientState","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestFSActionSubprocessCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicBindSubprocessCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicInitialCheckoutBaseCommitCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicSyncSubprocessCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicSyncTransactionCrashMatrix","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicCreateZeroIdentityReplacementPreserved","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicDeepCreateZeroIdentityPreserved","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicCreateZeroIdentityTypeChangedEntryPreserved","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicCreateRecoveryCollisionChain","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicSyncZeroIdentityCreateAutoRollback","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicSyncZeroIdentityTypeChangedEntryPreserved","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestPublicSyncCreateRecoveryCollisionChain","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestFSActionRemoveIntentPreservesOldFDModification","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestLibrarySyncConflictPromotionPreservesOpenFileIdentity","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"checkout fault injection","package":"internal/clientapp","test":"TestLibrarySyncRemoteApplyPreservesOpenFileModification","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"server fault injection","package":"internal/storage","test":"TestObjectStorePublicationCrashMatrixPreservesOldHead","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"server fault injection","package":"internal/library","test":"TestHeadUpdateFaultPointsPreserveReadableInvariant","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"transfer recovery","package":"internal/clientapp","test":"TestLibrarySyncInterrupted100MiBUploadSendsOnlyMissingBlocks","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"transfer recovery","package":"internal/clientapp","test":"TestLibraryBindCheckoutDownloadAndDiskFailuresRetryFixedTarget","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"transfer recovery","package":"internal/library","test":"TestBlockResponseLossReplayReturnsCreatedFalse","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"permissions","package":"internal/library","test":"TestLibraryAuthenticationAndOwnerIsolationAreUniform","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"permissions","package":"internal/library","test":"TestCheckObjectsReturnsOnlyOwnerLibraryMissingObjects","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/auth","test":"TestCreateSessionEachKDFCapacityReturnsImmediately","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/library","test":"TestObjectPUTRejectsBusyRequestsBeforeReadingBody","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/library","test":"TestObjectPUTRollsBudgetAcrossRestartWithoutChargingReplays","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/library","test":"TestHeadValidationAdmissionBoundsConcurrentWork","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"resource limits","package":"internal/library","test":"TestHeadValidationCommitBudgetBoundaries","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"deletion confirmation","package":"internal/clientapp","test":"TestLibrarySyncProtectedDeletionConfirmation","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"deletion confirmation","package":"internal/clientapp","test":"TestLibrarySyncProtectedDeletionMutationRequiresNewCandidate","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"deletion confirmation","package":"internal/clientapp","test":"TestLibrarySyncConfirmedDeletionResumesUploadFailure","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/auth","test":"TestSessionRawHTTPHeadersAndEmptyLogout","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestCreateReplayAndReadLibrary","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestListLibrariesUsesStableOpaqueExpiringPagination","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestHeadHTTPPreconditionsAndConditionalGet","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestMetadataObjectHTTPContract","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestBlockHTTPContract","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/library","test":"TestObjectHTTPWireContract","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/clientapp","test":"TestLibraryClientIgnoresOptionalResponseFields","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/clientapp","test":"TestUpdateRemoteHeadRetriesExplicitTransientResponses","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/clientapp","test":"TestUpdateRemoteHeadDoesNotRetryUnknownNetworkResult","linux":"pass","darwin":"pass","windows":"pass"}
+{"category":"raw HTTP contract","package":"internal/clientapp","test":"TestCheckRemoteObjectsBatchesAt1000","linux":"pass","darwin":"pass","windows":"pass"}

@@ -159,6 +159,20 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 
 稳定绑定、同步、传输恢复和 checkout 崩溃恢复场景输出以 `FILECLOUD_ATTESTATION` 开头的严格 JSON 记录。门禁按精确白名单拒绝缺失、重复、未知、无法完整解码或带未知字段的记录，并分别验证 `Head == Sync Base`、`Head Root == Sync Base Root ==` 独立重扫的工作树快照、完整 Head parent 历史对象可达、确认输入摘要集合完整保留、journal 清空且无未登记内部路径。真实恢复证明还要求 SourceCommit/Root/Path、PreviousHead/ExpectedHead、CandidateCommit、ResultRoot、五类变化统计、pending 清理、Source/PreviousHead 可达性和非空的恢复前输入摘要集合；期望摘要与从最终历史实际观测到的保留摘要必须完全一致。双空场景允许确认输入集合为空；100 MiB 场景以流式 SHA-256 验证内容，不在 Oracle 中重复缓存整文件。完整 bind/sync checkout 文件系统动作矩阵的每个动作和崩溃边界各自产生证明，顶层矩阵测试名也在 required-pass 清单中。对象发布和 Head 更新矩阵在每个真实子进程 `SIGKILL` 点重开存储，输出旧 Head 与当前 Head，并逐对象验证旧 Head 的 Commit、Directory、File 和 Block 仍可读。当前三平台门禁精确要求 115 条结构化证明：既有收敛、可读性和 bind/sync `between_create_identity` 恢复证明，加上一条由真实构建二进制、真实 `serve` 进程和两个 CLI 客户端完成创建、读取、双向同步、冲突收敛、服务重启及 token 撤销的生命周期证明、两条分别对应成功目录恢复和根恢复的真实二进制证明、一条固定向量证明、两条固定双设备收敛证明和一条平台文件系统原语证明。固定向量由生产规范化、冲突命名、合并和 restore planner 实际计算，并与冻结 ObjectId map 及规范 restore Commit 字节比较；固定收敛使用相同设备 ID、整秒 mtime 和提交时钟，要求两端及三平台均得到 Root `746abb68bf9a6fb9cc2251b96be467622a28dd8a7d6686c73a5f0db97a703599` 与 Head `6b604c48ae82f9a829370976c3f08ce34dee7ea01a1791a336b3363175fcee53`。这些进程测试只证明进程崩溃恢复，不证明物理断电、控制器缓存或硬件故障下的持久性。
 
+### #54：Publication 生命周期重构验收（2026-11-20）
+
+验收基线为 #53 的收尾提交 `44f27791c4c74e8773bb18c3bbef4175c9422722`。核对了 Sync、watch 和 Safe Restore 的调用路径：发布统一经过 `_publicationLifecycle.Advance`；`pending_publications` 的运行时 SQL 由 `publication_persistence.go` 持有，unbind 在原事务内调用该模块清理候选。三端使用 Go 1.26.6。本地先以 `go test -count=1 ./...` 通过完整回归，再将同一份源码归档解到各自的本地卷运行上述 1B 命令。归档可用 `git archive --format=tar.gz 44f2779 -- cmd internal tools go.mod go.sum` 重建，SHA-256 为 `362550779f6854bf84c805d9c490dd348da7c76a55598491b6aa2deddf32135b`。
+
+| 原生测试环境 | 矩阵耗时 | 必跑测试 | 结构化证明（每行一条 JSON） |
+|---|---:|---:|---|
+| Linux 7.3.4-zen2-2-zen / amd64 / ext4 | 285.21 秒 | 117/117 | [115 条证明](../acceptance/54-publication/linux-ext4.jsonl) |
+| macOS 27.0.1 / arm64 / APFS | 488.88 秒 | 117/117 | [115 条证明](../acceptance/54-publication/macos-apfs.jsonl) |
+| Windows 11 10.0.26200.8037 / amd64 / 固定 NTFS | 1263.51 秒 | 117/117 | [115 条证明](../acceptance/54-publication/windows-ntfs.jsonl) |
+
+[逐测试通过记录](../acceptance/54-publication/required-pass.jsonl)来自三个矩阵的具名 pass 事件。Sync 覆盖受保护删除及确认后重试、连续 Head 竞争、发布后保留本地修改、向后继 Head 交接 checkout；Safe Restore 覆盖预览重放、精确确认、HeadConflict、CAS 响应丢失、候选已在 Head 历史中，以及交接 checkout 时基线和索引尚未推进。进程崩溃与恢复场景也通过。三端均无白名单之外的测试跳过；APFS 和 NTFS 的文件系统证据均记录了大小写不敏感查找。
+
+三个证明文件中的 `deterministic convergence first client` 和 `deterministic convergence second client` 共六条记录，以下字段跨设备、跨平台逐字一致：`head = syncBase = 6b604c48ae82f9a829370976c3f08ce34dee7ea01a1791a336b3363175fcee53`，`headRoot = baseRoot = snapshot = 746abb68bf9a6fb9cc2251b96be467622a28dd8a7d6686c73a5f0db97a703599`。此次验收未修改产品代码、断言、跳过清单或超时预算。
+
 ## macOS/APFS 平台边界
 
 macOS 门禁在仓库所在挂载创建专用根，通过 held worktree fd 的 `fstatfs` 确认 `Fstypename=apfs` 与 `MNT_LOCAL`，再通过 `fgetattrlist(ATTR_VOL_CAPABILITIES)` 要求 `VOL_CAP_INT_RENAME_EXCL` 和 `VOL_CAP_INT_FLOCK` 同时 valid/supported。无法确认、网络卷或缺失能力时直接失败。随后复用完整公共 required-pass 清单、全仓 `go test -json ./...`、故障注入点和结构化 Oracle。
