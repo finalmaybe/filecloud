@@ -420,6 +420,23 @@ printf '%s\n' "$TOKEN" |
 
 ## 9. 同步
 
+查看这个工作目录最近确认到哪个版本、是否有待处理操作（源码版）：
+
+```bash
+filecloud library status --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"
+```
+
+命令离线读取本地绑定，输出 JSON。`LibraryId` 是资料库 ID，`SyncBase` 是上次确认的本地同步基线。它不扫描工作目录，也不查询服务端 Head。`Pending` 取值如下：
+
+| `Pending` | 含义和下一步 |
+|---|---|
+| `none` | 没有记录在案的待处理操作。本地文件或远端仍可能有新变化。 |
+| `sync` / `restore` / `checkout` | 分别有同步发布、已确认的恢复或文件落盘尚待完成。运行普通 `sync` 继续。 |
+| `delete-confirmation` | 删除保护等待确认。先核对 `Deletion.Deleted`（待删除数）和 `Deletion.Tracked`（跟踪总数），确定后再按提示运行 `sync --confirm-delete`。 |
+| `restore-confirmation` | 历史恢复预览等待确认。确定要应用预览时，按提示运行 `restore --confirm`。 |
+
+有待处理操作时，`NextCommand` 给出完整命令的参数数组，带空格的目录也是一个参数。查询本身不会执行该命令、更新基线或迁移数据库。SQLite 使用只读连接；读取 WAL 模式的数据库时，SQLite 仍可能在客户端状态目录中创建或更新 `client.db-wal` / `client.db-shm` 辅助文件。
+
 执行一轮同步：
 
 ```bash
@@ -685,6 +702,7 @@ filecloud library create --server URL --library-id UUID --name NAME --token-stdi
 filecloud library list --server URL --token-stdin
 filecloud library inspect --server URL --library-id UUID --token-stdin
 filecloud library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
+filecloud library status --client-dir PATH --worktree PATH
 filecloud library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
 filecloud library watch --client-dir PATH --worktree PATH --interval DURATION
 filecloud library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]

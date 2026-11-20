@@ -100,7 +100,7 @@ type _pendingPublicationExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-func loadPendingPublication(ctx context.Context, db *sql.DB, binding clientBinding) (_pendingPublicationState, error) {
+func loadPendingPublication(ctx context.Context, db clientSchemaQuerier, binding clientBinding) (_pendingPublicationState, error) {
 	var row _pendingPublicationRow
 	var candidateLength, capturedLength, historyLength, previewLength int
 	var blobs bool

@@ -170,7 +170,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 	}
 	config = normalizeLibraryClientConfig(config)
 	if len(args) == 0 {
-		return errors.New("usage: filecloud library <create|list|inspect|history|bind|sync|watch|restore|unbind> [options]")
+		return errors.New("usage: filecloud library <create|list|inspect|history|bind|status|sync|watch|restore|unbind> [options]")
 	}
 	switch args[0] {
 	case "create":
@@ -198,6 +198,8 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		}
 		defer clear(options.token)
 		return bindLibrary(ctx, options, stdout, config)
+	case "status":
+		return runLibraryStatus(ctx, args[1:], stdout, stderr)
 	case "sync":
 		return runLibrarySync(ctx, args[1:], stdout, stderr, config)
 	case "watch":

@@ -153,6 +153,7 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 | 管理用户 | `filecloud-server user add`、`filecloud-server user reset-password` |
 | 管理会话 | `filecloud login`、`filecloud logout` |
 | 管理资料库 | `filecloud library create/list/inspect/bind/unbind` |
+| 查看本地绑定、同步基线和待处理操作（离线） | `filecloud library status`（源码版） |
 | 同步 | `filecloud library sync/watch` |
 | 浏览与恢复历史 | `filecloud library history list/inspect`、`filecloud library restore` |
 | 服务端维护 | `filecloud-server integrity check`、`filecloud-server gc` |
