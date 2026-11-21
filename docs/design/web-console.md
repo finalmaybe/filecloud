@@ -46,4 +46,4 @@ Web 与 `/v1` 不互相代收凭据：Web 不用客户端 Bearer 授予管理权
 
 ## 交付门禁
 
-阶段 1 的原型是离线示例，不能作为权限或协议回归的证据。维护者确认原型后才开始 `/web/` 实现；正式验证包括 WCAG 2.2 AA、窄屏与键盘、固定样本性能、真实 CLI↔Web 闭环，以及[发布门禁](../distribution.md)。所有后续任务和依赖见 [#56](https://github.com/finalmaybe/filecloud/issues/56)。
+维护者已在 [#58](https://github.com/finalmaybe/filecloud/issues/58) 选定亮色 A「图谱」：桌面左侧选主线提交或合并来源，右侧查看快照详情；窄屏选中后聚焦列表下方的详情。生产界面不提供评审用的版式切换器。原型使用离线示例，权限与协议兼容性须用真实服务验证；正式验证包括 WCAG 2.2 AA、窄屏与键盘、固定样本性能、真实 CLI↔Web 闭环，以及[发布门禁](../distribution.md)。所有后续任务和依赖见 [#56](https://github.com/finalmaybe/filecloud/issues/56)。
