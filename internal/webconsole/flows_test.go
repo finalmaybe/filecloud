@@ -94,6 +94,27 @@ func (f *fixture) login() {
 	}
 	f.cookie = w.Result().Cookies()[0]
 }
+func TestAdminGrantAndRevocation(t *testing.T) {
+	f := newFixture(t)
+	f.login()
+	if f.req("GET", "/web/accounts", nil).Code != 403 {
+		t.Fatal("implicit administrator")
+	}
+	f.config.AdminUsers = []string{"OBSERVER"}
+	f.mount()
+	if f.req("GET", "/web/accounts", nil).Code != 200 {
+		t.Fatal("authorized admin rejected")
+	}
+	f.config.AdminUsers = nil
+	f.mount()
+	if f.req("GET", "/web/accounts", nil).Code != 403 || f.req("GET", "/web/libraries", nil).Code != 200 {
+		t.Fatal("existing session did not lose only admin rights")
+	}
+	f.config.AdminUsers = []string{"missing"}
+	if _, err := webconsole.NewHandler(origin, "127.0.0.1:0", f.config); err == nil {
+		t.Fatal("unknown admin configured")
+	}
+}
 func TestSessionLifecycle(t *testing.T) {
 	f := newFixture(t)
 	bad := f.req("POST", "/web/login", url.Values{"username": {"observer"}, "password": {"invalid"}})

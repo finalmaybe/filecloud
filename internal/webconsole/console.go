@@ -2,6 +2,7 @@
 package webconsole
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"github.com/mingming-cn/filecloud/internal/auth"
@@ -19,11 +20,13 @@ import (
 var files embed.FS
 
 type Config struct {
-	Catalog  *library.Catalog
-	Sessions *auth.Sessions
-	Store    *storage.Store
+	AdminUsers []string
+	Catalog    *library.Catalog
+	Sessions   *auth.Sessions
+	Store      *storage.Store
 }
 type console struct {
+	admins map[string]bool
 	Config
 	shell  *template.Template
 	origin *url.URL
@@ -47,7 +50,17 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /web", http.RedirectHandler("/web/", http.StatusMovedPermanently))
-	c := &console{Config: config, shell: shell, origin: origin}
+	c := &console{Config: config, shell: shell, origin: origin, admins: map[string]bool{}}
+	for _, name := range config.AdminUsers {
+		if _, err := auth.ValidateUsername(name); err != nil {
+			return nil, errors.New("invalid configured Web administrator")
+		}
+		u, err := config.Store.FindUserByUsername(context.Background(), name)
+		if err != nil {
+			return nil, errors.New("configured Web administrator must already exist")
+		}
+		c.admins[u.ID] = true
+	}
 	mux.HandleFunc("GET /web/{$}", c.home)
 	mux.HandleFunc("GET /web/login", func(w http.ResponseWriter, r *http.Request) {
 		c.render(w, r, 200, page{Title: "账号登录", View: "login"})
@@ -60,7 +73,7 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
 	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
 	for _, path := range []string{"overview", "accounts"} {
-		mux.HandleFunc("GET /web/"+path, c.private(c.workspace))
+		mux.HandleFunc("GET /web/"+path, c.admin(c.workspace))
 	}
 	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js"} {
 		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {

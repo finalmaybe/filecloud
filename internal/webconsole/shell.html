@@ -19,8 +19,8 @@
     <nav aria-label="主导航">
       <a href="/web/" {{if eq .View "home"}}aria-current="page"{{end}}>控制台入口</a>
       <a href="/web/libraries">资料库</a>
-      <a href="/web/overview">服务概览</a>
-      <a href="/web/accounts">账号管理</a>
+      {{if .Admin}}<a href="/web/overview">服务概览</a>
+      <a href="/web/accounts">账号管理</a>{{end}}
     </nav>
     <span class="rail-foot">FILECLOUD / SERVER</span>
   </aside>

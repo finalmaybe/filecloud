@@ -95,6 +95,8 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
+	var admins []string
+	flags.Func("web-admin-user", "Authorize an existing local account for Web administration (repeatable)", func(value string) error { admins = append(admins, value); return nil })
 	globalKDFCapacity := flags.Int("kdf-global-capacity", _defaultGlobalKDFCapacity, "Global concurrent password KDF capacity")
 	sourceIPKDFCapacity := flags.Int("kdf-source-ip-capacity", _defaultSourceIPKDFCapacity, "Concurrent password KDF capacity per direct source IP")
 	usernameKDFCapacity := flags.Int("kdf-username-capacity", _defaultUsernameKDFCapacity, "Concurrent password KDF capacity per canonical username")
@@ -156,7 +158,10 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if historyConfig.GlobalConcurrency < 1 || historyConfig.UserConcurrency < 1 || historyConfig.RequestTimeout <= 0 {
 		return errors.New("history limits must be positive")
 	}
-	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, auth.HandlerConfig{
+	if len(admins) > 0 && *webOrigin == "" {
+		return errors.New("web-admin-user requires web-origin")
+	}
+	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -361,7 +366,7 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, webOrigin string, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
@@ -388,7 +393,8 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	mux.Handle("/v1/libraries/", libraries)
 	mux.Handle("/", health.NewHandler(store, logger))
 	if webOrigin != "" {
-		web, err := webconsole.NewHandler(webOrigin, address, webconsole.Config{Sessions: sessions, Store: store, Catalog: libraries})
+		webConfig.Sessions, webConfig.Store, webConfig.Catalog = sessions, store, libraries
+		web, err := webconsole.NewHandler(webOrigin, address, webConfig)
 		if err != nil {
 			return errors.Join(err, listener.Close())
 		}

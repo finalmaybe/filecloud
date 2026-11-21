@@ -23,7 +23,7 @@ func (c *console) current(r *http.Request) (identity, error) {
 		return identity{}, storage.ErrSessionNotFound
 	}
 	id, err := c.Sessions.BrowserUser(r.Context(), cookie.Value)
-	return identity{user: id}, err
+	return identity{user: id, admin: c.admins[id]}, err
 }
 func (c *console) private(next privatePage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +42,15 @@ func (c *console) private(next privatePage) http.HandlerFunc {
 		}
 		next(w, r, who)
 	}
+}
+func (c *console) admin(next privatePage) http.HandlerFunc {
+	return c.private(func(w http.ResponseWriter, r *http.Request, who identity) {
+		if !who.admin {
+			c.show(w, r, who, 403, "需要管理员权限", "error", nil, "此操作仅对服务器本机授权的管理员开放。")
+			return
+		}
+		next(w, r, who)
+	})
 }
 func (c *console) home(w http.ResponseWriter, r *http.Request) {
 	_, err := c.current(r)
