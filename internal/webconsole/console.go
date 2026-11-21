@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"github.com/mingming-cn/filecloud/internal/auth"
+	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/storage"
 	"html/template"
 	"net"
@@ -18,6 +19,7 @@ import (
 var files embed.FS
 
 type Config struct {
+	Catalog  *library.Catalog
 	Sessions *auth.Sessions
 	Store    *storage.Store
 }
@@ -52,7 +54,10 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	})
 	mux.HandleFunc("POST /web/login", c.login)
 	mux.HandleFunc("POST /web/logout", c.private(c.logout))
-	for _, path := range []string{"libraries", "libraries/{library}", "libraries/{library}/history", "overview", "accounts"} {
+	mux.HandleFunc("GET /web/libraries", c.private(c.libraries))
+	mux.HandleFunc("POST /web/libraries", c.private(c.createLibrary))
+	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
+	for _, path := range []string{"libraries/{library}/history", "overview", "accounts"} {
 		mux.HandleFunc("GET /web/"+path, c.private(c.workspace))
 	}
 	for _, name := range []string{"assets/console.css", "assets/atlas.svg"} {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/auth"
+	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/storage"
 	"github.com/mingming-cn/filecloud/internal/webconsole"
 )
@@ -56,7 +57,11 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.config = webconsole.Config{Store: db, Sessions: f.sessions}
+	catalog, err := library.NewHandler(db, nil, library.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.config = webconsole.Config{Store: db, Sessions: f.sessions, Catalog: catalog}
 	f.mount()
 	return f
 }

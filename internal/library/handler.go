@@ -74,8 +74,14 @@ type handler struct {
 	afterHistoryAdmit        func(context.Context)
 }
 
+// Catalog serves the Bearer API and provides the same owner-scoped operations to the console.
+type Catalog struct {
+	http.Handler
+	core *handler
+}
+
 // NewHandler constructs authenticated create, list, and get library endpoints.
-func NewHandler(store *storage.Store, logger *log.Logger, config Config) (http.Handler, error) {
+func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catalog, error) {
 	if store == nil {
 		return nil, errors.New("library store is required")
 	}
@@ -158,7 +164,7 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (http.H
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/objects/{ObjectType}/{ObjectId}", h.getMetadataObject)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/blocks/{ObjectId}", h.putBlock)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/blocks/{ObjectId}", h.getBlock)
-	return auth.RequireSession(store, config.Now, logger, mux), nil
+	return &Catalog{auth.RequireSession(store, config.Now, logger, mux), h}, nil
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
@@ -256,29 +262,14 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		h.internal(w, "read authenticated user", errors.New("missing authenticated user"))
 		return
 	}
-	var cursorTime time.Time
-	var cursorID string
-	if token != "" {
-		cursorTime, cursorID, err = h.decodePageToken(token, userID)
-		if err != nil {
-			h.invalid(w)
-			return
-		}
+	libraries, nextPageToken, err := h.listPage(r.Context(), userID, token, pageSize)
+	if errors.Is(err, ErrInvalidPage) {
+		h.invalid(w)
+		return
 	}
-	libraries, err := h.store.ListLibraries(r.Context(), userID, cursorTime, cursorID, pageSize+1)
 	if err != nil {
 		h.internal(w, "list libraries", err)
 		return
-	}
-	nextPageToken := ""
-	if len(libraries) > pageSize {
-		last := libraries[pageSize-1]
-		nextPageToken, err = h.encodePageToken(userID, last)
-		if err != nil {
-			h.internal(w, "encode page token", err)
-			return
-		}
-		libraries = libraries[:pageSize]
 	}
 	responses := make([]libraryResponse, len(libraries))
 	for i, item := range libraries {

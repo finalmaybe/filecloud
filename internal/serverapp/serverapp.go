@@ -388,7 +388,7 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	mux.Handle("/v1/libraries/", libraries)
 	mux.Handle("/", health.NewHandler(store, logger))
 	if webOrigin != "" {
-		web, err := webconsole.NewHandler(webOrigin, address, webconsole.Config{Sessions: sessions, Store: store})
+		web, err := webconsole.NewHandler(webOrigin, address, webconsole.Config{Sessions: sessions, Store: store, Catalog: libraries})
 		if err != nil {
 			return errors.Join(err, listener.Close())
 		}
