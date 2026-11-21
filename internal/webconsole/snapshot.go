@@ -26,5 +26,14 @@ func (c *console) snapshot(w http.ResponseWriter, r *http.Request, who identity)
 		c.problem(w, r, who, err)
 		return
 	}
+	if q.Has("shell") {
+		shell := q.Get("shell")
+		if shell != "sh" && shell != "ps" {
+			c.problem(w, r, who, library.ErrInvalidPath)
+			return
+		}
+		c.show(w, r, who, 200, "交给本机预览", "handoff", guide(v, shell == "ps"), "")
+		return
+	}
 	c.show(w, r, who, 200, "快照检查", "snapshot", v, "")
 }

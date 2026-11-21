@@ -41,6 +41,7 @@
     {{else if eq .View "libraries"}}{{template "libraries" .}}
     {{else if eq .View "library"}}{{template "library" .Data}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/web/libraries">重新打开资料库列表</a></section>
+    {{else if eq .View "handoff"}}{{template "handoff" .Data}}
     {{else if eq .View "snapshot"}}{{template "snapshot" .Data}}
     {{else if eq .View "history"}}{{template "history" .Data}}
     {{else if eq .View "accounts"}}{{template "accounts" .}}
