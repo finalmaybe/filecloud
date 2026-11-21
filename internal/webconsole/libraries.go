@@ -14,6 +14,9 @@ func (c *console) show(w http.ResponseWriter, r *http.Request, who identity, sta
 func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, err error) {
 	code, msg := 503, "服务暂不可用，请稍后重试。"
 	switch {
+	case errors.Is(err, library.ErrHistoryBusy):
+		code, msg = 429, "历史读取繁忙，请稍后再试。"
+		w.Header().Set("Retry-After", "1")
 	case errors.Is(err, library.ErrInvalidPage):
 		code, msg = 400, "分页链接已失效，请重新打开第一页。"
 	case errors.Is(err, storage.ErrLibraryNotFound):
@@ -58,6 +61,15 @@ func (c *console) createLibrary(w http.ResponseWriter, r *http.Request, who iden
 	default:
 		http.Redirect(w, r, "/web/libraries/"+item.ID, 303)
 	}
+}
+func (c *console) history(w http.ResponseWriter, r *http.Request, who identity) {
+	q := r.URL.Query()
+	data, err := c.Catalog.History(r.Context(), who.user, r.PathValue("library"), q.Get("cursor"), q.Get("commit"), q.Get("merge"))
+	if err != nil {
+		c.problem(w, r, who, err)
+		return
+	}
+	c.show(w, r, who, 200, "主线历史", "history", data, "")
 }
 func (c *console) libraryDetail(w http.ResponseWriter, r *http.Request, who identity) {
 	item, err := c.Store.GetLibrary(r.Context(), who.user, r.PathValue("library"))

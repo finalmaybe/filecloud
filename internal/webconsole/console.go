@@ -57,10 +57,11 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries", c.private(c.libraries))
 	mux.HandleFunc("POST /web/libraries", c.private(c.createLibrary))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
-	for _, path := range []string{"libraries/{library}/history", "overview", "accounts"} {
+	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
+	for _, path := range []string{"overview", "accounts"} {
 		mux.HandleFunc("GET /web/"+path, c.private(c.workspace))
 	}
-	for _, name := range []string{"assets/console.css", "assets/atlas.svg"} {
+	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js"} {
 		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})
@@ -82,7 +83,7 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")

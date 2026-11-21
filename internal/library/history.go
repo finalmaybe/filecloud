@@ -91,42 +91,14 @@ func (h *handler) getHistoryCommit(w http.ResponseWriter, r *http.Request) {
 		h.afterHistoryAdmit(request.Context())
 	}
 
-	role, found, err := h.store.GetPublishedCommitRole(request.Context(), owner, libraryID, commitID)
-	if err != nil {
-		h.historyFailure(w, fmt.Errorf("%w: role lookup", errHistoryUnavailable), "")
+	response, err := h.historyDetail(request.Context(), owner, libraryID, commitID)
+	if errors.Is(err, storage.ErrLibraryNotFound) {
+		h.writeError(w, 404, 2000, "history commit not found")
 		return
 	}
-	if !found {
-		h.writeError(w, http.StatusNotFound, 2000, "history commit not found")
-		return
-	}
-	if role.CommitID != commitID || !object.ValidID(role.MainlineCommitID) ||
-		(role.Role == _historyRoleMainline && role.MainlineCommitID != commitID) ||
-		(role.Role == _historyRoleMergeSource && role.MainlineCommitID == commitID) ||
-		(role.Role != _historyRoleMainline && role.Role != _historyRoleMergeSource) {
-		h.historyFailure(w, errHistoryCorrupt, commitID)
-		return
-	}
-	if role.Role == _historyRoleMergeSource {
-		mainline, found, err := h.store.GetPublishedCommitRole(request.Context(), owner, libraryID, role.MainlineCommitID)
-		if err != nil {
-			h.historyFailure(w, fmt.Errorf("%w: mainline role lookup", errHistoryUnavailable), "")
-			return
-		}
-		if !found || mainline.Role != _historyRoleMainline || mainline.CommitID != role.MainlineCommitID || mainline.MainlineCommitID != role.MainlineCommitID {
-			h.historyFailure(w, errHistoryCorrupt, commitID)
-			return
-		}
-	}
-	commit, err := h.readHistoryCommitObject(request.Context(), owner, libraryID, commitID)
 	if err != nil {
 		h.historyFailure(w, err, commitID)
 		return
-	}
-	response := historyCommitDetailResponse{
-		CommitID: commitID, Role: role.Role, MainlineCommitID: role.MainlineCommitID,
-		AuthorUserID: commit.AuthorUserID, CreatedAt: commit.CreatedAt, DeviceID: commit.DeviceID,
-		Message: commit.Message, Parents: append([]string{}, commit.Parents...), Root: commit.Root,
 	}
 	w.Header().Set("ETag", `"`+commitID+`"`)
 	w.Header().Set("Cache-Control", "private, immutable")
@@ -168,45 +140,53 @@ func (h *handler) listHistory(w http.ResponseWriter, r *http.Request) {
 		h.afterHistoryAdmit(request.Context())
 	}
 
-	library, err := h.store.GetLibrary(request.Context(), owner, libraryID)
+	response, failedID, err := h.historyPage(request.Context(), owner, libraryID, token, pageSize)
 	if errors.Is(err, storage.ErrLibraryNotFound) {
-		h.writeError(w, http.StatusNotFound, 2000, "library not found")
+		h.writeError(w, 404, 2000, "library not found")
 		return
 	}
 	if err != nil {
-		h.historyFailure(w, fmt.Errorf("%w: metadata lookup", errHistoryUnavailable), "")
+		h.historyFailure(w, err, failedID)
 		return
+	}
+	h.writeJSON(w, 200, struct {
+		RetCode int
+		Message string
+		History historyListResponse
+	}{0, "success", response})
+}
+func (h *handler) historyPage(ctx context.Context, owner, libraryID string, token historyPageToken, pageSize int) (historyListResponse, string, error) {
+	var zero historyListResponse
+	library, err := h.store.GetLibrary(ctx, owner, libraryID)
+	if errors.Is(err, storage.ErrLibraryNotFound) {
+		return zero, "", err
+	}
+	if err != nil {
+		return zero, "", errHistoryUnavailable
 	}
 
 	anchorID := library.HeadCommitID
 	nextID := ""
-	if encodedToken != "" {
+	if token.NextCommitID != "" {
 		anchorID = &token.AnchorCommitID
 		nextID = token.NextCommitID
 	}
 	if anchorID == nil || *anchorID == "" {
-		h.writeJSON(w, http.StatusOK, struct {
-			RetCode int
-			Message string
-			History historyListResponse
-		}{RetCode: 0, Message: "success", History: historyListResponse{Commits: make([]historyCommitResponse, 0)}})
-		return
+		return historyListResponse{Commits: []historyCommitResponse{}}, "", nil
 	}
-	if !object.ValidID(*anchorID) || (encodedToken != "" && !object.ValidID(nextID)) {
-		h.historyFailure(w, errHistoryCorrupt, *anchorID)
-		return
+	if !object.ValidID(*anchorID) || (token.NextCommitID != "" && !object.ValidID(nextID)) {
+		return zero, *anchorID, errHistoryCorrupt
 	}
-	if encodedToken == "" {
+	if token.NextCommitID == "" {
 		nextID = *anchorID
 	}
 
 	commits := make([]historyCommitResponse, 0, pageSize)
 	for len(commits) < pageSize && nextID != "" {
 		commitID := nextID
-		commit, err := h.readHistoryCommit(request.Context(), owner, libraryID, commitID)
+		commit, err := h.readHistoryCommit(ctx, owner, libraryID, commitID)
 		if err != nil {
-			h.historyFailure(w, err, commitID)
-			return
+			return zero, commitID, err
 		}
 		commits = append(commits, historyCommitResponse{
 			CommitID:     commitID,
@@ -228,16 +208,10 @@ func (h *handler) listHistory(w http.ResponseWriter, r *http.Request) {
 	if nextID != "" {
 		nextPageToken, err = h.encodeHistoryToken(owner, libraryID, *anchorID, nextID)
 		if err != nil {
-			h.historyFailure(w, errHistoryUnavailable, "")
-			return
+			return zero, "", errHistoryUnavailable
 		}
 	}
-	response := historyListResponse{AnchorCommitID: anchorID, Commits: commits, NextPageToken: nextPageToken}
-	h.writeJSON(w, http.StatusOK, struct {
-		RetCode int
-		Message string
-		History historyListResponse
-	}{RetCode: 0, Message: "success", History: response})
+	return historyListResponse{AnchorCommitID: anchorID, Commits: commits, NextPageToken: nextPageToken}, "", nil
 }
 
 func parseHistoryQuery(rawQuery string) (int, string, error) {
