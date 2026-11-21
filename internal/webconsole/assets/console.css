@@ -55,13 +55,17 @@ input, select { min-width: 0; padding: 8px; border: 1px solid #7b828b; border-ra
 .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 8px; min-height: 44px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .row:hover, .row[aria-current] { background: #edf1ff; color: var(--blue); }
 .source { margin-inline-start: 1em; border-inline-start: 2px dashed var(--orange); }
-.panel strong, .panel p, .panel dd, h1 { overflow-wrap: anywhere; }
+.panel strong, .panel p, .panel dd, h1, h2, h3 { overflow-wrap: anywhere; }
 .sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
 .row[aria-current] { box-shadow: inset 3px 0 var(--blue); }
 .source[aria-current] { background: #fff0e4; box-shadow: inset 3px 0 var(--orange); color: var(--orange); }
 small { color: var(--quiet); } .pair > * { min-width: 0; }
 .inline { display: inline-block; color: var(--blue); padding: 8px; text-decoration: underline; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #edf1ff; padding: 12px; }
+.atlas summary { color: var(--blue); cursor: pointer; min-height: 44px; font-size: 14px; }
+.atlas summary img { display: block; width: 150px; transition: transform 180ms ease-out; }
+.atlas[open] img { transform: rotate(3deg); }
+.atlas summary:focus-visible { outline: 2px solid var(--blue); }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 @media (max-width: 760px) {
   body { display: block; }

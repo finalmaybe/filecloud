@@ -3,7 +3,9 @@ package library
 import (
 	"errors"
 	"fmt"
+	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
+	"os"
 	"strings"
 	"testing"
 )
@@ -44,5 +46,20 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	}
 	if _, e = c.Snapshot(t.Context(), "other", _headLibraryID, id, ".", 0); !errors.Is(e, storage.ErrLibraryNotFound) {
 		t.Fatal("other owner read snapshot")
+	}
+	f, _, err := s.GetObject(t.Context(), _ownerID, _headLibraryID, "files", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	if err = os.Chmod(name, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(name, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, "观测54", 0); !errors.Is(err, object.ErrInvalidPersistedObject) {
+		t.Fatal("corrupt file accepted", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/library"
+	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
 	"net/http"
 )
@@ -14,6 +15,8 @@ func (c *console) show(w http.ResponseWriter, r *http.Request, who identity, sta
 func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, err error) {
 	code, msg := 503, "服务暂不可用，请稍后重试。"
 	switch {
+	case errors.Is(err, object.ErrInvalidPersistedObject):
+		code, msg = 500, "已发布的对象无法通过完整性检查，请联系管理员停服检查。"
 	case errors.Is(err, library.ErrHistoryBusy):
 		code, msg = 429, "历史读取繁忙，请稍后再试。"
 		w.Header().Set("Retry-After", "1")

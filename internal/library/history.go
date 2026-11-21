@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	errHistoryCorrupt     = errors.New("published history is corrupt")
+	errHistoryCorrupt     = fmt.Errorf("published history is corrupt: %w", object.ErrInvalidPersistedObject)
 	errHistoryUnavailable = errors.New("published history is unavailable")
 )
 

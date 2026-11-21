@@ -1,3 +1,5 @@
+const cancelReset = document.querySelector('#cancel-reset');
+if (cancelReset) document.addEventListener('keydown', event => {if (event.key === 'Escape') cancelReset.click();});
 const probe = document.querySelector('#probe');
 probe?.addEventListener('click', async () => {
   probe.disabled = true;

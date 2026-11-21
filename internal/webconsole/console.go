@@ -2,6 +2,7 @@
 package webconsole
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"errors"
@@ -127,10 +128,17 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 
 func (c *console) render(w http.ResponseWriter, r *http.Request, status int, p page) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if r.Method != http.MethodHead {
-		_ = c.shell.ExecuteTemplate(w, "shell.html", p)
+	if r.Method == http.MethodHead {
+		w.WriteHeader(status)
+		return
 	}
+	var body bytes.Buffer
+	if err := c.shell.ExecuteTemplate(&body, "shell.html", p); err != nil {
+		http.Error(w, "页面暂不可用", 500)
+		return
+	}
+	w.WriteHeader(status)
+	_, _ = body.WriteTo(w)
 }
 
 func parseOrigin(raw, listen string) (*url.URL, error) {
