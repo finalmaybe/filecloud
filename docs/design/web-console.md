@@ -1,0 +1,49 @@
+# 服务端 Web 控制台契约
+
+状态：范围已确认（[#56](https://github.com/finalmaybe/filecloud/issues/56)），阶段 1 规格（[#57](https://github.com/finalmaybe/filecloud/issues/57)）。下文定义后续实现的验收条件，不是当前版本的使用说明。基线 `8f484e9`；[调研与视觉依据](../research/server-web-console.md)。
+
+## 开关、来源与身份
+
+- 新增 `filecloud-server serve --web-origin <origin>`。省略即关闭全部 Web 页面/资产；配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后只挂载 `/web/`，不接管 `/`、`/v1` 或探针。未知 Web 页面返回 404，不回落到首页。
+- 生产使用固定 HTTPS origin，反向代理终止 TLS，后端监听回环；本机试用仅在监听地址和配置的 HTTP origin 均为回环地址时允许明文。按配置校验请求 Host 与写请求 Origin，不从任意转发头推断公开地址或授予权限。代理须保留外部 Host。
+- 新增可重复的本机启动参数 `--web-admin-user <username>`：启动时按现有规范用户名解析为已有用户 ID，失败则报配置错误；未启用 Web 不接受此参数。授权集合固定到本次服务运行。配置变更并重启即生效；旧会话下一次请求按新集合判断。默认集合为空，不按用户名、首用户、首个登录者或来源 IP 自动提权。首个账号仍由主机在停服时创建。
+
+| 主体 | 允许 | 明确拒绝 / 验收 |
+|---|---|---|
+| 未登录 | 登录页、公共静态资产；沿用匿名存活/就绪探针 | 私有页面去登录，未认证写请求不执行。登录表单同样保护来源。 |
+| 已登录所有者 | 自己的资料库、历史和设备交接；退出当前会话 | 直接请求后台管理为 403；他人资料库与不存在统一 404。以两个所有者使用同一 LibraryId 验证。 |
+| 本机显式授权的管理员 | 自身所有者权限 + 服务概览、运维清单、开户和重置已有账号密码 | 账号管理不提供直接代登录或跨资料库访问。每次请求在服务端验证；撤销权限后旧会话也无法再操作。重置属于高权限操作，确认对象后才提交。 |
+| 主机运维者 / 绑定设备 | 本机管理开关、停服维护 / 客户端扫描、合并、确认、恢复、落盘 | 不接受网页下发 shell、任意磁盘路径、启动服务或远控客户端。 |
+
+### 浏览器会话
+
+浏览器登录复用现有密码校验、可撤销会话、过期规则和同一组 KDF 并发预算。每次登录独立签发；退出仅撤销本次会话。目标账号密码重置与撤销其所有 Web/CLI 会话在同一存储事务中完成。管理请求使用服务进程已持锁的 Store；密码派生使用有界预算。离线 CLI 及独占锁保留。
+
+Web 用 host-only、`Path=/web/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HTTPS 强制 `Secure`，回环明文试用例外。Web 写请求（含登录、退出）用 POST，要求 Origin 精确匹配配置 origin；缺失、不匹配或 `null` 均拒绝，不执行操作。不得在 GET 里改变业务状态。凭据不返回给 JS、不放在 URL、Web Storage、日志或复制命令中；含身份及私有信息的响应 `Cache-Control: no-store`。日志记录操作类别/结果，不记录表单、原始 URL 查询、用户名或文件路径。沿用 `opslog` 脱敏约定。只使用同源嵌入资源，不加载外站脚本或字体。
+
+Web 与 `/v1` 不互相代收凭据：Web 不用客户端 Bearer 授予管理权，`/v1` 不用 cookie 鉴权。跨入口检查凭据拒绝、注销后重放、登录限流/429、过期、密码重置、来源不符及旧部署无开关的行为。
+
+## 功能兼容矩阵
+
+`L` = `/v1/libraries/{LibraryId}`。协议请求、状态码、分页、缓存、错误体与预算以[既有契约](http-api.md)及[历史规格](history-and-safe-restore.md)为准。验收列是阶段 2–5 必须执行的场景。
+
+| 入口（CLI / HTTP） | 用户从哪里完成；哪里是真相 | 禁止动作及回归场景 |
+|---|---|---|
+| `login`、`logout`；`POST /v1/sessions`、`DELETE /v1/sessions/current` | 浏览器独立会话；CLI 仍用 Bearer | 登录不自动重试；验证两处同时登录，Web 注销后 CLI 仍能用。 |
+| `user add/reset-password` | 管理页面或原本机命令 | 不能公开注册。重置后新密码可用，旧口令和两端旧会话失效；普通账号无法操作。 |
+| `library create/list/inspect`；`PUT L`、`GET /v1/libraries`、`GET L`、`GET L/head` | 资料库列表、创建、详情。Head 是服务端已发布状态 | 重试创建复用 UUID；验证同名、空 Head、ETag/304、稳定分页和所有者隔离；不显示虚构设备在线状态。 |
+| `library history list [--include-merged]`；`GET L/history`、`GET L/history/{CommitId}` | 主线历史锚定首次读取的 Head；合并来源在所属提交下展开 | 不按客户端时间排序；翻页期间发布新 Head，旧游标仍在原锚点；游标失效可刷新。只展开经角色证明的来源，保留深度/数量上限。 |
+| `library history inspect [--path]`；`GET L/history/{CommitId}`、`GET L/objects/{ObjectType}/{ObjectId}` | 先固定已发布的完整 CommitId，再从 Root 逐级检查目录和文件元数据 | 不把对象存在性当作发布证明；比较 Web/CLI 根目录、分页、同名长路径、文件大小、mtime 与块数；检查文件不读块。 |
+| `library bind [--import-local]`、凭据刷新、`unbind` | 在设备工作目录操作；网页提供库 ID 和本地说明 | 不读客户端数据库；分别验证空目录 checkout、非空目录导入限制、更新凭据；解绑不删普通文件。 |
+| `library status`、`sync [--confirm-delete]`、`watch` | CLI 的 Sync Base、Pending 及工作目录扫描；设备端执行 | 不把 Head 写成“设备已同步”。走通删除精确确认、两设备合并/冲突副本、进程中断与 journal 续跑。 |
+| `POST L/object-checks`、`GET/PUT L/blocks/{ObjectId}`、`GET/PUT L/objects/{ObjectType}/{ObjectId}`、`PUT L/head` | 原同步引擎和现有传输协议；Web 只读发布结果 | 不提供对象编辑器。原 CLI 上传/下载、重复 PUT、摘要错误、缺对象、限流和强 If-Match CAS 均按原契约；Web 开关不影响。 |
+| `library restore --commit … --path …`、`restore --confirm …` | 网页选择提交和原路径；设备先同步，预览后在 CLI 用固定候选的 12 位小写前缀确认 | 不在网页生成确认值或发布。验证目录叠加、no-op、预览后 Head/工作目录变化需重预览、未知结果续跑；成功产生新前向提交。 |
+| `GET /healthz`、`GET /readyz`、两侧 `version` | 管理页面显示探针、检查时间和服务端构建信息；客户端版本在设备查看 | 进程存活不等于存储就绪；模拟 503 和请求未抵达，分别显示未就绪与未知；原匿名探针不增加重定向/登录。 |
+| `init`、`serve` 参数、停止/重启，`integrity check`、`gc [--dry-run] [--grace-period]`，完整备份恢复 | 主机执行；页面仅给可提前复制的停服清单 | 不在线维护。验证关停→独占检查/GC→启动→就绪；灾备同时还原元数据和对象。 |
+| 双二进制及 `filecloud` 过渡期服务端子命令 | 原 Go 构建与原生平台发布；网页资源编入服务端，不依赖 Node/CDN | 旧目录直接升级、Web 开/关均可用原 CLI；执行原 1B/1C 和目标平台双二进制冒烟。无用户配置迁移要求。 |
+
+深链接和复制命令携带完整 ID。浏览器短码仅用于辨读。交接前要求用户以本机 `library status` 核对资料库 ID；本地状态目录和工作目录用占位符，不向服务器上传。文件名按所选 shell 进行字面量引用。安全恢复继续遵循 [ADR-0004](../adr/0004-restore-history-with-a-forward-commit.md)，合并继续遵循 [ADR-0003](../adr/0003-merge-on-the-client.md)。
+
+## 交付门禁
+
+阶段 1 的原型是离线示例，不能作为权限或协议回归的证据。维护者确认原型后才开始 `/web/` 实现；正式验证包括 WCAG 2.2 AA、窄屏与键盘、固定样本性能、真实 CLI↔Web 闭环，以及[发布门禁](../distribution.md)。所有后续任务和依赖见 [#56](https://github.com/finalmaybe/filecloud/issues/56)。
