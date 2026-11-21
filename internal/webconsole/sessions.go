@@ -1,0 +1,93 @@
+package webconsole
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/mingming-cn/filecloud/internal/auth"
+	"github.com/mingming-cn/filecloud/internal/storage"
+)
+
+const cookieName = "filecloud_web"
+
+type identity struct {
+	user  string
+	admin bool
+}
+type privatePage func(http.ResponseWriter, *http.Request, identity)
+
+func (c *console) current(r *http.Request) (identity, error) {
+	cookie, err := r.Cookie(cookieName)
+	if err != nil {
+		return identity{}, storage.ErrSessionNotFound
+	}
+	id, err := c.Sessions.BrowserUser(r.Context(), cookie.Value)
+	return identity{user: id}, err
+}
+func (c *console) private(next privatePage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		who, err := c.current(r)
+		if errors.Is(err, storage.ErrSessionNotFound) {
+			if r.Method == http.MethodPost {
+				http.Error(w, "请重新登录", 401)
+			} else {
+				http.Redirect(w, r, "/web/login", 303)
+			}
+			return
+		}
+		if err != nil {
+			http.Error(w, "会话暂不可用", 503)
+			return
+		}
+		next(w, r, who)
+	}
+}
+func (c *console) home(w http.ResponseWriter, r *http.Request) {
+	_, err := c.current(r)
+	if err == nil {
+		http.Redirect(w, r, "/web/libraries", 303)
+		return
+	}
+	if !errors.Is(err, storage.ErrSessionNotFound) {
+		http.Error(w, "会话暂不可用", 503)
+		return
+	}
+	c.render(w, r, 200, page{Title: "控制台入口", View: "home"})
+}
+func (c *console) cookie(value string, expires time.Time) *http.Cookie {
+	return &http.Cookie{Name: cookieName, Value: value, Path: "/web/", HttpOnly: true, Secure: c.origin.Scheme == "https", SameSite: http.SameSiteLaxMode, Expires: expires}
+}
+func (c *console) login(w http.ResponseWriter, r *http.Request) {
+	session, err := c.Sessions.LoginBrowser(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.RemoteAddr)
+	if err != nil {
+		status, msg := 503, "登录服务暂不可用"
+		switch {
+		case errors.Is(err, auth.ErrInvalidLogin):
+			status, msg = 400, "请检查用户名和密码格式"
+		case errors.Is(err, auth.ErrCredentials):
+			status, msg = 401, "用户名或密码错误"
+		case errors.Is(err, auth.ErrKDFBusy):
+			status, msg = 429, "登录繁忙，请稍后再试"
+			w.Header().Set("Retry-After", "1")
+		}
+		c.render(w, r, status, page{Title: "账号登录", View: "login", Message: msg})
+		return
+	}
+	http.SetCookie(w, c.cookie(session.AccessToken, session.ExpiresAt))
+	http.Redirect(w, r, "/web/libraries", 303)
+}
+func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
+	cookie, _ := r.Cookie(cookieName)
+	if err := c.Sessions.LogoutBrowser(r.Context(), cookie.Value); err != nil {
+		http.Error(w, "注销未完成，请重试", 503)
+		return
+	}
+	expired := c.cookie("", time.Unix(1, 0))
+	expired.MaxAge = -1
+	http.SetCookie(w, expired)
+	http.Redirect(w, r, "/web/login", 303)
+}
+func (c *console) workspace(w http.ResponseWriter, r *http.Request, who identity) {
+	c.render(w, r, 200, page{Title: "资料库工作台", View: "workspace", SignedIn: true})
+}

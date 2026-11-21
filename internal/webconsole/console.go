@@ -4,6 +4,8 @@ package webconsole
 import (
 	"embed"
 	"errors"
+	"github.com/mingming-cn/filecloud/internal/auth"
+	"github.com/mingming-cn/filecloud/internal/storage"
 	"html/template"
 	"net"
 	"net/http"
@@ -12,33 +14,55 @@ import (
 	"strings"
 )
 
-//go:embed shell.html assets
+//go:embed *.html assets
 var files embed.FS
+
+type Config struct {
+	Sessions *auth.Sessions
+	Store    *storage.Store
+}
+type console struct {
+	Config
+	shell  *template.Template
+	origin *url.URL
+}
+type page struct {
+	Title, View, Message string
+	SignedIn, Admin      bool
+	Data                 any
+}
 
 // NewHandler builds the Web routes for one configured public origin.
 // The server itself speaks HTTP; remote HTTPS terminates at a local reverse proxy.
-func NewHandler(rawOrigin, listen string) (http.Handler, error) {
+func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	origin, err := parseOrigin(rawOrigin, listen)
 	if err != nil {
 		return nil, err
 	}
-	shell, err := template.ParseFS(files, "shell.html")
+	shell, err := template.New("shell.html").ParseFS(files, "*.html")
 	if err != nil {
 		return nil, err
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /web", http.RedirectHandler("/web/", http.StatusMovedPermanently))
-	mux.Handle("GET /web/{$}", shellPage(shell, http.StatusOK, "控制台入口", "home"))
-	mux.Handle("GET /web/login", shellPage(shell, http.StatusOK, "登录与访问", "login"))
+	c := &console{Config: config, shell: shell, origin: origin}
+	mux.HandleFunc("GET /web/{$}", c.home)
+	mux.HandleFunc("GET /web/login", func(w http.ResponseWriter, r *http.Request) {
+		c.render(w, r, 200, page{Title: "账号登录", View: "login"})
+	})
+	mux.HandleFunc("POST /web/login", c.login)
+	mux.HandleFunc("POST /web/logout", c.private(c.logout))
 	for _, path := range []string{"libraries", "libraries/{library}", "libraries/{library}/history", "overview", "accounts"} {
-		mux.Handle("GET /web/"+path, http.RedirectHandler("/web/login", http.StatusSeeOther))
+		mux.HandleFunc("GET /web/"+path, c.private(c.workspace))
 	}
 	for _, name := range []string{"assets/console.css", "assets/atlas.svg"} {
 		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})
 	}
-	mux.Handle("GET /web/", shellPage(shell, http.StatusNotFound, "页面不存在", "missing"))
+	mux.HandleFunc("GET /web/", func(w http.ResponseWriter, r *http.Request) {
+		c.render(w, r, 404, page{Title: "页面不存在", View: "missing"})
+	})
 
 	// Browsers omit the default port even when it is explicit in the configured origin.
 	port := "443"
@@ -53,27 +77,36 @@ func NewHandler(rawOrigin, listen string) (http.Handler, error) {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Referrer-Policy", "same-origin")
 		if !strings.EqualFold(r.Host, origin.Host) && !strings.EqualFold(r.Host, alternate) {
 			http.Error(w, http.StatusText(http.StatusMisdirectedRequest), http.StatusMisdirectedRequest)
 			return
+		}
+		if r.Method == http.MethodPost {
+			o := r.Header.Values("Origin")
+			if len(o) != 1 || !(strings.EqualFold(o[0], origin.Scheme+"://"+origin.Host) || strings.EqualFold(o[0], origin.Scheme+"://"+alternate)) {
+				http.Error(w, "请求来源不匹配", http.StatusForbidden)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "无效表单", 400)
+				return
+			}
 		}
 		mux.ServeHTTP(w, r)
 	}), nil
 }
 
-func shellPage(shell *template.Template, status int, title, view string) http.Handler {
-	page := struct{ Title, View string }{title, view}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(status)
-		if r.Method != http.MethodHead {
-			_ = shell.Execute(w, page)
-		}
-	})
+func (c *console) render(w http.ResponseWriter, r *http.Request, status int, p page) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if r.Method != http.MethodHead {
+		_ = c.shell.ExecuteTemplate(w, "shell.html", p)
+	}
 }
 
 func parseOrigin(raw, listen string) (*url.URL, error) {

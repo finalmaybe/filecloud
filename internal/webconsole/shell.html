@@ -24,7 +24,7 @@
     <span class="rail-foot">FILECLOUD / SERVER</span>
   </aside>
   <main id="content" tabindex="-1">
-    <header class="context"><span>工作空间 <span aria-hidden="true">/</span> {{.Title}}</span><span class="badge">未登录</span></header>
+    <header class="context"><span>工作空间 <span aria-hidden="true">/</span> {{.Title}}</span>{{if .SignedIn}}<form action="/web/logout" method="post"><button>退出登录</button></form>{{else}}<span class="badge">未登录</span>{{end}}</header>
     {{if eq .View "home"}}
     <section class="cover" aria-labelledby="title">
       <div><p class="kicker" lang="en">FILECLOUD / ATLAS</p><h1 id="title">资料库工作台</h1><p>浏览资料库与版本历史的服务端入口。</p></div>
@@ -32,11 +32,12 @@
     </section>
     <h2 class="section-title">访问控制台</h2>
     <div class="pair">
-      <section class="panel"><p class="kicker">01 / 访问方式</p><h3>从已有账号开始</h3><p>当前版本提供浏览器入口，账号登录与资料库操作请使用 Filecloud CLI。</p><a class="action" href="/web/login">查看登录说明 <span aria-hidden="true">→</span></a></section>
+      <section class="panel"><p class="kicker">01 / 访问方式</p><h3>从已有账号开始</h3><p>使用已有 Filecloud 账号登录，进入自己的资料库。</p><a class="action" href="/web/login">登录工作台 <span aria-hidden="true">→</span></a></section>
       <aside class="panel aside"><p class="kicker">02 / 设备端</p><h3>同步留在工作目录</h3><p>在绑定资料库的设备上运行 <code>filecloud library status</code>，配合本机状态目录和工作目录参数查看同步基线。</p></aside>
     </div>
     {{else if eq .View "login"}}
-    <section class="panel notice"><p class="kicker" lang="en">WORKSPACE / ACCESS</p><h1>登录与访问</h1><p>浏览器登录尚未开放。请在自己的设备上使用 <code>filecloud login</code> 登录；此页不收集密码或令牌。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
+    <section class="panel notice"><p class="kicker" lang="en">WORKSPACE / ACCESS</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/web/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
+    {{else if eq .View "workspace"}}<section class="panel"><h1>资料库工作台</h1><p>浏览器会话已建立。</p></section>
     {{else}}
     <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或从控制台入口重新开始。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
     {{end}}

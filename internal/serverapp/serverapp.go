@@ -156,15 +156,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if historyConfig.GlobalConcurrency < 1 || historyConfig.UserConcurrency < 1 || historyConfig.RequestTimeout <= 0 {
 		return errors.New("history limits must be positive")
 	}
-	var web http.Handler
-	if *webOrigin != "" {
-		handler, err := webconsole.NewHandler(*webOrigin, *listen)
-		if err != nil {
-			return err
-		}
-		web = handler
-	}
-	return serve(ctx, *dataDir, *listen, stdout, stderr, web, auth.HandlerConfig{
+	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -369,7 +361,7 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, web http.Handler, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, webOrigin string, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
@@ -395,7 +387,11 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	mux.Handle("/v1/libraries", libraries)
 	mux.Handle("/v1/libraries/", libraries)
 	mux.Handle("/", health.NewHandler(store, logger))
-	if web != nil {
+	if webOrigin != "" {
+		web, err := webconsole.NewHandler(webOrigin, address, webconsole.Config{Sessions: sessions, Store: store})
+		if err != nil {
+			return errors.Join(err, listener.Close())
+		}
 		mux.Handle("/web", web)
 		mux.Handle("/web/", web)
 	}

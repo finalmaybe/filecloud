@@ -225,8 +225,14 @@ type HandlerConfig struct {
 	limiter          *kdfLimiter
 }
 
+// Sessions shares the password-verification budget between API and browser sessions.
+type Sessions struct {
+	http.Handler
+	core *handler
+}
+
 // NewHandler constructs the session endpoints.
-func NewHandler(store *storage.Store, logger *log.Logger, config HandlerConfig) (http.Handler, error) {
+func NewHandler(store *storage.Store, logger *log.Logger, config HandlerConfig) (*Sessions, error) {
 	if store == nil {
 		return nil, errors.New("authentication store is required")
 	}
@@ -267,13 +273,13 @@ func NewHandler(store *storage.Store, logger *log.Logger, config HandlerConfig) 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
 	mux.HandleFunc("DELETE /v1/sessions/current", h.deleteCurrentSession)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return &Sessions{core: h, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		mux.ServeHTTP(w, r)
-	}), nil
+	})}, nil
 }
 
 type kdfLimiter struct {
@@ -410,67 +416,28 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request, err := decodeCreateSession(data)
-	if err != nil || validateCreateSession(request) != nil {
+	if err != nil {
 		h.writeError(w, http.StatusBadRequest, 1000, "invalid request")
 		return
 	}
-	_, usernameKey := storage.CanonicalUsername(request.Username)
-	release, ok := h.config.limiter.tryAcquire(sourceIP(r.RemoteAddr), usernameKey)
-	if !ok {
-		w.Header().Set("Retry-After", "1")
-		h.writeError(w, http.StatusTooManyRequests, 4000, "authentication busy")
-		return
-	}
-	defer release()
-
-	user, findErr := h.store.FindUserByUsername(r.Context(), request.Username)
-	if findErr != nil && !errors.Is(findErr, storage.ErrUserNotFound) {
-		h.internal(w, "find login user", findErr)
-		return
-	}
-	hash := h.dummyHash
-	if findErr == nil {
-		hash = user.PasswordHash
-	}
-	valid, verifyErr := VerifyPassword([]byte(request.Password), hash, h.config.Params)
-	if verifyErr != nil {
-		if findErr == nil {
-			_, dummyErr := VerifyPassword([]byte(request.Password), h.dummyHash, h.config.Params)
-			verifyErr = errors.Join(verifyErr, dummyErr)
-		}
-		h.internal(w, "verify password hash", verifyErr)
-		return
-	}
-	if findErr != nil || !valid {
+	session, err := h.issue(r.Context(), request, r.RemoteAddr, "")
+	switch {
+	case errors.Is(err, ErrCredentials):
 		h.writeUnauthenticated(w)
-		return
+	case errors.Is(err, ErrKDFBusy):
+		w.Header().Set("Retry-After", "1")
+		h.writeError(w, 429, 4000, "authentication busy")
+	case errors.Is(err, ErrInvalidLogin):
+		h.writeError(w, 400, 1000, "invalid request")
+	case err != nil:
+		h.internal(w, "create session", err)
+	default:
+		h.writeJSON(w, 200, struct {
+			RetCode int
+			Message string
+			Session Session
+		}{0, "success", session})
 	}
-	tokenBytes := make([]byte, _accessTokenBytes)
-	if _, err := io.ReadFull(h.config.Random, tokenBytes); err != nil {
-		h.internal(w, "generate access token", err)
-		return
-	}
-	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
-	tokenHash := sha256.Sum256([]byte(token))
-	now := h.config.Now().UTC()
-	expiresAt := now.Add(_sessionLifetime)
-	if err := h.store.CreateSession(r.Context(), user.ID, tokenHash, request.DeviceName, now, expiresAt); err != nil {
-		h.internal(w, "persist session", err)
-		return
-	}
-	h.writeJSON(w, http.StatusOK, struct {
-		RetCode int
-		Message string
-		Session struct {
-			AccessToken string
-			ExpiresAt   string
-			UserID      string `json:"UserId"`
-		}
-	}{RetCode: 0, Message: "success", Session: struct {
-		AccessToken string
-		ExpiresAt   string
-		UserID      string `json:"UserId"`
-	}{AccessToken: token, ExpiresAt: expiresAt.Format(time.RFC3339), UserID: user.ID}})
 }
 
 func (h *handler) deleteCurrentSession(w http.ResponseWriter, r *http.Request) {

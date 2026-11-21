@@ -33,7 +33,7 @@ func TestOriginConfiguration(t *testing.T) {
 		{"https://console.example/#part", "localhost:8080", false},
 		{"https://console.example:65536", "localhost:8080", false},
 	} {
-		_, err := webconsole.NewHandler(tc.origin, tc.listen)
+		_, err := webconsole.NewHandler(tc.origin, tc.listen, webconsole.Config{})
 		if (err == nil) != tc.valid {
 			t.Errorf("NewHandler(%q, %q) error = %v, want valid=%v", tc.origin, tc.listen, err, tc.valid)
 		}
@@ -53,7 +53,7 @@ func TestWebHostBinding(t *testing.T) {
 		{"https://console.example:8443", "console.example", 421},
 		{"https://console.example", "other.example", 421},
 	} {
-		h, err := webconsole.NewHandler(tc.origin, "127.0.0.1:8080")
+		h, err := webconsole.NewHandler(tc.origin, "127.0.0.1:8080", webconsole.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestWebHostBinding(t *testing.T) {
 }
 
 func TestEmbeddedRoutes(t *testing.T) {
-	h, err := webconsole.NewHandler("https://console.example", "127.0.0.1:8080")
+	h, err := webconsole.NewHandler("https://console.example", "127.0.0.1:8080", webconsole.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestEmbeddedRoutes(t *testing.T) {
 		{"GET", "/web", 301, "/web/", "", ""},
 		{"GET", "/web/", 200, "", "text/html", `href="#content"`},
 		{"HEAD", "/web/", 200, "", "text/html", ""},
-		{"GET", "/web/login", 200, "", "text/html", "浏览器登录尚未开放"},
+		{"GET", "/web/login", 200, "", "text/html", `autocomplete="current-password"`},
 		{"GET", "/web/libraries", 303, "/web/login", "", ""},
 		{"GET", "/web/libraries/example/history", 303, "/web/login", "", ""},
 		{"GET", "/web/overview", 303, "/web/login", "", ""},
@@ -92,7 +92,7 @@ func TestEmbeddedRoutes(t *testing.T) {
 		{"GET", "/web/shell.html", 404, "", "text/html", "页面不存在"},
 		{"GET", "/web/assets/console.css", 200, "", "text/css", ".skip"},
 		{"GET", "/web/assets/atlas.svg", 200, "", "image/svg+xml", "<svg"},
-		{"POST", "/web/login", 405, "", "", ""},
+		{"POST", "/web/login", 403, "", "", ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, "https://console.example"+tc.path, nil)
