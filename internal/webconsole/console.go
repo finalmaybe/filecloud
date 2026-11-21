@@ -64,7 +64,9 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 		}
 		c.admins[u.ID] = true
 	}
-	mux.HandleFunc("GET /web/{$}", c.home)
+	mux.HandleFunc("GET /web/{$}", c.private(func(w http.ResponseWriter, r *http.Request, _ identity) {
+		http.Redirect(w, r, "/web/libraries", http.StatusSeeOther)
+	}))
 	mux.HandleFunc("GET /web/login", func(w http.ResponseWriter, r *http.Request) {
 		c.render(w, r, 200, page{Title: "账号登录", View: "login"})
 	})
@@ -75,6 +77,7 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
 	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
 	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
+	mux.HandleFunc("GET /web/libraries/{library}/file-history", c.private(c.fileHistory))
 	mux.HandleFunc("GET /web/overview", c.admin(c.overview))
 	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
 	mux.HandleFunc("POST /web/accounts/review", c.admin(c.reviewReset))

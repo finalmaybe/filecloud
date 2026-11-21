@@ -52,18 +52,6 @@ func (c *console) admin(next privatePage) http.HandlerFunc {
 		next(w, r, who)
 	})
 }
-func (c *console) home(w http.ResponseWriter, r *http.Request) {
-	_, err := c.current(r)
-	if err == nil {
-		http.Redirect(w, r, "/web/libraries", 303)
-		return
-	}
-	if !errors.Is(err, storage.ErrSessionNotFound) {
-		http.Error(w, "会话暂不可用", 503)
-		return
-	}
-	c.render(w, r, 200, page{Title: "控制台入口", View: "home"})
-}
 func (c *console) cookie(value string, expires time.Time) *http.Cookie {
 	return &http.Cookie{Name: cookieName, Value: value, Path: "/web/", HttpOnly: true, Secure: c.origin.Scheme == "https", SameSite: http.SameSiteLaxMode, Expires: expires}
 }

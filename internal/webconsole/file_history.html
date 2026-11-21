@@ -1,0 +1,11 @@
+{{define "file-history"}}
+<header class="section-title"><p class="kicker">FILE / VERSIONS</p><h1>文件历史版本</h1><p>{{.Path}}</p></header>
+<p><a class="inline" href="/web/libraries/{{.LibraryID}}?commit={{.Anchor}}&amp;path={{.Parent}}">返回文件列表</a></p>
+<section class="panel">
+  <h2>版本记录</h2>
+  <p>按主线提交从新到旧排列，仅列出这个路径新增文件、内容变化或修改时间变化的版本。</p>
+  {{range .Versions}}<a class="row" href="/web/libraries/{{$.LibraryID}}/snapshot/{{.CommitID}}?path={{$.Path}}"><span><strong>{{.Message}}</strong><br><small>{{.Time}} · {{printf "%.8s" .CommitID}}</small></span><span class="file-history-link">查看此版</span></a>
+  {{else}}<p>本页提交中没有此文件的变更。</p>{{end}}
+  {{if .Next}}<a class="action" href="?commit={{.Anchor}}&amp;path={{.Path}}&amp;cursor={{.Next}}">查看更早的记录</a>{{end}}
+</section>
+{{end}}

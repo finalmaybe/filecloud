@@ -1,12 +1,13 @@
 package webconsole
 
 import (
-	"github.com/mingming-cn/filecloud/internal/library"
 	"net/http"
 	"strconv"
+
+	"github.com/mingming-cn/filecloud/internal/library"
 )
 
-func (c *console) snapshot(w http.ResponseWriter, r *http.Request, who identity) {
+func (c *console) requestedSnapshot(r *http.Request, who identity, commit string) (library.Snapshot, error) {
 	q := r.URL.Query()
 	path := q.Get("path")
 	if path == "" {
@@ -17,11 +18,15 @@ func (c *console) snapshot(w http.ResponseWriter, r *http.Request, who identity)
 		var err error
 		offset, err = strconv.Atoi(q.Get("offset"))
 		if err != nil {
-			c.problem(w, r, who, library.ErrInvalidPage)
-			return
+			return library.Snapshot{}, library.ErrInvalidPage
 		}
 	}
-	v, err := c.Catalog.Snapshot(r.Context(), who.user, r.PathValue("library"), r.PathValue("commit"), path, offset)
+	return c.Catalog.Snapshot(r.Context(), who.user, r.PathValue("library"), commit, path, offset)
+}
+
+func (c *console) snapshot(w http.ResponseWriter, r *http.Request, who identity) {
+	q := r.URL.Query()
+	v, err := c.requestedSnapshot(r, who, r.PathValue("commit"))
 	if err != nil {
 		c.problem(w, r, who, err)
 		return

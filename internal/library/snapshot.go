@@ -3,11 +3,13 @@ package library
 import (
 	"context"
 	"errors"
-	"github.com/mingming-cn/filecloud/internal/object"
-	"github.com/mingming-cn/filecloud/internal/storage"
 	"io"
+	"path"
 	"sort"
 	"strings"
+
+	"github.com/mingming-cn/filecloud/internal/object"
+	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
 var ErrInvalidPath = errors.New("invalid snapshot path")
@@ -21,9 +23,9 @@ type Snapshot struct {
 }
 
 // Snapshot resolves from a verified published root; callers cannot select object IDs or disk paths.
-func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, path string, offset int) (Snapshot, error) {
-	v := Snapshot{LibraryID: lib, CommitID: commit, Path: path, Parent: ".", Kind: "Directory"}
-	if !object.ValidPath(path) || offset < 0 {
+func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath string, offset int) (Snapshot, error) {
+	v := Snapshot{LibraryID: lib, CommitID: commit, Path: filePath, Parent: path.Dir(filePath)}
+	if !object.ValidPath(filePath) || offset < 0 {
 		return v, ErrInvalidPath
 	}
 	ctx, done, err := c.admit(ctx, owner)
@@ -35,65 +37,82 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, path string,
 	if err != nil {
 		return v, err
 	}
-	v.ID = detail.Root
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		v.Parent = path[:i]
+	entry, err := c.pathEntry(ctx, owner, lib, detail.Root, filePath)
+	if err != nil {
+		return v, err
 	}
-	rest := path
-	for {
-		if err := ctx.Err(); err != nil {
-			return v, err
+	if entry.Type == "" {
+		return v, storage.ErrLibraryNotFound
+	}
+	v.Kind, v.ID, v.ModifiedAt = entry.Type, entry.ID, entry.ModifiedAt
+	if v.Kind == "File" {
+		if offset != 0 {
+			return v, ErrInvalidPage
 		}
-		if v.Kind == "File" {
-			if rest != "." {
-				return v, storage.ErrLibraryNotFound
-			}
-			if offset != 0 {
-				return v, ErrInvalidPage
-			}
-			data, err := c.metadata(ctx, owner, lib, "files", v.ID, object.MaxFileObjectSize)
-			if err != nil {
-				return v, err
-			}
-			f, err := object.VerifyFile(data, v.ID)
-			if err != nil {
-				return v, errHistoryCorrupt
-			}
-			v.Size, v.Blocks = f.Size, len(f.Blocks)
-			return v, nil
-		}
-		data, err := c.metadata(ctx, owner, lib, "directories", v.ID, object.MaxDirectoryObjectSize)
+		data, err := c.metadata(ctx, owner, lib, "files", v.ID, object.MaxFileObjectSize)
 		if err != nil {
 			return v, err
 		}
-		d, err := object.VerifyDirectory(data, v.ID)
+		f, err := object.VerifyFile(data, v.ID)
 		if err != nil {
 			return v, errHistoryCorrupt
 		}
-		if rest == "." {
-			if offset > len(d.Entries) {
-				return v, ErrInvalidPage
-			}
-			end := min(offset+50, len(d.Entries))
-			v.Entries = d.Entries[offset:end]
-			if end < len(d.Entries) {
-				v.Next = end
-			}
-			return v, nil
+		v.Size, v.Blocks = f.Size, len(f.Blocks)
+		return v, nil
+	}
+	d, err := c.directory(ctx, owner, lib, v.ID)
+	if err != nil {
+		return v, err
+	}
+	if offset > len(d.Entries) {
+		return v, ErrInvalidPage
+	}
+	end := min(offset+50, len(d.Entries))
+	v.Entries = d.Entries[offset:end]
+	if end < len(d.Entries) {
+		v.Next = end
+	}
+	return v, nil
+}
+
+// pathEntry returns a zero entry when the path did not exist in this root.
+func (c *Catalog) pathEntry(ctx context.Context, owner, lib, root, path string) (object.DirectoryEntry, error) {
+	entry := object.DirectoryEntry{Type: "Directory", ID: root}
+	if path == "." {
+		return entry, nil
+	}
+	for name := range strings.SplitSeq(path, "/") {
+		if entry.Type != "Directory" {
+			return object.DirectoryEntry{}, nil
 		}
-		name, tail, more := strings.Cut(rest, "/")
+		d, err := c.directory(ctx, owner, lib, entry.ID)
+		if err != nil {
+			return object.DirectoryEntry{}, err
+		}
 		i := sort.Search(len(d.Entries), func(i int) bool { return d.Entries[i].Name >= name })
 		if i == len(d.Entries) || d.Entries[i].Name != name {
-			return v, storage.ErrLibraryNotFound
+			return object.DirectoryEntry{}, nil
 		}
-		entry := d.Entries[i]
-		v.Kind, v.ID, v.ModifiedAt = entry.Type, entry.ID, entry.ModifiedAt
-		rest = tail
-		if !more {
-			rest = "."
-		}
+		entry = d.Entries[i]
 	}
+	return entry, nil
 }
+
+func (c *Catalog) directory(ctx context.Context, owner, lib, id string) (object.Directory, error) {
+	if err := ctx.Err(); err != nil {
+		return object.Directory{}, err
+	}
+	data, err := c.metadata(ctx, owner, lib, "directories", id, object.MaxDirectoryObjectSize)
+	if err != nil {
+		return object.Directory{}, err
+	}
+	d, err := object.VerifyDirectory(data, id)
+	if err != nil {
+		return object.Directory{}, errHistoryCorrupt
+	}
+	return d, nil
+}
+
 func (c *Catalog) metadata(ctx context.Context, owner, lib, kind, id string, maxSize int64) ([]byte, error) {
 	f, n, err := c.core.store.GetObject(ctx, owner, lib, kind, id)
 	if err != nil {

@@ -80,11 +80,13 @@ func TestEmbeddedRoutes(t *testing.T) {
 		media, text  string
 	}{
 		{"GET", "/web", 301, "/web/", "", ""},
-		{"GET", "/web/", 200, "", "text/html", `href="#content"`},
-		{"HEAD", "/web/", 200, "", "text/html", ""},
+		{"GET", "/web/", 303, "/web/login", "", ""},
+		{"HEAD", "/web/", 303, "/web/login", "", ""},
 		{"GET", "/web/login", 200, "", "text/html", `autocomplete="current-password"`},
 		{"GET", "/web/libraries", 303, "/web/login", "", ""},
 		{"GET", "/web/libraries/example/history", 303, "/web/login", "", ""},
+		{"GET", "/web/libraries/example/info", 404, "", "text/html", "页面不存在"},
+		{"GET", "/web/libraries/example/file-history", 303, "/web/login", "", ""},
 		{"GET", "/web/overview", 303, "/web/login", "", ""},
 		{"GET", "/web/accounts", 303, "/web/login", "", ""},
 		{"GET", "/web/not-a-page", 404, "", "text/html", "页面不存在"},

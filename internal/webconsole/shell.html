@@ -9,37 +9,45 @@
   <script defer src="/web/assets/console.js"></script>
   <link rel="icon" type="image/svg+xml" href="/web/assets/atlas.svg">
 </head>
-<body>
+<body{{if not .SignedIn}} class="standalone"{{end}}>
+  {{if .SignedIn}}
   <a class="skip" href="#content">跳到主要内容</a>
-  <aside class="rail">
-    <a class="brand" href="/web/" aria-label="Filecloud 控制台入口">
-      <svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true"><rect width="36" height="36" rx="10" fill="currentColor"/><path d="m7 12 11-5 11 5-11 5zM7 17l11 5 11-5M7 22l11 5 11-5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Filecloud
-    </a>
-    <div class="rail-label">工作空间</div>
-    <nav aria-label="主导航">
-      <a href="/web/" {{if eq .View "home"}}aria-current="page"{{end}}>控制台入口</a>
-      <a href="/web/libraries" {{if or (eq .View "libraries") (eq .View "library") (eq .View "history") (eq .View "snapshot") (eq .View "handoff")}}aria-current="page"{{end}}>资料库</a>
-      {{if .Admin}}<a href="/web/overview" {{if eq .View "overview"}}aria-current="page"{{end}}>服务概览</a>
-      <a href="/web/accounts" {{if or (eq .View "accounts") (eq .View "confirm")}}aria-current="page"{{end}}>账号管理</a>{{end}}
-    </nav>
-    <span class="rail-foot">FILECLOUD / SERVER</span>
-  </aside>
-  <main id="content" tabindex="-1">
-    <header class="context"><span>工作空间 <span aria-hidden="true">/</span> {{.Title}}</span>{{if .SignedIn}}<form action="/web/logout" method="post"><button>退出登录</button></form>{{else}}<span class="badge">未登录</span>{{end}}</header>
-    {{if eq .View "home"}}
-    <section class="cover" aria-labelledby="title">
-      <div><p class="kicker" lang="en">FILECLOUD / ATLAS</p><h1 id="title">资料库工作台</h1><p>浏览资料库与版本历史的服务端入口。</p></div>
-      <img src="/web/assets/atlas.svg" width="240" height="160" alt="">
-    </section>
-    <h2 class="section-title">访问控制台</h2>
-    <div class="pair">
-      <section class="panel"><p class="kicker">01 / 访问方式</p><h3>从已有账号开始</h3><p>使用已有 Filecloud 账号登录，进入自己的资料库。</p><a class="action" href="/web/login">登录工作台 <span aria-hidden="true">→</span></a></section>
-      <aside class="panel aside"><p class="kicker">02 / 设备端</p><h3>同步留在工作目录</h3><p>在绑定资料库的设备上运行 <code>filecloud library status</code>，配合本机状态目录和工作目录参数查看同步基线。</p></aside>
+  {{template "symbols"}}
+  <header class="topbar">
+    <div class="app-name">
+      <button type="button" id="nav-toggle" aria-label="主导航" aria-controls="sidebar" aria-expanded="false" hidden>{{template "icon" "menu"}}</button>
+      <a class="brand" href="/web/libraries">{{template "icon" "brand"}}Filecloud</a>
+      <span class="app-label">工作空间</span>
     </div>
-    {{else if eq .View "login"}}
-    <section class="panel notice"><p class="kicker" lang="en">WORKSPACE / ACCESS</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/web/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
+    {{if or (eq .View "libraries") (eq .View "library")}}
+    <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="按名称筛选本页" placeholder="按名称筛选本页" autocomplete="off"></label>
+    {{end}}
+    <form class="logout" action="/web/logout" method="post"><button>{{template "icon" "logout"}}退出登录</button></form>
+  </header>
+  <aside class="rail" id="sidebar">
+    <nav aria-label="主导航">
+      <p class="rail-label">文件空间</p>
+      <a href="/web/libraries" {{if eq .View "libraries"}}aria-current="page"{{end}}>{{template "icon" "folder"}}资料库</a>
+      {{$lib := ""}}{{if eq .View "library"}}{{$lib = .Data.ID}}{{else if or (eq .View "file-history") (eq .View "history") (eq .View "snapshot") (eq .View "handoff")}}{{$lib = .Data.LibraryID}}{{end}}
+      {{if $lib}}
+      <p class="rail-label">当前资料库</p>
+      <a href="/web/libraries/{{$lib}}" {{if eq .View "library"}}aria-current="page"{{end}}>{{template "icon" "file"}}文件列表</a>
+      <a href="/web/libraries/{{$lib}}/history" {{if eq .View "history"}}aria-current="page"{{end}}>{{template "icon" "history"}}主线历史</a>
+      {{end}}
+      {{if .Admin}}
+      <p class="rail-label">服务管理</p>
+      <a href="/web/overview" {{if eq .View "overview"}}aria-current="page"{{end}}>{{template "icon" "server"}}服务概览</a>
+      <a href="/web/accounts" {{if or (eq .View "accounts") (eq .View "confirm")}}aria-current="page"{{end}}>{{template "icon" "users"}}账号管理</a>{{end}}
+    </nav>
+    <span class="rail-foot">{{template "icon" "server"}}Filecloud Server</span>
+  </aside>
+  {{end}}
+  <main id="content" tabindex="-1" {{if or (eq .View "libraries") (eq .View "library")}}class="explorer"{{end}}>
+    {{if eq .View "login"}}
+    <section class="panel notice"><p class="kicker" lang="en">FILECLOUD</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/web/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
     {{else if eq .View "libraries"}}{{template "libraries" .}}
     {{else if eq .View "library"}}{{template "library" .Data}}
+    {{else if eq .View "file-history"}}{{template "file-history" .Data}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/web/libraries">重新打开资料库列表</a></section>
     {{else if eq .View "handoff"}}{{template "handoff" .Data}}
     {{else if eq .View "snapshot"}}{{template "snapshot" .Data}}
@@ -48,7 +56,7 @@
     {{else if eq .View "confirm"}}{{template "confirm" .}}
     {{else if eq .View "overview"}}{{template "overview" .Data}}
     {{else}}
-    <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或从控制台入口重新开始。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
+    <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或返回首页。</p><a class="action" href="/web/">返回首页 <span aria-hidden="true">→</span></a></section>
     {{end}}
   </main>
 <div id="feedback" class="sr" role="status"></div>

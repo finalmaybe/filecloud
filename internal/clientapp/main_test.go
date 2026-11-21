@@ -249,7 +249,7 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 			client := &http.Client{Timeout: 5 * time.Second}
 			webStatus, home, css := 404, "404 page not found", "404 page not found"
 			if enabled {
-				webStatus, home, css = 200, "资料库工作台", ".skip"
+				webStatus, home, css = 200, "账号登录", ".skip"
 			}
 			for _, tc := range []struct {
 				path   string

@@ -113,8 +113,9 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 		t.Fatal("idempotent create")
 	}
 	id2, _ := auth.NewUserID(nil)
-	if f.req("POST", "/web/libraries", url.Values{"id": {id2}, "name": {"Atlas"}}).Code != 409 {
-		t.Fatal("duplicate library name")
+	duplicate := f.req("POST", "/web/libraries", url.Values{"id": {id2}, "name": {"Atlas"}})
+	if duplicate.Code != 409 || !strings.Contains(duplicate.Body.String(), `aria-labelledby="create-title" open`) || !strings.Contains(duplicate.Body.String(), `name="name" value="Atlas"`) {
+		t.Fatal("duplicate library name should reopen the create dialog with the submitted name")
 	}
 	if f.req("GET", "/web/libraries?cursor=invalid", nil).Code != 400 {
 		t.Fatal("cursor error")
@@ -128,13 +129,21 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	if f.req("GET", "/web/libraries/"+id, nil).Code != 404 {
 		t.Fatal("foreign library visible")
 	}
+	if list := f.req("GET", "/web/libraries", nil); list.Code != 200 || strings.Contains(list.Body.String(), id) {
+		t.Fatal("expected an empty list without foreign library metadata")
+	}
 	lib.Set("name", "Other")
 	if f.req("POST", "/web/libraries", lib).Code != 303 {
 		t.Fatal("same UUID in separate owner scope")
 	}
 	f.cookie = admin
-	if strings.Contains(f.req("GET", "/web/libraries/"+id, nil).Body.String(), "Other") {
-		t.Fatal("library crossed owners")
+	detail := f.req("GET", "/web/libraries/"+id, nil)
+	if detail.Code != 200 || strings.Contains(detail.Body.String(), "Other") || !strings.Contains(detail.Body.String(), "尚未发布文件") {
+		t.Fatal("expected the owner's empty file list")
+	}
+	info := f.req("GET", "/web/libraries", nil)
+	if info.Code != 200 || !strings.Contains(info.Body.String(), "Atlas") || strings.Contains(info.Body.String(), "Other") || strings.Contains(info.Body.String(), `id="head-id"`) {
+		t.Fatal("expected only the owner's unpublished library metadata")
 	}
 	if f.req("POST", "/web/accounts/review", url.Values{"username": {"field-device"}}).Code != 200 {
 		t.Fatal("reset review")
@@ -173,6 +182,23 @@ func TestAdminGrantAndRevocation(t *testing.T) {
 		t.Fatal("unknown admin configured")
 	}
 }
+func TestWorkspaceNavigationBySession(t *testing.T) {
+	f := newFixture(t)
+	login := f.req("GET", "/web/login", nil).Body.String()
+	if !strings.Contains(login, `autocomplete="current-password"`) || strings.Contains(login, `<nav`) || strings.Contains(login, "工作空间") {
+		t.Fatal("expected a standalone login form without workspace navigation")
+	}
+	f.login()
+	entry := f.req("GET", "/web/", nil)
+	if entry.Code != 303 || entry.Header().Get("Location") != "/web/libraries" {
+		t.Fatal("signed-in entry did not lead to libraries")
+	}
+	libraries := f.req("GET", "/web/libraries", nil).Body.String()
+	if !strings.Contains(libraries, `aria-label="主导航"`) || !strings.Contains(libraries, `>资料库</a>`) || strings.Contains(libraries, "控制台入口") {
+		t.Fatal("expected libraries navigation without the redundant console entry")
+	}
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	f := newFixture(t)
 	bad := f.req("POST", "/web/login", url.Values{"username": {"observer"}, "password": {"invalid"}})

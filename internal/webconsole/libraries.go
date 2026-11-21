@@ -2,11 +2,12 @@ package webconsole
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
-	"net/http"
 )
 
 func (c *console) show(w http.ResponseWriter, r *http.Request, who identity, status int, title, view string, data any, msg string) {
@@ -76,11 +77,42 @@ func (c *console) history(w http.ResponseWriter, r *http.Request, who identity) 
 	}
 	c.show(w, r, who, 200, "主线历史", "history", data, "")
 }
+func (c *console) fileHistory(w http.ResponseWriter, r *http.Request, who identity) {
+	q := r.URL.Query()
+	data, err := c.Catalog.FileHistory(r.Context(), who.user, r.PathValue("library"), q.Get("commit"), q.Get("path"), q.Get("cursor"))
+	if err != nil {
+		c.problem(w, r, who, err)
+		return
+	}
+	c.show(w, r, who, 200, "文件历史版本", "file-history", data, "")
+}
+
+type libraryDetail struct {
+	storage.Library
+	Files library.Snapshot
+}
+
 func (c *console) libraryDetail(w http.ResponseWriter, r *http.Request, who identity) {
 	item, err := c.Store.GetLibrary(r.Context(), who.user, r.PathValue("library"))
 	if err != nil {
 		c.problem(w, r, who, err)
 		return
 	}
-	c.show(w, r, who, 200, item.Name, "library", item, "")
+	data := libraryDetail{Library: item}
+	if item.HeadCommitID != nil {
+		commit := r.URL.Query().Get("commit")
+		if commit == "" {
+			commit = *item.HeadCommitID
+		}
+		data.Files, err = c.requestedSnapshot(r, who, commit)
+		if err != nil {
+			c.problem(w, r, who, err)
+			return
+		}
+		if data.Files.Kind != "Directory" {
+			c.problem(w, r, who, library.ErrInvalidPath)
+			return
+		}
+	}
+	c.show(w, r, who, 200, item.Name, "library", data, "")
 }
