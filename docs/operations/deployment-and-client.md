@@ -23,11 +23,13 @@
 
 正式版本可从项目的 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。归档中包含二进制、项目许可证、第三方模块清单和许可证文本。
 
-也可以从源码构建。当前仓库要求 Go 1.26.6：
+从源码构建时固定使用 Go 1.26.6，以使用协议测试锁定的 Unicode 表：
 
 ```bash
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
+export GOTOOLCHAIN=go1.26.6
+go version
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
 ./filecloud version
@@ -141,7 +143,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 **查看历史**：点击文件旁的「… → 历史版本」可查看这个文件的版本记录。桌面在列表右侧打开版本栏，窄屏切换为单栏；点「关闭」或在栏内按 Esc 回到原列表。顶部显示打开列表时的文件版本，下方按从新到旧的顺序列出该路径的变更。点击版本名称或时间，可就地展开修改时间、内容标识和版本标识。点「加载更早的记录」继续查看。
 
-**操作文件版本**：点版本行右侧的「…」打开操作菜单。文件的当前版本只提供下载；只有更早的版本才能恢复或删除。选「下载版本」直接按原文件名保存；选「恢复版本」并核对弹窗中的路径和时间后确认，会把所选文件的内容和修改时间发布为新版本，其他文件保持不变；绑定设备在下次同步时收到变更。选「删除版本」并确认，只从这个路径的版本列表移除该条记录，保留当前文件、历史快照和共享数据块。侧栏会在原位置提示「版本已删除」，无需重新打开文件列表。打开列表后如果有设备发布了新版本，请重新打开资料库，核对后再操作。
+**操作文件版本**：点版本行右侧的「…」打开操作菜单。文件的当前版本只提供下载；只有更早的版本才能恢复或删除。选「下载版本」直接按原文件名保存；选「恢复版本」并核对弹窗中的路径和时间后确认，会把所选文件的内容和修改时间发布为新版本，其他文件保持不变；绑定设备在下次同步时收到变更。如果内容和修改时间都已相同，页面提示「文件已与所选版本相同」，不创建新提交。选「删除版本」并确认，只从这个路径的版本列表移除该条记录，保留当前文件、历史快照和共享数据块。侧栏会在原位置提示「版本已删除」，无需重新打开文件列表。打开列表后如果有设备发布了新版本，请重新打开资料库，核对后再操作。
 
 **管理与维护**：管理员的「账号管理」可以在线开户或重置密码；确认重置会撤销目标用户所有 Web/CLI 会话，不赋予管理员直接读取其他资料库的权限。「服务概览」分开检查存活和就绪，并提供可提前复制的维护清单。GC、完整性检查、完整数据目录的备份与恢复仍在停服后于服务器本地执行。
 
@@ -268,7 +270,7 @@ sudo systemctl start filecloud
 - 回环地址可以使用 HTTP，例如 `http://127.0.0.1:8080`。
 - 非回环地址必须使用 HTTPS，例如 `https://cloud.example.com`。
 
-因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。若启用 Web，请为回环监听的 `serve` 加上 `--web-origin https://cloud.example.com`，让代理保留浏览器的 Host（含非默认端口）。服务端不从 `X-Forwarded-Host` 等请求头推断来源。下面是 Nginx 配置的核心部分：
+因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。若启用 Web，请为回环监听的 `serve` 加上 `--web-origin https://cloud.example.com`，让代理保留浏览器的 Host（含非默认端口）。服务端不从 `X-Forwarded-Host` 推断公开地址。登录并发限制也按直连 IP 计算：使用下面的配置时，所有经过该代理的登录共享回环 IP 的并发槽（默认 1），添加 `X-Forwarded-For` 不会改变此行为。
 
 ```nginx
 server {
@@ -356,12 +358,7 @@ LIBRARY_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 DEVICE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 ```
 
-Windows PowerShell：
-
-```powershell
-$LibraryId = [guid]::NewGuid().ToString().ToLowerInvariant()
-$DeviceId = [guid]::NewGuid().ToString().ToLowerInvariant()
-```
+Windows 用户可直接按 [PowerShell 客户端快速体验](#windows-客户端快速体验)操作。
 
 创建资料库：
 
@@ -423,7 +420,7 @@ printf '%s\n' "$TOKEN" |
 
 ### 导入已有本地文件
 
-只有远端资料库为空时才能导入非空工作目录，必须显式使用 `--import-local`：
+只有远端资料库从未发布过提交（Head 为空）时才能首次导入非空工作目录，必须显式使用 `--import-local`：
 
 ```bash
 printf '%s\n' "$TOKEN" |
@@ -441,7 +438,40 @@ printf '%s\n' "$TOKEN" |
 
 绑定成功后，后续 `sync` 和 `watch` 从 `client.db` 读取服务地址、设备 ID 和 token，不再要求输入 token。
 
-重新登录得到新 token 后，可以使用相同的 `bind` 参数刷新现有绑定的凭据。刷新时工作目录必须尚未发生未同步变化；否则先使用仍有效的旧凭据完成同步。
+### 刷新绑定凭据
+
+用同一账号重新登录，将新 token 通过标准输入交给原来的 `bind` 命令，保持服务地址、资料库、设备 ID 和两个目录不变。刷新要求同时满足两个条件：工作目录的内容和修改时间与同步基线一致，且服务端 Head 仍是这条基线。其他设备发布了提交时，即使本机没有编辑，也要先同步。
+
+旧 token 仍有效时，先用原绑定运行 `library sync`，再刷新。若旧 token 已失效且两端尚未收敛，先停止 `watch`，保留原工作目录和客户端状态目录。用新的状态目录、空工作目录和设备 ID 绑定同一资料库，下载当前版本，再对照原目录逐项合入要保留的本地修改并同步；核对完毕前保留原目录。
+
+### Windows 客户端快速体验
+
+前提：服务已启动、管理员已为你开户，`filecloud.exe` 已加入 `PATH`。在 PowerShell 7.4 或更高版本中运行下面的代码，将服务地址和用户名换成自己的。两个目录应位于本地固定 NTFS 卷；示例使用新的工作目录，避免覆盖现有文件。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+$Server = 'https://cloud.example.com'
+$Username = 'alice'
+$LibraryId = [guid]::NewGuid().ToString()
+$DeviceId = [guid]::NewGuid().ToString()
+$ClientDir = Join-Path $env:LOCALAPPDATA 'Filecloud\client'
+$Worktree = Join-Path $HOME "Filecloud\$LibraryId"
+New-Item -ItemType Directory -Force -Path $ClientDir | Out-Null
+New-Item -ItemType Directory -Path $Worktree | Out-Null
+
+try {
+    $Login = (Read-Host '密码' -MaskInput) | filecloud.exe login --server $Server --username $Username --device-name windows-pc --password-stdin | ConvertFrom-Json
+    $Token = $Login.Session.AccessToken
+    $Token | filecloud.exe library create --server $Server --library-id $LibraryId --name "Documents-$($LibraryId.Substring(0,8))" --token-stdin
+    $Token | filecloud.exe library bind --client-dir $ClientDir --server $Server --library-id $LibraryId --worktree $Worktree --device-id $DeviceId --token-stdin
+} finally {
+    Remove-Variable Login, Token -ErrorAction SilentlyContinue
+}
+
+Set-Content -LiteralPath (Join-Path $Worktree 'hello.txt') -Value 'hello, filecloud' -Encoding utf8
+filecloud.exe library sync --client-dir $ClientDir --worktree $Worktree
+```
 
 ## 9. 同步
 
@@ -577,7 +607,9 @@ filecloud library restore \
   --confirm 0123456789ab
 ```
 
-恢复通过一个新的前向 Commit 发布，不会把 Head 指回旧版本。预览后若工作目录或 Head 已变化，确认会失效，必须先同步并重新预览；客户端不会自动把旧确认意图应用到新 Head。上传、CAS 响应或 checkout 中断时，使用同一候选前缀重试确认；不要创建另一个预览。历史中不存在的源路径会返回 NotFound，不表示删除当前路径。
+恢复通过一个新的前向 Commit 发布，不会把 Head 指回旧版本。预览后若工作目录或 Head 已变化，确认会失效，必须先同步并重新预览；客户端不会自动把旧确认意图应用到新 Head。历史中不存在的源路径会返回 NotFound，不表示删除当前路径。
+
+中断后按待处理状态继续，不必重新生成候选：尚待确认时，使用预览中的 12 位前缀执行 `library restore --confirm`；已确认但上传、发布结果核对或 checkout 尚未完成时，运行普通 `filecloud library sync --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"`。已有待处理 checkout 时，再执行 `restore --confirm` 会提示先同步。源码版可用[离线状态命令](#9-同步)查看 `Pending` 和 `NextCommand`。
 
 ## 11. 解除绑定和注销
 
@@ -719,7 +751,7 @@ read -rsp "Password: " PASSWORD
 ```text
 filecloud-server version
 filecloud-server init --data-dir PATH
-filecloud-server serve --data-dir PATH [--listen ADDRESS] [--web-origin ORIGIN] [--web-admin-user USERNAME ...]
+filecloud-server serve --data-dir PATH [--listen ADDRESS]
 filecloud-server user add --data-dir PATH --username NAME --password-stdin
 filecloud-server user reset-password --data-dir PATH --username NAME --password-stdin
 filecloud version
@@ -729,7 +761,6 @@ filecloud library create --server URL --library-id UUID --name NAME --token-stdi
 filecloud library list --server URL --token-stdin
 filecloud library inspect --server URL --library-id UUID --token-stdin
 filecloud library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
-filecloud library status --client-dir PATH --worktree PATH
 filecloud library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
 filecloud library watch --client-dir PATH --worktree PATH --interval DURATION
 filecloud library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]
@@ -739,6 +770,13 @@ filecloud library restore --client-dir PATH --worktree PATH --confirm 12_HEX
 filecloud library unbind --client-dir PATH --worktree PATH
 filecloud-server integrity check --data-dir PATH
 filecloud-server gc --data-dir PATH [--dry-run] [--grace-period DURATION]
+```
+
+以下两项在 `v0.3.0` 标签之后加入，使用当前源码构建的二进制：
+
+```text
+filecloud-server serve --data-dir PATH [--listen ADDRESS] --web-origin ORIGIN [--web-admin-user USERNAME ...]
+filecloud library status --client-dir PATH --worktree PATH
 ```
 
 协议、冲突处理和崩溃恢复边界见 [同步架构](../design/architecture.md)，接口细节见 [HTTP API 契约](../design/http-api.md)。

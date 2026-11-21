@@ -133,17 +133,19 @@ NFS、SMB、FAT/exFAT 和网络映射盘必须拒绝绑定，除非后续 ADR �
 1B 必须分别在 Linux/ext4、macOS/APFS 和 Windows/NTFS 的本地 checkout 中显式运行。三平台使用同一测试名、场景清单和证明 schema；普通 `go test ./...` 中跳过重型矩阵或交叉编译不构成通过：
 
 ```bash
+export GOTOOLCHAIN=go1.26.6
 FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
   -run '^TestCrossPlatformAcceptanceMatrix$' \
   -count=1 -timeout=30m -v
 ```
 
 ```powershell
+$env:GOTOOLCHAIN = 'go1.26.6'
 $env:FILECLOUD_RUN_1B=1
 go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```
 
-门禁在仓库所在挂载创建专用 `TMPDIR`，通过 held worktree fd、`statfs` 和 `/proc/self/mountinfo` 的设备号及最深挂载点共同确认 fstype 精确为 `ext4`；无法确认、ext2、ext3 或其他文件系统直接失败。随后在该根下执行完整 `go test -json ./...`，Linux/ext4 与 macOS/APFS 的内层 suite 超时为 20 分钟，Windows/NTFS 为 28 分钟；Windows 预算按完整矩阵约 26 分钟的实测时长单独设置，并在外层 30 分钟门禁内保留约 2 分钟用于启动、事件校验和清理。任何测试失败或非子进程 helper 的具名测试 skip 都使门禁失败；`go test -json` 为无测试文件包生成的 package-level skip 没有测试名，不属于场景 skip。关键场景清单还必须逐项产生 pass，因此测试被删除、重命名或环境不满足时不能空匹配通过。correctness worktree、对象发布和 Head 更新的 crash data dir 均来自同一个已验证 ext4 根。
+三平台都在仓库所在卷创建专用测试根。Linux 通过 held worktree fd、`statfs` 和 `/proc/self/mountinfo` 的设备号及最深挂载点共同确认 fstype 精确为 `ext4`；无法确认、ext2、ext3 或其他文件系统直接失败。随后在该根下执行完整 `go test -json ./...`，Linux/ext4 与 macOS/APFS 的内层 suite 超时为 20 分钟，Windows/NTFS 为 28 分钟；Windows 预算按完整矩阵约 26 分钟的实测时长单独设置，并在外层 30 分钟门禁内保留约 2 分钟用于启动、事件校验和清理。任何测试失败或白名单之外的具名 skip 都使门禁失败。允许跳过的测试按包名和测试名精确匹配，包括子进程 helper、内层矩阵入口、由 1C 单独运行的性能测试，以及大小写不敏感 APFS/NTFS 上由同次文件系统原语证明补位的指定场景。无测试文件包的 package-level skip 没有测试名，不属于场景 skip。关键场景清单还必须逐项产生 pass，因此测试被删除、重命名或环境不满足时不能空匹配通过。工作目录和崩溃测试数据目录都位于本次门禁已验证的文件系统上。
 
 2026-08-15 的验收记录：Linux 7.1.8-zen1-3-zen（x86_64）、Go 1.26.5、本地 ext4；完整统一门禁、required-pass 与 112 条结构化证明全部通过，固定收敛 Root 为 `746abb68bf9a6fb9cc2251b96be467622a28dd8a7d6686c73a5f0db97a703599`，Head 为 `6b604c48ae82f9a829370976c3f08ce34dee7ea01a1791a336b3363175fcee53`。
 

@@ -2,7 +2,7 @@
 
 状态：第一阶段实现已完成，并按 1A、1B、1C 递进验收。单节点 Go 服务端与 Linux/macOS/Windows Go CLI 已落地；各平台支持声明以对应目标文件系统的最近一次实机门禁记录为准。CAS、pending publication、对象校验和 checkout journal 不因拆阶段而删减。
 
-详细故障注入和平台断言见 [验收规范](./acceptance-tests.md)。
+本文保留第一阶段的原始范围和完成标准。后续已实现 [CLI 历史浏览与安全恢复](./history-and-safe-restore.md)和[源码版 Web 单文件版本操作](./web-console.md)。第一阶段的故障注入和平台断言见[验收规范](./acceptance-tests.md)。
 
 ## 产品边界
 

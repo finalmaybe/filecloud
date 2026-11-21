@@ -111,7 +111,7 @@ Authorization: Bearer <opaque-token>
 
 错误：`InvalidArgument`、`Unauthenticated`、`RateLimited`。用户名不存在和密码错误必须执行等价 KDF 工作并返回相同消息与状态。所有 `401` 响应携带 `WWW-Authenticate: Bearer`。
 
-登录按来源 IP、规范用户名和全局 KDF 并发数限流；达到并发上限立即返回 `429`，不得无界排队。具体默认值在目标硬件基准后写入部署配置，但“必须有界”属于协议安全要求。
+登录 KDF 的默认并发上限为全局 2、每个直连来源 IP 1、每个规范用户名 1。任一上限用尽即返回 `429`。来源 IP 取自 TCP 连接的对端地址；经同一反向代理 IP 的登录共享该来源的并发槽。参见[部署性能基线](../operations/performance-baseline.md#冻结默认值)。
 
 ## DeleteCurrentSession
 
@@ -187,7 +187,7 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 `GET /v1/libraries/{LibraryId}/file-history?CommitId=…&Path=…[&PageToken=…]`
 
-`CommitId` 必须是固定的已发布主线提交，`Path` 是该提交内文件的规范相对路径，按 URL 查询参数编码。首次请求返回该文件在该提交的状态。更早的记录按主线从新到旧读取，每页检查最多 50 个提交，即使本页没有这个文件的变更也可能有下一页。续页沿用原 `CommitId` 和 `Path`，仅追加 `PageToken`，不跟随新 Head。
+`CommitId` 必须是固定的已发布主线提交，`Path` 是该提交内文件的规范相对路径，按 URL 查询参数编码。首次请求返回该文件在该提交的状态。更早的记录按主线从新到旧读取，每页从最多 50 个主线提交中筛选变更；还有更早的提交时，额外读取下一页的首个提交作边界比较。即使本页没有这个文件的变更也可能有下一页。续页沿用原 `CommitId` 和 `Path`，仅追加 `PageToken`，不跟随新 Head。
 
 响应包含 `RetCode`、`Message` 和 `FileHistory`。后者包含 `LibraryId`、`AnchorCommitId`、`Path`、`Current`（`CommitId`、`FileId`、`ModifiedAt`；续页为 `null`）、`Versions` 数组和 `NextPageToken`（结束时为空字符串）。已在 Web 删除的单文件记录不再列出，不改变发布提交及其快照。`IsCurrent` 标记截至锚定提交该路径最近一次变更，翻页时延续同一判断。每条变更另含 `CreatedAt`、`Message`、`Change`（`added`、`content` 或 `modified-time`）。非法参数/游标返回 `400/1000`，无权访问的库、未发布的提交或首次读取时不存在的文件统一返回 `404/2000`；历史读取繁忙返回 `429/4000` 并携带 `Retry-After`。
 
@@ -364,7 +364,7 @@ CAS 请求结果因断网而未知时，客户端必须调用 `GetLibraryHead`�
 
 `GET /healthz` 仅表示进程存活，不访问数据库。
 
-`GET /readyz` 检查元数据库可读和对象目录可写；成功返回 `200`，失败返回 `503`。响应不得泄露内部路径或数据库 DSN。
+`GET /readyz` 检查服务持有的数据目录锁、元数据库可读和对象目录可写；成功返回 `200`，失败返回 `503`。响应不得泄露内部路径或数据库 DSN。
 
 `204` 与 `304` 没有响应正文，不受 JSON envelope 规则约束。已认证用户访问不属于自己的 Library 与资源不存在统一返回 `404 NotFound`，避免泄露资源身份。
 

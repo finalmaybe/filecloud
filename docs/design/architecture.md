@@ -45,7 +45,7 @@ flowchart LR
 
 ObjectId 是对象规范字节的 SHA-256，以 64 位小写十六进制表示。元数据对象使用 [RFC 8785 JCS](https://www.rfc-editor.org/info/rfc8785) 生成 UTF-8 规范 JSON；只允许 I-JSON，不允许重复键、浮点数或未知必填版本。
 
-所有对象都带 `Version: 1` 和 `Type`。时间固定为 UTC、整秒、无小数的 `YYYY-MM-DDTHH:MM:SSZ`；大小等整数固定为无符号十进制字符串，除 `"0"` 外不得有前导零。这样避免字符串语义等价但 ObjectId 不同。
+Commit、Directory 和 File 是 JSON 元数据对象，都带 `Version: 1` 和 `Type`；Block 直接存储原始字节。时间固定为 UTC、整秒、无小数的 `YYYY-MM-DDTHH:MM:SSZ`；大小等整数固定为无符号十进制字符串，除 `"0"` 外不得有前导零。这样避免字符串语义等价但 ObjectId 不同。
 
 ### Block
 
@@ -125,20 +125,22 @@ Entries 必须按 NFC 规范化后 `Name` 的 UTF-8 字节升序，名称只能�
 
 ## 可变元数据
 
-SQLite 只保存以下表；content objects 不进 SQL。
+服务端 SQLite 保存账号、会话、资料库及以下索引和计费记录；内容对象保存在文件系统。
 
 | 表 | 关键字段 | 约束 |
 |---|---|---|
 | `schema_migrations` | `version` | 单调递增 |
 | `users` | `id`, `username`, `password_hash`, `is_admin`, `created_at` | 规范用户名唯一 |
 | `access_tokens` | `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at` | token hash 唯一，级联用户 |
-| `libraries` | `id`, `owner_user_id`, `name`, `head_commit_id`, `head_version`, timestamps | `(owner_user_id,id)` 主键，`(owner_user_id,name)` 唯一 |
+| `libraries` | `id`, `owner_user_id`, `name`, `head_commit_id`, `head_version`, timestamps | `(owner_user_id,id)` 主键，`(owner_user_id,name_key)` 唯一 |
 | `published_commits` | `owner_user_id`, `library_id`, `commit_id` | 发布 reachability 索引，随 Head CAS 同事务维护，级联资料库 |
-| `usage_windows` | `user_id`, `window_start`, `accepted_bytes` | 用户上传安全预算 |
+| `published_commit_roles` | `owner_user_id`, `library_id`, `commit_id`, `role`, `mainline_commit_id` | 区分主线与合并来源，随 Head CAS 同事务维护 |
+| `deleted_file_versions` | `owner_user_id`, `library_id`, `path`, `commit_id` | 标记从单文件版本列表移除的记录，保留原提交和快照 |
+| `upload_charges` | `user_id`, `accepted_at`, `bytes` | 按用户累计滚动时间窗内首次接收的对象字节 |
 
 LibraryId 只在所有者作用域内唯一；不同用户可以独立使用相同 UUID。数据库查询、对象路径、资料库锁和 GC 标记都必须使用 `(OwnerUserId, LibraryId)`，不能只用 LibraryId 定位资料库。这样创建接口不会通过全局 UUID 冲突泄露其他用户资料库的存在性。滚动上传预算仍按用户统计，不属于资料库复合键命名空间。
 
-逻辑类型固定为：UUID 使用规范小写文本，时间使用 UTC RFC3339 文本，布尔使用 0/1，ObjectId/token hash 使用定长字节或固定小写十六进制且比较必须是 binary，不依赖数据库 locale/collation。用户名和资料库名先由应用生成规范键，再对规范键建唯一约束。Head CAS 的成功条件统一为条件 UPDATE 影响恰好一行；成功后在同一事务把候选及本次引入的 Commit 写入 `published_commits`。该表只记录发布可达性，不存储或替代 content objects。
+逻辑类型固定为：UUID 使用规范小写文本，账号、会话和资料库时间使用 UTC RFC3339 文本（上传计费的 `accepted_at` 使用 Unix 纳秒整数），布尔使用 0/1，ObjectId/token hash 使用定长字节或固定小写十六进制且比较必须是 binary，不依赖数据库 locale/collation。用户名和资料库名先由应用生成规范键，再对规范键建唯一约束。Head CAS 的成功条件统一为条件 UPDATE 影响恰好一行；成功后在同一事务把候选及本次引入的 Commit 写入 `published_commits`。该表只记录发布可达性，不存储或替代 content objects。
 
 `serve` 整个生命周期持有数据目录共享锁。Head 发布先在该锁下验证新 Commit 的完整可达图，再用短事务读取当前 `head_commit_id/head_version`、比较 Expected Head并带当前版本条件更新。服务运行期间对象不可删除；GC 必须取得数据目录独占锁并要求服务停止，因此验证与 CAS 之间对象不会消失。
 
@@ -278,14 +280,14 @@ JCS 本身不做 Unicode normalization，因此名称必须先按 Unicode 15.1 N
 ## 认证与安全
 
 - 生产流量必须由可信反向代理提供 HTTPS；服务端默认只绑定 loopback。
-- 管理员通过本地 CLI 创建用户，不提供公开注册。
+- 首个账号由管理员通过本地 CLI 创建；源码版也允许启动时显式授权的 Web 管理员在线开户和重置密码。不提供公开注册。
 - 密码使用带参数版本的内存困难哈希；访问 token 至少 256 bit 随机，数据库只存 SHA-256 token hash。
 - Bearer token 可撤销、可过期；日志不得记录密码、token 或完整 Authorization header。
 - 所有正文设置大小和数量上限；JSON 拒绝未知类型、重复键和尾随内容。
 - 登录 KDF、Head 图验证和对象上传必须有全局及主体级并发/速率门控。对象 PUT 在读取正文或创建临时文件前取得全局和用户并发槽，block 按 Content-Length 预留临时字节；无槽或无预算立即拒绝，不允许慢请求无界占用连接、fd 或磁盘。
-- 第一阶段保留“无用户可见容量配额”，但实现按用户滚动时间窗限制首次接收的对象字节，并在离线 GC 前提供未发布对象统计；该安全预算持久化在 `usage_windows`。1A 用容量测试冻结安全默认值，1C 只能基于部署基准调优，不能取消有界约束。
+- 第一阶段保留“无用户可见容量配额”，但实现按用户滚动时间窗限制首次接收的对象字节，并在离线 GC 前提供未发布对象统计；计费记录持久化在 `upload_charges`。1A 用容量测试冻结安全默认值，1C 只能基于部署基准调优，不能取消有界约束。
 - 对象读写必须验证资料库所有权，不能因内容摘要相同跨资料库读取。
-- 反向代理头默认不可信，只有显式配置的代理地址可提供客户端 IP。
+- 登录限流只使用 TCP 对端 IP，不读取 `X-Forwarded-For` 等转发头，也没有可信代理名单配置。经同一代理 IP 的请求共享来源并发槽。
 
 第一阶段没有端到端加密；服务端可见名称、目录结构和内容。
 

@@ -4,7 +4,9 @@
 
 ## 目标与边界
 
-Filecloud 已永久保存完整不可变历史，但第一阶段没有用户可用的历史浏览和恢复路径。本能力解决误删和错误覆盖后的找回问题：资料库所有者从正式 Head 历史选择一个已发布 Commit，检查其中的文件树，并把一个历史文件或目录安全恢复到原路径。
+本文定义绑定设备上的 **CLI 历史浏览与恢复**：资料库所有者选择已发布提交，将其中的文件、目录或根恢复到原路径，可用于找回已删除的内容。
+
+[Web 版本栏](./web-console.md)还有一条独立入口：所有者可将历史版本恢复到当前 Head 仍存在的同路径文件。网页核对路径和版本后，由服务端校验快照并以前向 CAS 发布；无需绑定设备预览或输入候选前缀。两种入口都保留旧快照。
 
 本阶段继续保持以下边界：
 
@@ -12,12 +14,12 @@ Filecloud 已永久保存完整不可变历史，但第一阶段没有用户可�
 - 一个资料库只有一个所有者；不增加成员、角色或共享链接。
 - 服务端可见名称、目录结构和内容；不引入端到端加密。
 - SQLite 元数据、本地内容对象存储、离线 GC 和永久历史保持不变。
-- Commit、Directory、File 和 Block 继续使用 Version 1；不改变对象规范。
+- Commit、Directory 和 File 沿用 Version 1；Block 沿用原始字节编码。
 - Head 只能通过现有强 ETag CAS 前向发布。
 
 该能力称为“历史浏览与安全恢复”，不是版本控制、备份或 Head 回滚。恢复采用前向提交的原因见 [ADR-0004](../adr/0004-restore-history-with-a-forward-commit.md)。
 
-## 产品不变量
+## CLI 历史与恢复不变量
 
 1. 默认历史只包含从锚点 Head 沿第一 parent 形成的主线历史；客户端时间不决定顺序。
 2. 第二 parent 及其非主线祖先只能作为合并来源展开，不得伪装成曾经的 Head。
@@ -38,7 +40,7 @@ Filecloud 已永久保存完整不可变历史，但第一阶段没有用户可�
 
 一个非空资料库的历史锚点是第一次 `ListLibraryHistory` 请求观察到的 Head。列表从锚点开始，沿每个 Commit 的第一个 parent 倒序返回。初始 Commit 没有 parent，结束列表。合并 Commit 的第一个 parent 仍是它发布时的 Expected Head，因此第一 parent 链精确表示正式 Head 演进，而不依赖 `CreatedAt`。
 
-`CreatedAt`、`AuthorUserId`、`DeviceId` 和 `Message` 是展示元数据。`CreatedAt` 来自客户端时钟，不能用于排序、游标或并发判断。
+`CreatedAt`、`AuthorUserId`、`DeviceId` 和 `Message` 是展示元数据。`CreatedAt` 由创建提交的一方写入：CLI 用设备时钟，Web 文件恢复用服务端时钟。排序、游标和并发判断都不依赖它。
 
 空 Head 返回空列表、空 `NextPageToken` 和 `null` 的 `AnchorCommitId`。
 
@@ -189,7 +191,7 @@ Token 使用现有 page-token AEAD 保护，必须绑定用户、资料库和接
 
 `history inspect` 从 `HistoryCommit.Root` 开始，通过现有 `GetMetadataObject` 按需读取并逐个验证 Directory 和 File。第一版 inspect 只展示元数据和目录项，不输出文件内容，因此不会为浏览调用 `GetBlock`；恢复确认后上传缺失对象并调用现有 `UpdateLibraryHead`。
 
-恢复不得调用新的服务端树变换或任务接口。服务端无法从 Commit Message 推断或授权恢复；它只按现有规则验证对象图、Commit 作者、第一 parent 和 Head CAS。
+CLI 恢复在绑定设备构造候选，不调用 Web 的单文件恢复处理器。服务端无法从 Commit Message 推断或授权恢复；它只按现有规则验证对象图、Commit 作者、第一 parent 和 Head CAS。
 
 ## CLI 契约
 
@@ -478,7 +480,7 @@ Linux/ext4、macOS/APFS 和 Windows/固定 NTFS 使用同一测试名、场景�
 
 三平台必须生成相同的固定恢复 Candidate Commit 和 Result Root。仓库必须增加 `restore-fixed-vector`：固定 OwnerUserId、DeviceId、Current Head/Root、Source Commit/Root、SourcePath、完整目录对象和 preview clock，并把规范 Commit 字节、CandidateCommit 和 ResultRoot 的字面期望值冻结在测试中。三个实机门禁都把该向量列入 required manifest，逐项比较同一字面期望值，不能只记录各平台自行计算的结果。只在 Linux 实现、交叉编译或具名测试 skip 都不能声明 APFS/NTFS 恢复支持。
 
-## 明确不做
+## CLI 历史与恢复的范围之外
 
 - GUI、系统托盘或文件管理器扩展。
 - 按路径聚合的版本历史、跨 rename 追踪、内容 diff、搜索或文件内容预览。

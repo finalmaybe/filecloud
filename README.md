@@ -2,7 +2,7 @@
 
 Filecloud 是一个以资料库（Library）为同步单位的多设备文件同步系统。它由单节点 Go 服务端和跨平台 Go CLI 组成；服务端使用 SQLite 保存可变元数据，并在本地文件系统中保存按 SHA-256 寻址的不可变内容对象。
 
-当前仓库已完成第一阶段实现和验收，包括 Linux/ext4、macOS/APFS、Windows/固定 NTFS 三个平台的同步闭环，以及历史浏览、安全恢复和运维命令。
+第一阶段已完成 Linux/ext4、macOS/APFS、Windows/固定 NTFS 三个平台的同步闭环和运维验收。后续版本增加了 CLI 历史浏览与安全恢复；当前源码版还提供可选的 Web 控制台。
 
 > Filecloud 当前是同步产品，不是独立备份方案。服务端故障仍可能同时影响当前数据和历史版本；部署时应单独备份完整服务端数据目录。
 
@@ -43,11 +43,13 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 正式版本可从 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。每个归档都包含 `filecloud` 和 `filecloud-server` 两个二进制、项目许可证、部署说明和对应目标平台的第三方依赖许可材料。
 
-从源码构建需要 Go 1.26.6：
+从源码构建和测试请固定使用 Go 1.26.6。Go 1.27 会选择不同的 Unicode 表，无法通过文件名规范化和大小写折叠的协议测试。
 
 ```bash
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
+export GOTOOLCHAIN=go1.26.6
+go version
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
 ./filecloud version
@@ -58,7 +60,7 @@ CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
 
 ## 本机快速体验
 
-下面的流程适用于 Bash 或 zsh，需要 `curl`、`jq` 和 `uuidgen`。它会在回环地址启动服务，创建一个空资料库，绑定本地工作目录并完成第一次同步。Windows 和生产环境的完整步骤见[部署与客户端使用](./docs/operations/deployment-and-client.md)。
+下面的流程适用于 Bash 或 zsh，需要 `curl`、`jq` 和 `uuidgen`。它会在回环地址启动服务，创建一个空资料库，绑定本地工作目录并完成第一次同步。已有账号的 Windows 用户可按 [PowerShell 客户端快速体验](./docs/operations/deployment-and-client.md#windows-客户端快速体验)完成首次同步。生产服务端见 [Linux 部署](./docs/operations/deployment-and-client.md#4-linux-生产部署)。
 
 先构建二进制。在第一个终端初始化服务端、创建用户并启动服务：
 
@@ -164,9 +166,11 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 
 ## 验证
 
-普通回归测试：
+在仓库根目录运行普通回归测试，后面的门禁沿用同一工具链：
 
 ```bash
+export GOTOOLCHAIN=go1.26.6
+go version
 go test ./...
 ```
 
@@ -181,6 +185,7 @@ FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
 PowerShell 使用同一入口：
 
 ```powershell
+$env:GOTOOLCHAIN = 'go1.26.6'
 $env:FILECLOUD_RUN_1B=1
 go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```
@@ -202,6 +207,7 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 | [同步架构](./docs/design/architecture.md) | 内容对象、存储布局、同步状态机、合并、崩溃恢复和安全边界 |
 | [HTTP API 契约](./docs/design/http-api.md) | 认证、资料库、对象、Head 和历史接口 |
 | [历史浏览与安全恢复](./docs/design/history-and-safe-restore.md) | 主线历史、合并来源、恢复预览和确认语义 |
+| [Web 控制台契约](./docs/design/web-console.md) | 源码版的浏览器会话、文件预览与版本操作，以及和 CLI 的分工 |
 | [第一阶段实施计划](./docs/design/phase-1-plan.md) | 1A、1B、1C 的原始交付范围和完成标准 |
 | [1C 部署性能基线](./docs/operations/performance-baseline.md) | 性能测量、资源上限和安全默认值 |
 | [分发说明](./docs/distribution.md) | 平台归档、发布门禁和许可材料 |
