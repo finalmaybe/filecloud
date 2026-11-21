@@ -45,7 +45,7 @@
     {{else if eq .View "history"}}{{template "history" .Data}}
     {{else if eq .View "accounts"}}{{template "accounts" .}}
     {{else if eq .View "confirm"}}{{template "confirm" .}}
-    {{else if eq .View "workspace"}}<section class="panel"><h1>资料库工作台</h1><p>浏览器会话已建立。</p></section>
+    {{else if eq .View "overview"}}{{template "overview" .Data}}
     {{else}}
     <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或从控制台入口重新开始。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
     {{end}}

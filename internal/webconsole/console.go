@@ -19,7 +19,9 @@ import (
 //go:embed *.html assets
 var files embed.FS
 
+type Build struct{ Version, Commit, BuildDate string }
 type Config struct {
+	Build      Build
 	AdminUsers []string
 	Catalog    *library.Catalog
 	Sessions   *auth.Sessions
@@ -72,7 +74,7 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
 	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
 	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
-	mux.HandleFunc("GET /web/overview", c.admin(c.workspace))
+	mux.HandleFunc("GET /web/overview", c.admin(c.overview))
 	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
 	mux.HandleFunc("POST /web/accounts/review", c.admin(c.reviewReset))
 	mux.HandleFunc("POST /web/accounts/create", c.admin(c.saveAccount))

@@ -64,7 +64,7 @@ func Run(ctx context.Context, program string, args []string, stdin io.Reader, st
 	case "init":
 		return runInit(ctx, program, args[1:], stderr)
 	case "serve":
-		return runServe(ctx, program, args[1:], stdout, stderr)
+		return runServe(ctx, program, args[1:], stdout, stderr, build)
 	case "gc":
 		return runGarbageCollection(ctx, program, args[1:], stdout, stderr)
 	case "integrity":
@@ -89,7 +89,7 @@ func runInit(ctx context.Context, program string, args []string, stderr io.Write
 	return storage.Init(ctx, *dataDir)
 }
 
-func runServe(ctx context.Context, program string, args []string, stdout, stderr io.Writer) error {
+func runServe(ctx context.Context, program string, args []string, stdout, stderr io.Writer, build BuildInfo) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
@@ -161,7 +161,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if len(admins) > 0 && *webOrigin == "" {
 		return errors.New("web-admin-user requires web-origin")
 	}
-	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins}, auth.HandlerConfig{
+	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,

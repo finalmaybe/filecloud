@@ -97,6 +97,13 @@ func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
 	http.SetCookie(w, expired)
 	http.Redirect(w, r, "/web/login", 303)
 }
-func (c *console) workspace(w http.ResponseWriter, r *http.Request, who identity) {
-	c.render(w, r, 200, page{Title: "资料库工作台", View: "workspace", SignedIn: true})
+func (c *console) overview(w http.ResponseWriter, r *http.Request, who identity) {
+	ready := "已就绪"
+	if err := c.Store.CheckReady(r.Context()); err != nil {
+		ready = "未就绪"
+	}
+	c.show(w, r, who, 200, "服务概览", "overview", struct {
+		Build       Build
+		Ready, Time string
+	}{c.Build, ready, time.Now().UTC().Format(time.RFC3339)}, "")
 }
