@@ -76,10 +76,7 @@ func (s *Sessions) LoginBrowser(ctx context.Context, name, password, remote stri
 	return s.core.issue(ctx, createSessionRequest{name, password, "Web"}, remote, browserNamespace)
 }
 func (s *Sessions) BrowserUser(ctx context.Context, token string) (string, error) {
-	if !validAccessToken(token) {
-		return "", storage.ErrSessionNotFound
-	}
-	return s.core.store.FindActiveSession(ctx, sha256.Sum256([]byte(browserNamespace+token)), s.core.config.Now())
+	return activeSession(ctx, s.core.store, s.core.config.Now(), browserNamespace, token)
 }
 
 // SetAccountPassword shares the login KDF budget with online account administration.

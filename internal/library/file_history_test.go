@@ -1,8 +1,10 @@
 package library
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -48,14 +50,27 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 		head = publish(root)
 	}
 	const path = "notes/a.txt"
-	p, err := c.FileHistory(ctx, _ownerID, _headLibraryID, head, path, "")
-	if err != nil || len(p.Versions) != 0 || p.Next == "" || p.Current == nil || p.Current.FileID != changed || p.Current.ModifiedAt != "2026-08-09T00:00:01Z" {
-		t.Fatalf("unchanged page: %d versions, continuation=%t, err=%v", len(p.Versions), p.Next != "", err)
+	const endpoint = "/v1/libraries/" + _headLibraryID + "/file-history?"
+	query := url.Values{"CommitId": {head}, "Path": {path}}
+	readPage := func() FileHistory {
+		t.Helper()
+		res := serve(h, "GET", endpoint+query.Encode(), "", _ownerToken)
+		assertStatusCode(t, res, 200, 0)
+		var result struct{ FileHistory FileHistory }
+		if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.FileHistory
+	}
+	p := readPage()
+	if p.Versions == nil || len(p.Versions) != 0 || p.Next == "" || p.Current == nil || p.Current.FileID != changed || p.Current.ModifiedAt != "2026-08-09T00:00:01Z" {
+		t.Fatalf("unchanged page: %d versions, continuation=%t", len(p.Versions), p.Next != "")
 	}
 	publish(empty) // Advancing Head does not change the file or commits selected by the cursor.
-	p, err = c.FileHistory(ctx, _ownerID, _headLibraryID, head, path, p.Next)
-	if err != nil || p.Next != "" || p.Anchor != head {
-		t.Fatalf("older page: continuation=%t, err=%v", p.Next != "", err)
+	query.Set("PageToken", p.Next)
+	p = readPage()
+	if p.Next != "" || p.Anchor != head {
+		t.Fatalf("older page: continuation=%t", p.Next != "")
 	}
 	var got, changes []string
 	for _, v := range p.Versions {
@@ -67,6 +82,13 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{restored, touched, updated, initial}) {
 		t.Fatalf("unexpected versions: %v", got)
+	}
+	query.Del("PageToken")
+	params := query.Encode()
+	assertStatusCode(t, serve(h, "GET", endpoint+params, "", _otherToken), 404, 2000)
+	assertStatusCode(t, serve(h, "GET", endpoint+"bad", "", ""), 401, 1001)
+	for _, invalid := range []string{"Path=a", "CommitId=" + head, params + "&Path=other", params + "&PageSize=1", params + "&PageToken=", params + "&PageToken=invalid"} {
+		assertStatusCode(t, serve(h, "GET", endpoint+invalid, "", _ownerToken), 400, 1000)
 	}
 	for _, tc := range []struct {
 		owner, anchor, path, cursor string

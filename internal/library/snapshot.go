@@ -33,7 +33,24 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 		return v, err
 	}
 	defer done()
-	detail, err := c.core.historyDetail(ctx, owner, lib, commit)
+	if commit == "" {
+		item, err := c.core.store.GetLibrary(ctx, owner, lib)
+		if err != nil {
+			return v, err
+		}
+		if item.HeadCommitID == nil {
+			if filePath != "." {
+				return v, storage.ErrLibraryNotFound
+			}
+			if offset != 0 {
+				return v, ErrInvalidPage
+			}
+			v.Kind = "Directory"
+			return v, nil
+		}
+		v.CommitID = *item.HeadCommitID
+	}
+	detail, err := c.core.historyDetail(ctx, owner, lib, v.CommitID)
 	if err != nil {
 		return v, err
 	}

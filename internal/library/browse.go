@@ -3,6 +3,8 @@ package library
 import (
 	"context"
 	"errors"
+	"net/http"
+
 	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
@@ -43,6 +45,20 @@ func (h *handler) historyDetail(ctx context.Context, owner, lib, id string) (his
 	}
 	return historyCommitDetailResponse{CommitID: id, MainlineCommitID: role.MainlineCommitID, Role: role.Role, Root: commit.Root, DeviceID: commit.DeviceID, Message: commit.Message, AuthorUserID: commit.AuthorUserID, CreatedAt: commit.CreatedAt, Parents: append([]string{}, commit.Parents...)}, nil
 }
+func (h *handler) writeBrowseError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidPath), errors.Is(err, ErrInvalidPage):
+		h.invalid(w)
+	case errors.Is(err, storage.ErrLibraryNotFound):
+		h.writeError(w, http.StatusNotFound, 2000, "library or published path not found")
+	case errors.Is(err, ErrHistoryBusy):
+		w.Header().Set("Retry-After", "1")
+		h.writeError(w, http.StatusTooManyRequests, 4000, "history busy")
+	default:
+		h.historyFailure(w, err, "")
+	}
+}
+
 func (c *Catalog) admit(ctx context.Context, owner string) (context.Context, func(), error) {
 	release, ok := c.core.historyLimiter.tryAcquire(owner)
 	if !ok {

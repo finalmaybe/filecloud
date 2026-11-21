@@ -340,8 +340,8 @@ type handler struct {
 
 type userIDContextKey struct{}
 
-// RequireSession authenticates bearer tokens before invoking next.
-func RequireSession(store *storage.Store, now func() time.Time, logger *log.Logger, next http.Handler) http.Handler {
+// RequireSession accepts Bearer tokens, or a browser cookie on explicitly shared routes.
+func RequireSession(store *storage.Store, now func() time.Time, logger *log.Logger, browser *BrowserOrigin, next http.Handler) http.Handler {
 	if now == nil {
 		now = time.Now
 	}
@@ -354,11 +354,23 @@ func RequireSession(store *storage.Store, now func() time.Time, logger *log.Logg
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
-		if !ok || scheme != "Bearer" || !validAccessToken(token) {
+		namespace := ""
+		if browser != nil && len(r.Header.Values("Authorization")) == 0 {
+			cookie, err := r.Cookie(BrowserCookieName)
+			if err != nil {
+				writeAuthenticationError(w, logger)
+				return
+			}
+			if status := browser.RequestStatus(r); status != 0 {
+				writeAuthenticationJSON(w, status, 1002, "browser origin rejected", logger)
+				return
+			}
+			token, namespace = cookie.Value, browserNamespace
+		} else if !ok || scheme != "Bearer" {
 			writeAuthenticationError(w, logger)
 			return
 		}
-		userID, err := store.FindActiveSession(r.Context(), sha256.Sum256([]byte(token)), now().UTC())
+		userID, err := activeSession(r.Context(), store, now(), namespace, token)
 		if errors.Is(err, storage.ErrSessionNotFound) {
 			writeAuthenticationError(w, logger)
 			return
@@ -370,6 +382,13 @@ func RequireSession(store *storage.Store, now func() time.Time, logger *log.Logg
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDContextKey{}, userID)))
 	})
+}
+
+func activeSession(ctx context.Context, store *storage.Store, now time.Time, namespace, token string) (string, error) {
+	if !validAccessToken(token) {
+		return "", storage.ErrSessionNotFound
+	}
+	return store.FindActiveSession(ctx, sha256.Sum256([]byte(namespace+token)), now.UTC())
 }
 
 // UserID returns the authenticated user ID installed by RequireSession.

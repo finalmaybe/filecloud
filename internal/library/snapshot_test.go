@@ -1,13 +1,15 @@
 package library
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mingming-cn/filecloud/internal/object"
-	"github.com/mingming-cn/filecloud/internal/storage"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/mingming-cn/filecloud/internal/object"
+	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
 func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
@@ -15,6 +17,22 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	defer closeStore(t, s)
 	c := h.(*Catalog)
 	createHeadLibrary(t, h)
+	const endpoint = "/v1/libraries/" + _headLibraryID + "/files"
+	readDirectory := func(query string) directoryListing {
+		t.Helper()
+		res := serve(h, "GET", endpoint+query, "", _ownerToken)
+		assertStatusCode(t, res, 200, 0)
+		var result struct{ Directory directoryListing }
+		if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Directory
+	}
+	if d := readDirectory(""); d.CommitID != nil || d.Entries == nil || len(d.Entries) != 0 || d.Path != "." {
+		t.Fatal("expected unpublished root")
+	}
+	assertStatusCode(t, serve(h, "GET", endpoint, "", _otherToken), 404, 2000)
+	assertStatusCode(t, serve(h, "GET", endpoint+"?Offset=bad", "", ""), 401, 1001)
 	empty := putMetadata(t, s, "directories", `{"Entries":[],"Type":"Directory","Version":1}`)
 	file := putMetadata(t, s, "files", `{"Blocks":[],"Size":"0","Type":"File","Version":1}`)
 	var entries []string
@@ -26,18 +44,27 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	if _, e := c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, ".", 0); !errors.Is(e, storage.ErrLibraryNotFound) {
 		t.Fatal("unpublished snapshot visible")
 	}
+	assertStatusCode(t, serve(h, "GET", endpoint+"?CommitId="+id, "", _ownerToken), 404, 2000)
 	publishHead(t, h, id, `"head-version-0"`, 200, 0)
+	first := readDirectory("")
+	if first.CommitID == nil || *first.CommitID != id || first.NextOffset != 50 || len(first.Entries) != 50 {
+		t.Fatal("wrong directory first page")
+	}
 	next := putCommit(t, s, _ownerID, []string{id}, empty)
 	publishHead(t, h, next, `"head-version-1"`, 200, 0)
-	v, e := c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, ".", 0)
-	if e != nil || v.Next != 50 || len(v.Entries) != 50 {
-		t.Fatal("first directory page", e)
+	second := readDirectory(fmt.Sprintf("?CommitId=%s&Offset=%d", *first.CommitID, first.NextOffset))
+	if len(second.Entries) != 5 || second.Entries[0].Name != "观测50" || second.NextOffset != 0 {
+		t.Fatal("directory pagination followed the new Head")
 	}
-	v, e = c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, ".", 50)
-	if e != nil || len(v.Entries) != 5 || v.Entries[0].Name != "观测50" {
-		t.Fatal("second page", e)
+	if d := readDirectory(""); d.CommitID == nil || *d.CommitID != next || d.Entries == nil || len(d.Entries) != 0 {
+		t.Fatal("expected published empty directory")
 	}
-	v, e = c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, "观测54", 0)
+	for _, query := range []string{"?Offset=-1", "?Offset=z", "?Offset=30", "?Offset=1&Offset=2", "?Path=..", "?CommitId=bad", "?other=1", "?CommitId=" + id + "&Path=%E8%A7%82%E6%B5%8B54"} {
+		assertStatusCode(t, serve(h, "GET", endpoint+query, "", _ownerToken), 400, 1000)
+	}
+	assertStatusCode(t, serve(h, "GET", endpoint+"?CommitId="+id, "", _otherToken), 404, 2000)
+	assertStatusCode(t, serve(h, "GET", endpoint+"?Path=missing", "", _ownerToken), 404, 2000)
+	v, e := c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, "观测54", 0)
 	if e != nil || v.ID != file || v.Kind != "File" || v.Blocks != 0 {
 		t.Fatal("file metadata", e)
 	}

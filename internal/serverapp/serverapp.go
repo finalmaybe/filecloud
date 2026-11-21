@@ -382,7 +382,14 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}
-	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig})
+	var browser *auth.BrowserOrigin
+	if webOrigin != "" {
+		browser, err = auth.NewBrowserOrigin(webOrigin, address)
+		if err != nil {
+			return errors.Join(err, listener.Close())
+		}
+	}
+	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{BrowserOrigin: browser, Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig})
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}
@@ -392,9 +399,9 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	mux.Handle("/v1/libraries", libraries)
 	mux.Handle("/v1/libraries/", libraries)
 	mux.Handle("/", health.NewHandler(store, logger))
-	if webOrigin != "" {
+	if browser != nil {
 		webConfig.Sessions, webConfig.Store, webConfig.Catalog = sessions, store, libraries
-		web, err := webconsole.NewHandler(webOrigin, address, webConfig)
+		web, err := webconsole.NewHandler(browser, webConfig)
 		if err != nil {
 			return errors.Join(err, listener.Close())
 		}

@@ -44,6 +44,7 @@ const (
 
 // Config contains deterministic handler seams.
 type Config struct {
+	BrowserOrigin            *auth.BrowserOrigin
 	Now                      func() time.Time
 	PageTokenKey             []byte
 	BeforeHeadUpdate         func() error
@@ -74,7 +75,7 @@ type handler struct {
 	afterHistoryAdmit        func(context.Context)
 }
 
-// Catalog serves the Bearer API and provides the same owner-scoped operations to the console.
+// Catalog serves the library API and supplies owner-scoped snapshot and history reads to the console.
 type Catalog struct {
 	http.Handler
 	core *handler
@@ -151,20 +152,37 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 		afterHeadValidationAdmit: config.afterHeadValidationAdmit,
 		afterHistoryAdmit:        config.afterHistoryAdmit,
 	}
+	catalog := &Catalog{core: h}
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /v1/libraries/{LibraryId}", h.create)
-	mux.HandleFunc("GET /v1/libraries/{LibraryId}", h.get)
+	shared := http.NewServeMux()
+	for pattern, handle := range map[string]http.HandlerFunc{
+		"GET /v1/libraries":                          h.list,
+		"GET /v1/libraries/{LibraryId}":              h.get,
+		"PUT /v1/libraries/{LibraryId}":              h.create,
+		"GET /v1/libraries/{LibraryId}/file-history": catalog.getFileHistory,
+		"GET /v1/libraries/{LibraryId}/files":        catalog.listFiles,
+	} {
+		mux.HandleFunc(pattern, handle)
+		if config.BrowserOrigin != nil {
+			shared.Handle(pattern, auth.RequireSession(store, config.Now, logger, config.BrowserOrigin, handle))
+		}
+	}
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/head", h.getHead)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/head", h.updateHead)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/history", h.listHistory)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/history/{CommitId}", h.getHistoryCommit)
-	mux.HandleFunc("GET /v1/libraries", h.list)
 	mux.HandleFunc("POST /v1/libraries/{LibraryId}/object-checks", h.checkObjects)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/objects/{ObjectType}/{ObjectId}", h.putMetadataObject)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/objects/{ObjectType}/{ObjectId}", h.getMetadataObject)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/blocks/{ObjectId}", h.putBlock)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/blocks/{ObjectId}", h.getBlock)
-	return &Catalog{auth.RequireSession(store, config.Now, logger, mux), h}, nil
+	api := auth.RequireSession(store, config.Now, logger, nil, mux)
+	if config.BrowserOrigin != nil {
+		shared.Handle("/", api)
+		api = shared
+	}
+	catalog.Handler = api
+	return catalog, nil
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/webconsole"
 )
 
@@ -33,7 +34,7 @@ func TestOriginConfiguration(t *testing.T) {
 		{"https://console.example/#part", "localhost:8080", false},
 		{"https://console.example:65536", "localhost:8080", false},
 	} {
-		_, err := webconsole.NewHandler(tc.origin, tc.listen, webconsole.Config{})
+		_, err := auth.NewBrowserOrigin(tc.origin, tc.listen)
 		if (err == nil) != tc.valid {
 			t.Errorf("NewHandler(%q, %q) error = %v, want valid=%v", tc.origin, tc.listen, err, tc.valid)
 		}
@@ -53,7 +54,7 @@ func TestWebHostBinding(t *testing.T) {
 		{"https://console.example:8443", "console.example", 421},
 		{"https://console.example", "other.example", 421},
 	} {
-		h, err := webconsole.NewHandler(tc.origin, "127.0.0.1:8080", webconsole.Config{})
+		h, err := webconsole.NewHandler(browserOrigin(t, tc.origin), webconsole.Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,8 +69,17 @@ func TestWebHostBinding(t *testing.T) {
 	}
 }
 
+func browserOrigin(t *testing.T, raw string) *auth.BrowserOrigin {
+	t.Helper()
+	o, err := auth.NewBrowserOrigin(raw, "127.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
 func TestEmbeddedRoutes(t *testing.T) {
-	h, err := webconsole.NewHandler("https://console.example", "127.0.0.1:8080", webconsole.Config{})
+	h, err := webconsole.NewHandler(browserOrigin(t, origin), webconsole.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +105,7 @@ func TestEmbeddedRoutes(t *testing.T) {
 		{"GET", "/web/shell.html", 404, "", "text/html", "页面不存在"},
 		{"GET", "/web/assets/console.css", 200, "", "text/css", ".skip"},
 		{"GET", "/web/assets/atlas.svg", 200, "", "image/svg+xml", "<svg"},
+		{"GET", "/web/assets/libraries.js", 200, "", "text/javascript", "loadLibraries"},
 		{"POST", "/web/login", 403, "", "", ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {

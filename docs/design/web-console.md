@@ -6,7 +6,7 @@
 
 ## 开关、来源与身份
 
-- 新增 `filecloud-server serve --web-origin <origin>`。省略即关闭全部 Web 页面/资产；配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后只挂载 `/web/`，不接管 `/`、`/v1` 或探针。未知 Web 页面返回 404，不回落到首页。
+- 新增 `filecloud-server serve --web-origin <origin>`。省略即关闭全部 Web 页面/资产；配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后页面和资产挂载在 `/web/`，并为下述资料库 API 启用浏览器会话；不改变 `/`、探针或原 CLI 路由。未知 Web 页面返回 404，不回落到首页。
 - 生产使用固定 HTTPS origin，反向代理终止 TLS，后端监听回环；本机试用仅在监听地址和配置的 HTTP origin 均为回环地址时允许明文。按配置校验请求 Host 与写请求 Origin，不从任意转发头推断公开地址或授予权限。代理须保留外部 Host。
 - 新增可重复的本机启动参数 `--web-admin-user <username>`：启动时按现有规范用户名解析为已有用户 ID，失败则报配置错误；未启用 Web 不接受此参数。授权集合固定到本次服务运行。配置变更并重启即生效；旧会话下一次请求按新集合判断。默认集合为空，不按用户名、首用户、首个登录者或来源 IP 自动提权。首个账号仍由主机在停服时创建。
 
@@ -21,9 +21,9 @@
 
 浏览器登录复用现有密码校验、可撤销会话、过期规则和同一组 KDF 并发预算。每次登录独立签发；退出仅撤销本次会话。目标账号密码重置与撤销其所有 Web/CLI 会话在同一存储事务中完成。管理请求使用服务进程已持锁的 Store；密码派生使用有界预算。离线 CLI 及独占锁保留。
 
-Web 用 host-only、`Path=/web/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HTTPS 强制 `Secure`，回环明文试用例外。Web 写请求（含登录、退出）用 POST，要求 Origin 精确匹配配置 origin；缺失、不匹配或 `null` 均拒绝，不执行操作。不得在 GET 里改变业务状态。凭据不返回给 JS、不放在 URL、Web Storage、日志或复制命令中；含身份及私有信息的响应 `Cache-Control: no-store`。日志记录操作类别/结果，不记录表单、原始 URL 查询、用户名或文件路径。沿用 `opslog` 脱敏约定。只使用同源嵌入资源，不加载外站脚本或字体。
+Web 用 host-only、`Path=/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HTTPS 强制 `Secure`，回环明文试用例外。Web 表单用 POST，共享建库接口用 PUT。所有浏览器会话写请求（含登录、退出）均要求 Origin 精确匹配配置 origin；缺失、不匹配或 `null` 均拒绝，不执行操作。不得在 GET 里改变业务状态。凭据不返回给 JS、不放在 URL、Web Storage、日志或复制命令中；含身份及私有信息的响应 `Cache-Control: no-store`。日志记录操作类别/结果，不记录表单、原始 URL 查询、用户名或文件路径。沿用 `opslog` 脱敏约定。只使用同源嵌入资源，不加载外站脚本或字体。
 
-Web 与 `/v1` 不互相代收凭据：Web 不用客户端 Bearer 授予管理权，`/v1` 不用 cookie 鉴权。跨入口检查凭据拒绝、注销后重放、登录限流/429、过期、密码重置、来源不符及旧部署无开关的行为。
+「我的资料库」用同源 JavaScript 获取列表、创建资料库。`GET /v1/libraries`、`GET /v1/libraries/{LibraryId}` 和 `PUT /v1/libraries/{LibraryId}` 共用 CLI 的 JSON 处理逻辑。文件列表页面地址仍为 `/web/libraries/{LibraryId}`，根目录、子目录和翻页数据由 `GET /v1/libraries/{LibraryId}/files` 提供。目录链接、分页和版本入口使用响应的固定提交。文件版本栏（含续页）使用 `GET /v1/libraries/{LibraryId}/file-history` 获取 JSON；新标签页和失败回退继续打开 `/web/libraries/{LibraryId}/file-history` 完整 HTML 页面，二者读取同一提交、路径和分页游标。启用 Web 后，这些操作在没有 Authorization 头时也接受 Web cookie，沿用 Web Host 和写请求 Origin 校验。其余受保护的 `/v1` 接口仍只认 Bearer；Web 管理操作不接受 Bearer。两种会话保持独立，显式 Authorization 认证失败不回退到 cookie。升级后旧路径 cookie 的用户重新登录一次；登录和退出会清除旧路径 cookie。
 
 ## 功能兼容矩阵
 

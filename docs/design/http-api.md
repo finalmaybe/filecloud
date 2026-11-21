@@ -8,11 +8,13 @@
 
 ### 鉴权
 
-除创建会话和健康检查外，使用：
+除创建会话和健康检查外，CLI 使用：
 
 ```http
 Authorization: Bearer <opaque-token>
 ```
+
+启用 `--web-origin` 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
 
 服务端先鉴权，再查找用户请求的资料库。第一阶段只有资料库所有者可访问。
 
@@ -173,6 +175,20 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 ```
 
 默认按 `CreatedAt, LibraryId` 升序稳定分页。
+
+## ListFiles
+
+`GET /v1/libraries/{LibraryId}/files` 返回当前发布版本的根目录。可选查询参数：`CommitId` 固定已发布提交，`Path` 指定规范相对目录（默认 `.`），`Offset` 是从零开始的目录项偏移量（默认 0）。
+
+响应包含 `RetCode`、`Message` 和 `Directory`。`Directory` 含 `CommitId`、`Path`、`Parent`、`Entries`（每项含 `Name`、`Type`、`ModifiedAt`）和 `NextOffset`。每页最多 50 项；翻页沿用返回的 `CommitId` 和 `Path`，传入 `NextOffset`；零表示结束。尚未发布的资料库根目录返回 `CommitId: null` 和 `Entries: []`；已发布的空目录返回实际提交 ID 和空数组。未知库、他人资料库、未发布的提交和不存在的路径返回 `404/2000`；非法参数、超出目录长度的偏移或请求文件而非目录返回 `400/1000`。只读取元数据，不下载文件内容。
+
+## GetFileHistory
+
+`GET /v1/libraries/{LibraryId}/file-history?CommitId=…&Path=…[&PageToken=…]`
+
+`CommitId` 必须是固定的已发布主线提交，`Path` 是该提交内文件的规范相对路径，按 URL 查询参数编码。首次请求返回该文件在该提交的状态。更早的记录按主线从新到旧读取，每页检查最多 50 个提交，即使本页没有这个文件的变更也可能有下一页。续页沿用原 `CommitId` 和 `Path`，仅追加 `PageToken`，不跟随新 Head。
+
+响应包含 `RetCode`、`Message` 和 `FileHistory`。后者包含 `LibraryId`、`AnchorCommitId`、`Path`、`Current`（`CommitId`、`FileId`、`ModifiedAt`；续页为 `null`）、`Versions` 数组和 `NextPageToken`（结束时为空字符串）。每条变更另含 `CreatedAt`、`Message`、`Change`（`added`、`content` 或 `modified-time`）。非法参数/游标返回 `400/1000`，无权访问的库、未发布的提交或首次读取时不存在的文件统一返回 `404/2000`；历史读取繁忙返回 `429/4000` 并携带 `Retry-After`。
 
 ## GetLibrary
 

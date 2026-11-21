@@ -15,7 +15,7 @@ if (navToggle) {
 const entries = document.querySelector('.entry-table tbody');
 if (entries) {
   const filter = document.querySelector('#list-filter');
-  filter.closest('label').hidden = false;
+  filter.closest('label').hidden = entries.closest('table').hidden;
   filter.addEventListener('input', () => {
     const query = filter.value.trim().toLowerCase();
     let visible = 0;
@@ -75,18 +75,18 @@ function enableVersionSidebar(sidebar) {
     request?.abort();
     request = new AbortController();
     const {signal} = request;
-    const url = new URL(link.href);
-    url.searchParams.set('panel', '1');
+    const pageURL = new URL(link.href);
+    const query = new URLSearchParams({CommitId: pageURL.searchParams.get('commit'), Path: pageURL.searchParams.get('path')});
+    if (more) query.set('PageToken', pageURL.searchParams.get('cursor'));
     fallback.hidden = true;
     status.textContent = '正在读取版本记录…';
     content.setAttribute('aria-busy', 'true');
     try {
-      const response = await fetch(url, {signal, redirect: 'error'});
+      const response = await fetch(`${sidebar.dataset.api}?${query}`, {signal, redirect: 'error'});
       if (!response.ok) throw new Error();
-      const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-      const page = doc.querySelector('.version-page');
-      if (!page) throw new Error();
+      const {FileHistory} = await response.json();
       if (signal.aborted) return;
+      const page = renderVersionPage(FileHistory, pageURL);
       const focusPage = more && document.activeElement === link;
       if (more) link.closest('.version-continuation').remove();
       content.append(page);
@@ -111,38 +111,49 @@ function enableVersionSidebar(sidebar) {
   sidebar.addEventListener('keydown', event => { if (event.key === 'Escape') close.click(); });
 }
 
-const libraryTable = document.querySelector('.libraries');
-if (libraryTable) {
-  const infoDialog = document.querySelector('#info-dialog');
-  const content = document.querySelector('#info-content');
-  libraryTable.addEventListener('click', event => {
-    const trigger = event.target.closest('button[aria-controls="info-dialog"]');
-    if (!trigger) return;
-    const menu = trigger.closest('.row-actions');
-    content.replaceChildren(menu.querySelector('template').content.cloneNode(true),
-      document.querySelector('#binding-template').content.cloneNode(true));
-    content.querySelector('.bind-library-id').textContent = content.querySelector('#library-id').textContent;
-    menu.open = false;
-    // The menu item is now hidden; let the dialog restore focus to the visible row control.
-    menu.querySelector('summary').focus({preventScroll: true});
-    infoDialog.showModal();
-  });
-  infoDialog.querySelector('.info-heading button').addEventListener('click', () => infoDialog.close());
+function renderVersionPage(history, pageURL) {
+  const page = document.querySelector('#version-page-template').content.firstElementChild.cloneNode(true);
+  if (history.Current) {
+    const intro = document.querySelector('#current-version-template').content.cloneNode(true);
+    intro.querySelector('.version-path').textContent = history.Path;
+    fillRevision(intro, history.Current);
+    page.prepend(intro);
+  }
+  const list = page.querySelector('.version-list');
+  for (const version of history.Versions) {
+    const row = document.querySelector('#version-entry-template').content.firstElementChild.cloneNode(true);
+    row.querySelector('strong').textContent = {added: '新增文件', content: '内容更新', 'modified-time': '修改时间变更'}[version.Change];
+    setVersionTime(row.querySelector('time'), version.CreatedAt);
+    fillRevision(row, version);
+    if (version.Message) {
+      const message = row.querySelector('.version-message');
+      message.querySelector('span').textContent = version.Message;
+      message.hidden = false;
+    }
+    list.append(row);
+  }
+  list.hidden = !history.Versions.length;
+  page.querySelector('.no-changes').hidden = !!history.Versions.length;
+  const more = page.querySelector('.version-more');
+  if (history.NextPageToken) {
+    pageURL.searchParams.set('cursor', history.NextPageToken);
+    more.href = pageURL.href;
+    page.querySelector('.history-end').hidden = true;
+  } else {
+    more.remove();
+  }
+  return page;
 }
 
-const libraryDialog = document.querySelector('#library-dialog');
-if (libraryDialog) {
-  const opener = document.querySelector('#create-library');
-  if (!('commandForElement' in opener)) {
-    opener.addEventListener('click', () => libraryDialog.showModal());
-    document.querySelector('#cancel-create').addEventListener('click', () => libraryDialog.close());
-  }
-  if (libraryDialog.open) {
-    // A rejected POST renders the form open; promote it to a modal with native focus handling.
-    libraryDialog.removeAttribute('open');
-    libraryDialog.showModal();
-  }
-  libraryDialog.addEventListener('close', () => opener.focus());
+function fillRevision(root, revision) {
+  root.querySelector('.file-id').textContent = revision.FileId;
+  root.querySelector('.commit-id').textContent = revision.CommitId;
+  setVersionTime(root.querySelector('.modified-at time'), revision.ModifiedAt);
+}
+
+function setVersionTime(time, value) {
+  time.dateTime = value;
+  time.textContent = value.slice(0, 19).replace('T', ' ') + ' UTC';
 }
 
 const cancelReset = document.querySelector('#cancel-reset');
@@ -165,7 +176,7 @@ probe?.addEventListener('click', async () => {
 });
 
 document.addEventListener('submit', event => {
-  if (event.submitter) {event.submitter.disabled = true; event.submitter.textContent = '正在提交…';}
+  if (!event.defaultPrevented && event.submitter) {event.submitter.disabled = true; event.submitter.textContent = '正在提交…';}
 });
 window.addEventListener('pageshow', event => {if (event.persisted) location.reload();});
 document.addEventListener('click', async (event) => {

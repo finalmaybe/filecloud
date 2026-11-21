@@ -1,38 +1,47 @@
 {{define "file-history"}}
 <header class="section-title"><h1>文件历史版本</h1><p>{{.Path}}</p></header>
 <a class="inline" href="/web/libraries/{{.LibraryID}}?commit={{.Anchor}}&amp;path={{.Parent}}">返回文件列表</a>
-<section class="panel version-standalone">{{template "version-page" .}}</section>
-{{end}}
-
-{{define "version-page"}}
-<div class="version-page" tabindex="-1">
-  {{if .Current}}
-  <section class="current-version">
-    <h3>当前版本</h3>
-    <p>{{.Path}}</p>
-    <p>文件修改于 {{template "version-time" .Current.ModifiedAt}}</p>
-    <details class="version-details"><summary>文件信息</summary>{{template "revision-ids" .Current}}</details>
-  </section>
-  <h3>变更记录</h3>
-  {{end}}
-  {{if .Versions}}<ol class="version-list" aria-label="文件变更记录（从新到旧）">
-    {{range .Versions}}<li>
-      <strong>{{if eq .Change "added"}}新增文件{{else if eq .Change "content"}}内容更新{{else}}修改时间变更{{end}}</strong>
-      <p>{{template "version-time" .Time}}</p>
-      <details class="version-details"><summary>查看此版</summary>
-        <p>文件修改于 {{template "version-time" .ModifiedAt}}</p>
-        {{template "revision-ids" .FileRevision}}
-        {{if .Message}}<p>版本说明：{{.Message}}</p>{{end}}
-      </details>
-    </li>{{end}}
-  </ol>{{end}}
+<section class="panel version-standalone">
+  {{if .Current}}{{template "current-version" .}}{{end}}
+  {{if .Versions}}<ol class="version-list" aria-label="文件变更记录（从新到旧）">{{range .Versions}}{{template "version-entry" .}}{{end}}</ol>{{end}}
   <div class="version-continuation">
     {{if not .Versions}}<p>这批记录中没有此文件的变更。</p>{{end}}
     {{if .Next}}<a class="version-more tool-link" href="/web/libraries/{{.LibraryID}}/file-history?commit={{.Anchor}}&amp;path={{.Path}}&amp;cursor={{.Next}}">加载更早的记录</a>{{else}}<p>已到最早记录</p>{{end}}
   </div>
-</div>
+</section>
 {{end}}
 
-{{define "revision-ids"}}<dl class="revision-ids"><dt>文件内容标识</dt><dd><code>{{.FileID}}</code></dd><dt>版本标识</dt><dd><code>{{.CommitID}}</code></dd></dl>{{end}}
+{{define "version-sidebar-templates"}}
+<template id="version-page-template"><div class="version-page" tabindex="-1">
+  <ol class="version-list" aria-label="文件变更记录（从新到旧）"></ol>
+  <div class="version-continuation">
+    <p class="no-changes">这批记录中没有此文件的变更。</p>
+    <a class="version-more tool-link">加载更早的记录</a><p class="history-end">已到最早记录</p>
+  </div>
+</div></template>
+<template id="current-version-template">{{template "current-version"}}</template>
+<template id="version-entry-template">{{template "version-entry"}}</template>
+{{end}}
 
-{{define "version-time"}}<time datetime="{{.}}">{{slice . 0 10}} {{slice . 11 19}} UTC</time>{{end}}
+{{define "current-version"}}
+<section class="current-version">
+  <h3>当前版本</h3><p class="version-path">{{.Path}}</p>
+  <p class="modified-at">文件修改于 {{template "version-time" .Current.ModifiedAt}}</p>
+  <details class="version-details"><summary>文件信息</summary>{{template "revision-ids" .Current}}</details>
+</section>
+<h3>变更记录</h3>
+{{end}}
+
+{{define "version-entry"}}<li>
+  <strong>{{if eq .Change "added"}}新增文件{{else if eq .Change "content"}}内容更新{{else}}修改时间变更{{end}}</strong>
+  <p>{{template "version-time" .Time}}</p>
+  <details class="version-details"><summary>查看此版</summary>
+    <p class="modified-at">文件修改于 {{template "version-time" .ModifiedAt}}</p>
+    {{template "revision-ids" .FileRevision}}
+    <p class="version-message" {{if not .Message}}hidden{{end}}>版本说明：<span>{{.Message}}</span></p>
+  </details>
+</li>{{end}}
+
+{{define "revision-ids"}}<dl class="revision-ids"><dt>文件内容标识</dt><dd><code class="file-id">{{.FileID}}</code></dd><dt>版本标识</dt><dd><code class="commit-id">{{.CommitID}}</code></dd></dl>{{end}}
+
+{{define "version-time"}}<time datetime="{{.}}">{{if .}}{{slice . 0 10}} {{slice . 11 19}} UTC{{end}}</time>{{end}}

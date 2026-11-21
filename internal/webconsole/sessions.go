@@ -9,8 +9,6 @@ import (
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
-const cookieName = "filecloud_web"
-
 type identity struct {
 	user  string
 	admin bool
@@ -18,7 +16,7 @@ type identity struct {
 type privatePage func(http.ResponseWriter, *http.Request, identity)
 
 func (c *console) current(r *http.Request) (identity, error) {
-	cookie, err := r.Cookie(cookieName)
+	cookie, err := r.Cookie(auth.BrowserCookieName)
 	if err != nil {
 		return identity{}, storage.ErrSessionNotFound
 	}
@@ -53,7 +51,7 @@ func (c *console) admin(next privatePage) http.HandlerFunc {
 	})
 }
 func (c *console) cookie(value string, expires time.Time) *http.Cookie {
-	return &http.Cookie{Name: cookieName, Value: value, Path: "/web/", HttpOnly: true, Secure: c.origin.Scheme == "https", SameSite: http.SameSiteLaxMode, Expires: expires}
+	return &http.Cookie{Name: auth.BrowserCookieName, Value: value, Path: "/", HttpOnly: true, Secure: c.origin.Secure(), SameSite: http.SameSiteLaxMode, Expires: expires}
 }
 func (c *console) login(w http.ResponseWriter, r *http.Request) {
 	session, err := c.Sessions.LoginBrowser(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.RemoteAddr)
@@ -72,10 +70,11 @@ func (c *console) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, c.cookie(session.AccessToken, session.ExpiresAt))
+	c.clearLegacyCookie(w)
 	http.Redirect(w, r, "/web/libraries", 303)
 }
 func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
-	cookie, _ := r.Cookie(cookieName)
+	cookie, _ := r.Cookie(auth.BrowserCookieName)
 	if err := c.Sessions.LogoutBrowser(r.Context(), cookie.Value); err != nil {
 		http.Error(w, "注销未完成，请重试", 503)
 		return
@@ -83,7 +82,13 @@ func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
 	expired := c.cookie("", time.Unix(1, 0))
 	expired.MaxAge = -1
 	http.SetCookie(w, expired)
+	c.clearLegacyCookie(w)
 	http.Redirect(w, r, "/web/login", 303)
+}
+func (c *console) clearLegacyCookie(w http.ResponseWriter) {
+	old := c.cookie("", time.Unix(1, 0))
+	old.Path, old.MaxAge = "/web/", -1
+	http.SetCookie(w, old)
 }
 func (c *console) overview(w http.ResponseWriter, r *http.Request, who identity) {
 	ready := "已就绪"

@@ -2,30 +2,67 @@ package library
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"path"
 
+	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
 type FileRevision struct {
-	CommitID, FileID, ModifiedAt string
+	CommitID   string `json:"CommitId"`
+	FileID     string `json:"FileId"`
+	ModifiedAt string
 }
 
 type FileVersion struct {
 	FileRevision
-	Time, Message, Change string
+	Time            string `json:"CreatedAt"`
+	Message, Change string
 }
 
 type FileHistory struct {
-	LibraryID, Anchor, Path, Parent, Next string
-	Current                               *FileRevision // Only on the first page.
-	Versions                              []FileVersion
+	LibraryID string `json:"LibraryId"`
+	Anchor    string `json:"AnchorCommitId"`
+	Path      string
+	Parent    string        `json:"-"`
+	Next      string        `json:"NextPageToken"`
+	Current   *FileRevision // Only on the first page.
+	Versions  []FileVersion
+}
+
+func (c *Catalog) getFileHistory(w http.ResponseWriter, r *http.Request) {
+	h := c.core
+	owner, _ := auth.UserID(r.Context())
+	lib := r.PathValue("LibraryId")
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || !validUUID(lib) || !object.ValidID(q.Get("CommitId")) {
+		h.invalid(w)
+		return
+	}
+	for key, values := range q {
+		if (key != "CommitId" && key != "Path" && key != "PageToken") || len(values) != 1 || values[0] == "" {
+			h.invalid(w)
+			return
+		}
+	}
+	page, err := c.FileHistory(r.Context(), owner, lib, q.Get("CommitId"), q.Get("Path"), q.Get("PageToken"))
+	if err != nil {
+		h.writeBrowseError(w, err)
+		return
+	}
+	h.writeJSON(w, http.StatusOK, struct {
+		RetCode     int
+		Message     string
+		FileHistory FileHistory
+	}{0, "success", page})
 }
 
 // FileHistory lists mainline commits that introduced a file state at the given path.
 func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath, cursor string) (FileHistory, error) {
-	result := FileHistory{LibraryID: lib, Anchor: anchor, Path: filePath, Parent: path.Dir(filePath)}
+	result := FileHistory{LibraryID: lib, Anchor: anchor, Path: filePath, Parent: path.Dir(filePath), Versions: []FileVersion{}}
 	if !object.ValidPath(filePath) || filePath == "." {
 		return result, ErrInvalidPath
 	}

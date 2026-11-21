@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
@@ -31,43 +30,6 @@ func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, 
 	c.show(w, r, who, code, "无法打开页面", "error", nil, msg)
 }
 
-type libraryList struct {
-	Items          []storage.Library
-	Next, ID, Name string
-}
-
-func (c *console) libraries(w http.ResponseWriter, r *http.Request, who identity) {
-	id, err := auth.NewUserID(nil)
-	if err != nil {
-		c.problem(w, r, who, err)
-		return
-	}
-	c.list(w, r, who, id, "", "", 200)
-}
-func (c *console) list(w http.ResponseWriter, r *http.Request, who identity, id, name, msg string, status int) {
-	items, next, err := c.Catalog.List(r.Context(), who.user, r.URL.Query().Get("cursor"))
-	if err != nil {
-		c.problem(w, r, who, err)
-		return
-	}
-	c.show(w, r, who, status, "我的资料库", "libraries", libraryList{items, next, id, name}, msg)
-}
-func (c *console) createLibrary(w http.ResponseWriter, r *http.Request, who identity) {
-	id, name := r.PostForm.Get("id"), r.PostForm.Get("name")
-	item, err := c.Catalog.Create(r.Context(), who.user, id, name)
-	switch {
-	case errors.Is(err, storage.ErrLibraryExists):
-		c.list(w, r, who, id, name, "已有同名资料库，请换一个名称。", 409)
-	case errors.Is(err, storage.ErrLibraryObjectConflict):
-		c.list(w, r, who, id, name, "此创建请求已用于其他名称，请重新打开列表。", 409)
-	case errors.Is(err, library.ErrInvalidLibrary):
-		c.list(w, r, who, id, name, "请使用有效的资料库标识和 1–128 字的名称。", 400)
-	case err != nil:
-		c.problem(w, r, who, err)
-	default:
-		http.Redirect(w, r, "/web/libraries/"+item.ID, 303)
-	}
-}
 func (c *console) fileHistory(w http.ResponseWriter, r *http.Request, who identity) {
 	q := r.URL.Query()
 	data, err := c.Catalog.FileHistory(r.Context(), who.user, r.PathValue("library"), q.Get("commit"), q.Get("path"), q.Get("cursor"))
@@ -75,16 +37,7 @@ func (c *console) fileHistory(w http.ResponseWriter, r *http.Request, who identi
 		c.problem(w, r, who, err)
 		return
 	}
-	if q.Get("panel") == "1" {
-		c.renderTemplate(w, r, http.StatusOK, "version-page", data)
-		return
-	}
 	c.show(w, r, who, 200, "文件历史版本", "file-history", data, "")
-}
-
-type libraryDetail struct {
-	storage.Library
-	Files library.Snapshot
 }
 
 func (c *console) libraryDetail(w http.ResponseWriter, r *http.Request, who identity) {
@@ -93,21 +46,5 @@ func (c *console) libraryDetail(w http.ResponseWriter, r *http.Request, who iden
 		c.problem(w, r, who, err)
 		return
 	}
-	data := libraryDetail{Library: item}
-	if item.HeadCommitID != nil {
-		commit := r.URL.Query().Get("commit")
-		if commit == "" {
-			commit = *item.HeadCommitID
-		}
-		data.Files, err = c.requestedSnapshot(r, who, commit)
-		if err != nil {
-			c.problem(w, r, who, err)
-			return
-		}
-		if data.Files.Kind != "Directory" {
-			c.problem(w, r, who, library.ErrInvalidPath)
-			return
-		}
-	}
-	c.show(w, r, who, 200, item.Name, "library", data, "")
+	c.show(w, r, who, 200, item.Name, "library", item, "")
 }

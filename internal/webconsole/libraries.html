@@ -1,38 +1,38 @@
 {{define "libraries"}}
 <header class="list-toolbar">
   <h1>我的资料库</h1>
-  <button type="button" id="create-library" class="action" commandfor="library-dialog" command="show-modal" aria-haspopup="dialog">{{template "icon" "plus"}}创建资料库</button>
+  <button type="button" id="create-library" disabled class="action" commandfor="library-dialog" command="show-modal" aria-haspopup="dialog">{{template "icon" "plus"}}创建资料库</button>
 </header>
-{{if .Data.Items}}
-<table class="entry-table libraries">
+<noscript>请启用 JavaScript 以查看和创建资料库。</noscript>
+<p id="list-status" role="status" hidden>正在读取资料库…</p>
+<a href="/web/libraries" id="list-retry" hidden>重新打开资料库列表</a>
+<table class="entry-table libraries" hidden>
   <caption class="sr">资料库索引</caption>
   <thead><tr><th scope="col">名称</th><th scope="col">发布状态</th><th scope="col">创建日期（UTC）</th></tr></thead>
-  <tbody>{{range .Data.Items}}
+  <tbody></tbody>
+</table>
+<template id="library-row">
     <tr>
       <td><div class="entry-cell">
-        <a class="entry-link folder" href="/web/libraries/{{.ID}}">{{template "icon" "folder"}}<span class="entry-name">{{.Name}}</span></a>
+        <a class="entry-link folder">{{template "icon" "folder"}}<span class="entry-name"></span></a>
         <details class="row-actions" name="row-actions">
-          {{template "row-actions-toggle" .Name}}
+          {{template "row-actions-toggle" "资料库"}}
           <div class="action-list"><button type="button" aria-haspopup="dialog" aria-controls="info-dialog">{{template "icon" "info"}}详情</button></div>
-          <template>{{template "library-record" .}}</template>
         </details>
       </div></td>
-      <td>{{template "library-state" .}}</td>
-      <td class="date"><span class="mobile-label">创建于 </span><time>{{.CreatedAt.UTC.Format "2006-01-02"}}</time></td>
-    </tr>{{end}}</tbody>
-</table>
+      <td><span class="state"></span></td>
+      <td class="date"><span class="mobile-label">创建于 </span><time></time></td>
+    </tr>
+</template>
 {{template "info-dialog"}}
 {{template "filter-empty"}}
-<footer class="list-footer"><span role="status">本页显示 <b id="visible-count">{{len .Data.Items}}</b> 个资料库</span>{{if .Data.Next}}<a class="inline" href="?cursor={{.Data.Next}}">下一页</a>{{end}}</footer>
-{{else}}
-<div class="empty">{{template "icon" "folder"}}<h2>还没有资料库</h2><p>点击「创建资料库」，为新资料库取个名字。</p></div>
-{{end}}
-<dialog class="panel library-dialog" id="library-dialog" aria-labelledby="create-title" {{if .Message}}open{{end}}>
+<footer class="list-footer" hidden><span role="status">本页显示 <b id="visible-count"></b> 个资料库</span><a class="inline" id="next-page" hidden>下一页</a></footer>
+<div class="empty" id="empty-libraries" hidden>{{template "icon" "folder"}}<h2>还没有资料库</h2><p>点击「创建资料库」，为新资料库取个名字。</p></div>
+<dialog class="panel library-dialog" id="library-dialog" aria-labelledby="create-title">
   <h2 id="create-title">创建资料库</h2>
-  <form class="fields" method="post" action="/web/libraries">
-    <input type="hidden" name="id" value="{{.Data.ID}}">
-    <label>资料库名称<input name="name" value="{{.Data.Name}}" required autofocus {{if .Message}}aria-describedby="create-error"{{end}}></label>
-    {{if .Message}}<p id="create-error" role="alert">{{.Message}}</p>{{end}}
+  <form class="fields" method="dialog">
+    <label>资料库名称<input name="name" required autofocus aria-describedby="create-error"></label>
+    <p id="create-error" role="alert" hidden></p>
     <div class="dialog-actions"><button type="button" id="cancel-create" commandfor="library-dialog" command="close">取消</button><button type="submit" class="action">确定创建</button></div>
   </form>
 </dialog>
@@ -42,37 +42,35 @@
 <header class="list-toolbar">
   <div class="location">
     <a href="/web/libraries">我的资料库</a><span aria-hidden="true">/</span>
-    {{if and .HeadCommitID (ne .Files.Path ".")}}
-    <a href="?commit={{.Files.CommitID}}&amp;path=.">{{.Name}}</a><span aria-hidden="true">/</span><h1>{{.Files.Path}}</h1>
-    {{else}}<h1>{{.Name}}</h1>{{end}}
+    <a id="directory-root" hidden>{{.Name}}</a><span id="path-separator" aria-hidden="true" hidden>/</span><h1 id="directory-title">{{.Name}}</h1>
   </div>
-  {{if and .HeadCommitID (ne .Files.Path ".")}}<a class="tool-link" href="?commit={{.Files.CommitID}}&amp;path={{.Files.Parent}}">上一级目录</a>{{end}}
+  <a class="tool-link" id="directory-parent" hidden>上一级目录</a>
 </header>
-{{if .HeadCommitID}}{{template "library-files" .Files}}
-{{else}}<div class="empty">{{template "icon" "folder"}}<h2>尚未发布文件</h2><p>在设备上绑定工作目录并完成首次同步后，文件会显示在这里。</p></div>{{end}}
+<noscript>请启用 JavaScript 以浏览文件列表。</noscript>
+<p id="directory-status" role="status" hidden>正在读取文件列表…</p>
+<a id="directory-retry" href="" hidden>重试</a>
+<div class="empty" id="unpublished" hidden>{{template "icon" "folder"}}<h2>尚未发布文件</h2><p>在设备上绑定工作目录并完成首次同步后，文件会显示在这里。</p></div>
+<div class="empty" id="empty-directory" hidden>{{template "icon" "folder"}}<h2>此目录为空。</h2></div>
+{{template "library-files" .}}
 {{end}}
 
 {{define "row-actions-toggle"}}<summary aria-label="{{.}} 的更多操作">{{template "icon" "more"}}</summary>{{end}}
 
-{{define "library-state"}}<span class="state {{if .HeadCommitID}}published{{end}}">{{if .HeadCommitID}}已发布{{else}}尚未发布{{end}}</span>{{end}}
-
 {{define "library-record"}}
-    <h3>{{.Name}}</h3>
+    <h3 id="info-name"></h3>
     <dl class="metadata">
-      <dt>发布状态</dt><dd>{{template "library-state" .}}</dd>
-      <dt>创建时间</dt><dd>{{.CreatedAt.UTC.Format "2006-01-02 15:04:05"}} UTC</dd>
-      <dt>资料库 ID</dt><dd><code id="library-id">{{.ID}}</code> <button data-copy="library-id">复制资料库 ID</button></dd>
-      {{if .HeadCommitID}}<dt>当前 Head</dt><dd><code id="head-id">{{.HeadCommitID}}</code> <button data-copy="head-id">复制 Head</button></dd>{{end}}
+      <dt>发布状态</dt><dd><span class="state"></span></dd>
+      <dt>创建时间</dt><dd id="info-created"></dd>
+      <dt>资料库 ID</dt><dd><code id="library-id"></code> <button data-copy="library-id">复制资料库 ID</button></dd>
+      <dt id="head-label">当前 Head</dt><dd><code id="head-id"></code> <button data-copy="head-id">复制 Head</button></dd>
     </dl>
-    <a class="tool-link" href="/web/libraries/{{.ID}}">打开文件列表</a>
+    <a class="tool-link" id="info-files">打开文件列表</a>
 {{end}}
 
 {{define "info-dialog"}}
 <dialog class="panel library-dialog" id="info-dialog" aria-labelledby="info-title">
   <header class="info-heading"><h2 id="info-title">资料库信息</h2><button type="button" autofocus>关闭</button></header>
-  <div id="info-content"></div>
-</dialog>
-<template id="binding-template">
+  {{template "library-record"}}
   <details class="panel binding"><summary>设备绑定说明</summary>
   <p>先用 CLI 登录。将该次 CLI 登录的令牌从标准输入提供给 bind（不是浏览器凭据），替换服务来源、设备 UUID 和两个本地目录。两种终端都可以使用以下参数：</p>
   <pre id="device-guide">filecloud library bind --server 'SERVER_ORIGIN' --library-id <span class="bind-library-id"></span> --device-id 'DEVICE_UUID' --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --token-stdin
@@ -83,41 +81,44 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
   <p>仅在首次导入已有文件且远端为空时使用 --import-local。刷新凭据前先同步，再以相同参数和新令牌 bind。解绑用 library unbind 加同一对目录参数；普通文件保留。</p>
   <p>以设备 status 的 Pending 和 NextCommand 为准。删除保护须核对本机统计与候选前缀；并发冲突会保留冲突副本，中断后用同一工作目录继续 sync。</p>
   </details>
-</template>
+</dialog>
 {{end}}
 
 {{define "library-files"}}
-{{if .Entries}}
-<div class="file-workspace">
+<div class="file-workspace" data-api="/v1/libraries/{{.ID}}/files" hidden>
 <div class="directory-list">
-<table class="entry-table files">
+<table class="entry-table files" hidden>
   <caption class="sr">文件列表</caption>
   <thead><tr><th scope="col">名称</th><th scope="col">修改时间（UTC）</th></tr></thead>
-  <tbody>{{range .Entries}}
-    {{$path := .Name}}{{if ne $.Path "."}}{{$path = printf "%s/%s" $.Path .Name}}{{end}}
-    <tr>
-      <td>{{if eq .Type "Directory"}}<a class="entry-link folder" href="?commit={{$.CommitID}}&amp;path={{$path}}">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name">{{.Name}}</span></a>
-        {{else}}<div class="entry-cell">
-          <a class="entry-link open-versions" aria-controls="version-sidebar" href="/web/libraries/{{$.LibraryID}}/file-history?commit={{$.CommitID}}&amp;path={{$path}}">{{template "icon" "file"}}<span class="entry-name">{{.Name}}</span></a>
-          <details class="row-actions" name="row-actions">
-            {{template "row-actions-toggle" .Name}}
-            <div class="action-list"><a class="open-versions" aria-controls="version-sidebar" href="/web/libraries/{{$.LibraryID}}/file-history?commit={{$.CommitID}}&amp;path={{$path}}" aria-label="查看 {{.Name}} 的历史版本">{{template "icon" "history"}}历史版本</a></div>
-          </details>
-        </div>{{end}}</td>
-      <td class="date"><time datetime="{{.ModifiedAt}}">{{slice .ModifiedAt 0 10}} {{slice .ModifiedAt 11 19}}</time><span class="mobile-label"> UTC</span></td>
-    </tr>{{end}}</tbody>
+  <tbody></tbody>
 </table>
+<template id="folder-row">{{template "file-list-row" "Directory"}}</template>
+<template id="file-row">{{template "file-list-row" "File"}}</template>
 {{template "filter-empty"}}
-<footer class="list-footer"><span role="status">本页显示 <b id="visible-count">{{len .Entries}}</b> 个目录项</span>{{if .Next}}<a class="inline" href="?commit={{.CommitID}}&amp;path={{.Path}}&amp;offset={{.Next}}">下一页目录项</a>{{end}}</footer>
+<footer class="list-footer"><span role="status">本页显示 <b id="visible-count"></b> 个目录项</span><a id="directory-next" class="inline" hidden>下一页目录项</a></footer>
 </div>
-<aside id="version-sidebar" aria-label="文件历史版本" hidden>
+<aside id="version-sidebar" data-api="/v1/libraries/{{.ID}}/file-history" aria-label="文件历史版本" hidden>
+  {{template "version-sidebar-templates"}}
   <header class="version-heading"><div><p>文件历史版本</p><h2 id="version-filename"></h2></div><button type="button" id="close-versions">关闭</button></header>
   <div id="version-content"></div>
   <p id="version-status" role="status"></p>
   <a id="version-fallback" class="tool-link" hidden>打开该文件的历史版本</a>
 </aside>
 </div>
-{{else}}<div class="empty">{{template "icon" "folder"}}<h2>此目录为空。</h2></div>{{end}}
+{{end}}
+
+{{define "file-list-row"}}
+<tr>
+  <td>{{if eq . "Directory"}}<a class="entry-link folder">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name"></span></a>
+    {{else}}<div class="entry-cell">
+      <a class="entry-link open-versions" aria-controls="version-sidebar">{{template "icon" "file"}}<span class="entry-name"></span></a>
+      <details class="row-actions" name="row-actions">
+        {{template "row-actions-toggle" "文件"}}
+        <div class="action-list"><a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a></div>
+      </details>
+    </div>{{end}}</td>
+  <td class="date"><time></time><span class="mobile-label"> UTC</span></td>
+</tr>
 {{end}}
 
 {{define "filter-empty"}}<p id="filter-empty" class="empty" hidden>本页没有匹配的名称。清除筛选可查看全部条目。</p>{{end}}
