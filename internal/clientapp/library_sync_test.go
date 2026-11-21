@@ -6659,6 +6659,74 @@ func TestLibrarySyncRecoveryRollbackRetriesPerRow(t *testing.T) {
 	})
 }
 
+func TestLibrarySyncRollbackVerifiesPartialCheckoutTemp(t *testing.T) {
+	_, publisherDir, publisherTree, clientDir, worktree := newEmptySyncPair(t)
+	tail := []byte("tail")
+	remote := append(bytes.Repeat([]byte("a"), object.MaxBlockSize), tail...)
+	if err := os.WriteFile(filepath.Join(publisherTree, "file"), remote, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncTestWorktree(t, publisherDir, publisherTree); err != nil {
+		t.Fatal(err)
+	}
+	var temp string
+	stop := errors.New("interrupted write")
+	err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", clientDir, "--worktree", worktree},
+		strings.NewReader(""), io.Discard, io.Discard, libraryClientConfig{checkFilesystem: func(*os.File) error { return nil },
+			beforeCheckoutFileWrite: func(path, name string) error {
+				temp = filepath.Join(worktree, name)
+				return stop
+			}})
+	if !errors.Is(err, stop) {
+		t.Fatalf("interrupt checkout: %v", err)
+	}
+	db, err := openClientDB(filepath.Join(clientDir, _clientDatabaseName), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(beginSyncRollback(t.Context(), db, worktree), db.Close()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := bytes.Clone(remote[:object.MaxBlockSize+1])
+	prefix[object.MaxBlockSize] = 'x'
+	blockID := object.ID(tail)
+	blockPath := filepath.Join(clientDir, "objects", "blocks", blockID[:2], blockID[2:])
+	for _, scenario := range []string{"different bytes", "missing cached block", "corrupt cached block"} {
+		switch scenario {
+		case "missing cached block":
+			prefix[object.MaxBlockSize] = tail[0]
+			if err := os.Remove(blockPath); err != nil {
+				t.Fatal(err)
+			}
+		case "corrupt cached block":
+			if err := os.WriteFile(blockPath, []byte("tbad"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(temp, prefix, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := syncTestWorktree(t, clientDir, worktree); err == nil || !strings.Contains(err.Error(), "temporary file content") {
+			t.Fatalf("rollback with %s: %v", scenario, err)
+		}
+		if got, err := os.ReadFile(temp); err != nil || !bytes.Equal(got, prefix) || readPendingCheckoutState(t, clientDir, worktree) != "rolling_back" {
+			t.Fatalf("rollback with %s did not preserve file and journal: %v", scenario, err)
+		}
+	}
+	if err := os.WriteFile(blockPath, tail, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncTestWorktree(t, clientDir, worktree); err != nil {
+		t.Fatalf("resume with verified partial block: %v", err)
+	}
+	if count := countClientRows(t, clientDir, "pending_checkouts", worktree); count != 0 {
+		t.Fatalf("pending checkouts after successful sync: %d", count)
+	}
+	if got, err := os.ReadFile(filepath.Join(worktree, "file")); err != nil || !bytes.Equal(got, remote) {
+		t.Fatalf("installed content after rollback differs: %v", err)
+	}
+}
+
 func TestLibrarySyncRollbackVerifiesInstalledFileContent(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -173,6 +173,12 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 
 三个证明文件中的 `deterministic convergence first client` 和 `deterministic convergence second client` 共六条记录，以下字段跨设备、跨平台逐字一致：`head = syncBase = 6b604c48ae82f9a829370976c3f08ce34dee7ea01a1791a336b3363175fcee53`，`headRoot = baseRoot = snapshot = 746abb68bf9a6fb9cc2251b96be467622a28dd8a7d6686c73a5f0db97a703599`。此次验收未修改产品代码、断言、跳过清单或超时预算。
 
+### #70：checkout 临时文件内容核验
+
+`TestLibraryCheckoutPendingUnbindCleansOnlyRegisteredTemp` 验证不同身份的替换文件会被保留。`TestRegisteredCheckoutTempContent` 固定文件身份，仅改变内容：空文件、正确前缀和完整目标能解绑或续跑；错误前缀、等长异内容和超长内容会保留原字节与待处理记录。`TestLibrarySyncRollbackVerifiesPartialCheckoutTemp` 覆盖写入跨过一个完整块后中断的回滚：内容不同、末块缓存缺失或损坏时停止，恢复可信缓存后可完成同步。
+
+使用 Go 1.26.6 运行完整 `TestCrossPlatformAcceptanceMatrix`：Linux/ext4 396.096 秒、macOS/APFS 509.793 秒、Windows/固定 NTFS 1322.351 秒，全部通过。Linux 同期执行的 `scripts/acceptance-1c.sh` 也通过。
+
 ## macOS/APFS 平台边界
 
 macOS 门禁在仓库所在挂载创建专用根，通过 held worktree fd 的 `fstatfs` 确认 `Fstypename=apfs` 与 `MNT_LOCAL`，再通过 `fgetattrlist(ATTR_VOL_CAPABILITIES)` 要求 `VOL_CAP_INT_RENAME_EXCL` 和 `VOL_CAP_INT_FLOCK` 同时 valid/supported。无法确认、网络卷或缺失能力时直接失败。随后复用完整公共 required-pass 清单、全仓 `go test -json ./...`、故障注入点和结构化 Oracle。

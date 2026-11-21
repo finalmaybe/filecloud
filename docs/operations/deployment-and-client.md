@@ -581,6 +581,8 @@ filecloud library unbind \
   --worktree "$WORKTREE"
 ```
 
+如果 checkout 曾中断，解绑会检查登记的临时文件。遇到 `checkout temporary file content` 错误时，客户端会保留文件和待处理状态。请先备份工作目录及客户端状态；若是本地缓存损坏，先从可靠备份恢复缓存。若临时文件含有需要保留的编辑，把它移到工作目录外妥善保存，再重试解绑。不要手工清空 `client.db`。
+
 注销会撤销当前 token：
 
 ```bash

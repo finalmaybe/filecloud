@@ -950,7 +950,7 @@ func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, v
 			existing.Mode&fscompat.S_IFMT != fscompat.S_IFREG {
 			return errors.New("registered checkout temporary file is not a regular file")
 		}
-		fd, err = fscompat.Openat(int(parent.Fd()), tempName, fscompat.O_WRONLY|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0)
+		fd, err = fscompat.Openat(int(parent.Fd()), tempName, fscompat.O_RDWR|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0)
 		if err == nil {
 			err = fscompat.Fstat(fd, &opened)
 		}
@@ -989,13 +989,16 @@ func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, v
 	if err := verifyCheckoutFileIdentity(fd, tempDevice, tempInode); err != nil {
 		return errors.Join(fmt.Errorf("verify checkout temporary file before write: %w", err), fscompat.Close(fd))
 	}
-	if !created {
-		if err := fscompat.Ftruncate(fd, 0); err != nil {
-			fscompat.Close(fd)
-			return fmt.Errorf("truncate registered checkout temporary file: %w", err)
+	temp := os.NewFile(uintptr(fd), tempName)
+	info, err := temp.Stat()
+	if err != nil {
+		return errors.Join(err, temp.Close())
+	}
+	if info.Size() != 0 {
+		if _, err := verifiedCheckoutTempID(temp, info, options.cacheRoot, value.id, value.size); err != nil {
+			return errors.Join(err, temp.Close())
 		}
 	}
-	temp := os.NewFile(uintptr(fd), tempName)
 	fileData, err := cachedRemoteObject(ctx, options, "files", value.id)
 	if err != nil {
 		return errors.Join(err, temp.Close())
@@ -1007,7 +1010,7 @@ func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, v
 		if err != nil {
 			return errors.Join(err, temp.Close())
 		}
-		count, err := temp.Write(block)
+		count, err := temp.WriteAt(block, written)
 		written += int64(count)
 		if err != nil || count != len(block) {
 			return errors.Join(errors.New("write checkout file failed"), err, temp.Close())
@@ -1429,13 +1432,63 @@ func finalizeCheckout(ctx context.Context, db *sql.DB, options bindOptions, pend
 	return nil
 }
 
+// verifiedCheckoutTempID returns the content ID to journal only if every byte could
+// have been written by this checkout. A reused inode alone doesn't establish that.
+func verifiedCheckoutTempID(file *os.File, info os.FileInfo, cacheRoot *os.File, targetID string, targetSize int64) (string, error) {
+	size := info.Size()
+	if size > targetSize {
+		return "", errors.New("checkout temporary file content exceeds target size; pending checkout retained")
+	}
+	if size == 0 {
+		_, id, err := canonicalFile(file.Name(), 0, nil)
+		return id, err
+	}
+	expected := targetID
+	if size < targetSize {
+		id, err := checkoutPrefixID(cacheRoot, targetID, targetSize, size)
+		if err != nil {
+			return "", fmt.Errorf("verify checkout temporary file content: %w", err)
+		}
+		expected = id
+	}
+	snapshot := worktreeSnapshot{blocks: make(map[string]blockSource)}
+	actual, err := scanRegularFile(file, file.Name(), info, &snapshot)
+	if err != nil {
+		return "", err
+	}
+	if actual != expected {
+		return "", errors.New("checkout temporary file content differs from target prefix; pending checkout retained")
+	}
+	return expected, nil
+}
+
+func checkoutPrefixID(cacheRoot *os.File, targetID string, targetSize, size int64) (string, error) {
+	metadata, err := readCachedCheckoutFile(cacheRoot, targetID)
+	if err != nil || metadata.Size != targetSize {
+		return "", errors.Join(errors.New("cached checkout File metadata is missing or changed"), err)
+	}
+	full := size / object.MaxBlockSize
+	blocks := metadata.Blocks[:full]
+	if tail := size % object.MaxBlockSize; tail != 0 {
+		id := metadata.Blocks[full]
+		block, err := readLocalCheckoutObject(cacheRoot, "blocks", id)
+		if err != nil || int64(len(block)) != min(targetSize-full*object.MaxBlockSize, int64(object.MaxBlockSize)) || object.ID(block) != id {
+			return "", errors.Join(errors.New("cached checkout block is missing or changed"), err)
+		}
+		blocks = append(blocks, object.ID(block[:tail]))
+	}
+	_, id, err := canonicalFile(targetID, size, blocks)
+	return id, err
+}
+
 type registeredCheckoutTemp struct {
-	path, checkoutPath, kind string
-	device, inode            uint64
+	path, checkoutPath, kind, objectID string
+	size                               int64
+	device, inode                      uint64
 }
 
 func checkoutTempNames(ctx context.Context, db *sql.DB, worktree string) ([]registeredCheckoutTemp, error) {
-	rows, err := db.QueryContext(ctx, `SELECT path, type, temp_name, temp_device, temp_inode FROM checkout_paths
+	rows, err := db.QueryContext(ctx, `SELECT path, type, temp_name, temp_device, temp_inode, object_id, size FROM checkout_paths
 		WHERE worktree = ? AND temp_name <> ''`, worktree)
 	if err != nil {
 		return nil, err
@@ -1443,25 +1496,22 @@ func checkoutTempNames(ctx context.Context, db *sql.DB, worktree string) ([]regi
 	defer rows.Close()
 	var names []registeredCheckoutTemp
 	for rows.Next() {
-		var path, kind, temp string
-		var device, inode uint64
-		if err := rows.Scan(&path, &kind, &temp, &device, &inode); err != nil {
+		var entry registeredCheckoutTemp
+		var temp string
+		if err := rows.Scan(&entry.checkoutPath, &entry.kind, &temp, &entry.device, &entry.inode, &entry.objectID, &entry.size); err != nil {
 			return nil, err
 		}
 		if !validCheckoutTempName(temp) {
 			return nil, errors.New("stale checkout state: pending checkout has invalid registered temporary name")
 		}
-		directory := filepath.Dir(filepath.FromSlash(path))
-		if directory == "." {
-			directory = ""
-		}
-		names = append(names, registeredCheckoutTemp{path: filepath.Join(directory, temp), checkoutPath: path, kind: kind, device: device, inode: inode})
+		entry.path = filepath.Join(filepath.Dir(filepath.FromSlash(entry.checkoutPath)), temp)
+		names = append(names, entry)
 	}
 	sort.Slice(names, func(i, j int) bool { return names[i].path < names[j].path })
 	return names, rows.Err()
 }
 
-func cleanupCheckoutTemps(ctx context.Context, db *sql.DB, root *openedWorktree, worktree, phase string,
+func cleanupCheckoutTemps(ctx context.Context, db *sql.DB, root *openedWorktree, cacheRoot *os.File, worktree, phase string,
 	temps []registeredCheckoutTemp, fault fsActionFault) error {
 	for _, temp := range temps {
 		parentPath, name := splitFSActionPath(filepath.ToSlash(temp.path))
@@ -1506,8 +1556,7 @@ func cleanupCheckoutTemps(ctx context.Context, db *sql.DB, root *openedWorktree,
 				parent.Close()
 				return err
 			}
-			snapshot := worktreeSnapshot{blocks: make(map[string]blockSource)}
-			expectedObject, err = scanRegularFile(file, temp.path, info, &snapshot)
+			expectedObject, err = verifiedCheckoutTempID(file, info, cacheRoot, temp.objectID, temp.size)
 			expectedSize = info.Size()
 			expectedMtime = canonicalProtocolMtime(info.ModTime())
 			if closeErr := file.Close(); err != nil || closeErr != nil {

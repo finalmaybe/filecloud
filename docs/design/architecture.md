@@ -208,6 +208,8 @@ stateDiagram-v2
 
 每个文件写到目标同目录、名称以保留前缀 `.filecloud-internal-` 开头的临时文件，校验完整 FileId 并 `fsync`。协议禁止用户路径段使用该保留前缀；Scanner 只忽略 journal 中登记的内部名称，启动扫描前必须恢复未完成 journal。
 
+中断后处理已登记的临时普通文件时，除核对文件身份外，还要检查内容。空文件允许续写；完整文件必须匹配登记的目标 FileId；只写了一部分时，已有字节必须是目标文件从头到该长度的精确前缀。前缀中的整块使用目标 File 中的块 ID，末块只写了一部分时，先按摘要验证本地缓存的完整块，再计算该段的 ID。解绑和回滚离线执行同样的检查，把已核实的前缀 FileId 写入删除日志，重放删除时再次核对。内容不同或缺少核验所需的缓存时，保留临时文件和待处理记录。
+
 每个文件系统动作都是 write-ahead 状态机。1A 客户端数据库固定使用 SQLite WAL、`synchronous=FULL` 和 5 秒 busy timeout，并在初始化时读取 PRAGMA 断言 `journal_mode=wal`、`synchronous=2`。每个 Intent/Completed 的成功 COMMIT 是数据库持久化边界；实现不为单个动作手工 checkpoint 或 fsync WAL。故障注入只夹住 COMMIT 前和成功返回后；SQLite 不提供受支持的 intra-COMMIT hook，因此进程测试不把 WAL 同步中途作为可观测边界。
 
 1. 在 SQLite 事务中记录 `Intent`（源路径、目标路径、临时名、恢复名、预期 FileId）并提交。

@@ -2383,7 +2383,7 @@ func rollbackSyncApply(ctx context.Context, db *sql.DB, root *openedWorktree, cl
 	if err != nil {
 		return err
 	}
-	if err := cleanupCheckoutTemps(ctx, db, root, worktree, fsPhaseRollback, temps, config.fsActionFault); err != nil {
+	if err := cleanupCheckoutTemps(ctx, db, root, cacheRoot, worktree, fsPhaseRollback, temps, config.fsActionFault); err != nil {
 		return err
 	}
 	if err := rollbackInstalledCheckoutPaths(ctx, db, root, cacheRoot, worktree, config); err != nil {
@@ -2651,7 +2651,7 @@ func verifyRollbackCheckoutTarget(parent, cacheRoot *os.File, name string, value
 		}
 		return nil
 	}
-	metadata, err := readCachedRollbackFile(cacheRoot, value.id)
+	metadata, err := readCachedCheckoutFile(cacheRoot, value.id)
 	if err != nil || metadata.Size != value.size {
 		return errors.Join(errors.New("cached checkout File metadata changed"), err)
 	}
@@ -2697,33 +2697,37 @@ func canonicalStatMtime(stat fscompat.Stat_t) string {
 	return canonicalProtocolMtime(time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec))
 }
 
-func readCachedRollbackFile(cacheRoot *os.File, id string) (object.File, error) {
-	if cacheRoot == nil || !object.ValidID(id) {
-		return object.File{}, errors.New("invalid cached checkout File")
-	}
-	fd, err := fscompat.Dup(int(cacheRoot.Fd()))
+func readCachedCheckoutFile(cacheRoot *os.File, id string) (object.File, error) {
+	data, err := readLocalCheckoutObject(cacheRoot, "files", id)
 	if err != nil {
 		return object.File{}, err
 	}
+	return object.VerifyFile(data, id)
+}
+
+func readLocalCheckoutObject(cacheRoot *os.File, kind, id string) ([]byte, error) {
+	if cacheRoot == nil || !object.ValidID(id) {
+		return nil, errors.New("invalid cached checkout object")
+	}
+	fd, err := fscompat.Dup(int(cacheRoot.Fd()))
+	if err != nil {
+		return nil, err
+	}
 	current := os.NewFile(uintptr(fd), cacheRoot.Name())
-	for _, name := range []string{"objects", "files", id[:2]} {
+	for _, name := range []string{"objects", kind, id[:2]} {
 		next, openErr := fscompat.Openat(int(current.Fd()), name, fscompat.O_RDONLY|fscompat.O_DIRECTORY|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0)
 		current.Close()
 		if openErr != nil {
-			return object.File{}, fmt.Errorf("open cached checkout File metadata: %w", openErr)
+			return nil, fmt.Errorf("open cached checkout %s: %w", kind, openErr)
 		}
 		current = os.NewFile(uintptr(next), name)
 	}
 	defer current.Close()
 	data, found, err := readCacheFile(current, id[2:])
 	if err != nil || !found {
-		return object.File{}, errors.Join(errors.New("cached checkout File metadata is missing"), err)
+		return nil, errors.Join(fmt.Errorf("cached checkout %s object is missing", kind), err)
 	}
-	file, err := object.VerifyFile(data, id)
-	if err != nil {
-		return object.File{}, errors.New("cached checkout File metadata failed verification")
-	}
-	return file, nil
+	return data, nil
 }
 
 func statMatchesCheckoutTarget(stat fscompat.Stat_t, kind string, device, inode uint64) bool {

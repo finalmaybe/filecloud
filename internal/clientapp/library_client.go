@@ -972,7 +972,12 @@ func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writ
 		if err == nil {
 			cleanupErr := recoverFSActions(ctx, db, canonicalWorktree, root, config.fsActionFault)
 			if cleanupErr == nil {
-				cleanupErr = cleanupCheckoutTemps(ctx, db, root, canonicalWorktree, fsPhaseRollback, temps, config.fsActionFault)
+				cacheRoot, err := openVerifiedCacheRoot(canonicalClientDir)
+				if err != nil {
+					return errors.Join(err, root.Close())
+				}
+				cleanupErr = cleanupCheckoutTemps(ctx, db, root, cacheRoot, canonicalWorktree, fsPhaseRollback, temps, config.fsActionFault)
+				cleanupErr = errors.Join(cleanupErr, cacheRoot.Close())
 			}
 			if closeErr := root.Close(); cleanupErr != nil || closeErr != nil {
 				return errors.Join(cleanupErr, closeErr)

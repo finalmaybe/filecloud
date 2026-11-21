@@ -1057,22 +1057,35 @@ func TestLibraryCheckoutPendingUnbindCleansOnlyRegisteredTemp(t *testing.T) {
 				t.Fatalf("disk failure=%v injected=%v", err, failed)
 			}
 			temp := findCheckoutTemp(t, worktree)
+			const replacementContent = "user replacement"
 			if mismatch {
-				if err := os.Remove(temp); err != nil {
+				var original, replacement fscompat.Stat_t
+				if err := fscompat.Lstat(temp, &original); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(temp, []byte("user replacement"), 0o600); err != nil {
+				// Create the replacement while the registered file still owns its inode.
+				staged := temp + ".replacement"
+				if err := os.WriteFile(staged, []byte(replacementContent), 0o600); err != nil {
 					t.Fatal(err)
+				}
+				if err := os.Rename(staged, temp); err != nil {
+					t.Fatal(err)
+				}
+				if err := fscompat.Lstat(temp, &replacement); err != nil {
+					t.Fatal(err)
+				}
+				if original.Dev == replacement.Dev && original.Ino == replacement.Ino {
+					t.Fatalf("test setup: replacement has registered identity %d/%d", original.Dev, original.Ino)
 				}
 			}
 			unbindErr := runLibraryWithConfig(t.Context(), []string{"unbind", "--client-dir", clientDir, "--worktree", worktree},
 				strings.NewReader(""), io.Discard, io.Discard, libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }})
 			if mismatch {
-				if unbindErr == nil {
-					t.Fatal("unbind deleted mismatched temporary inode")
+				if unbindErr == nil || !strings.Contains(unbindErr.Error(), "registered checkout temporary path identity changed") {
+					t.Errorf("unbind error = %v, want temporary path identity changed", unbindErr)
 				}
-				if data, err := os.ReadFile(temp); err != nil || string(data) != "user replacement" {
-					t.Fatalf("mismatched inode changed: %q err=%v", data, err)
+				if data, err := os.ReadFile(temp); err != nil || string(data) != replacementContent {
+					t.Errorf("replacement after unbind: content=%q err=%v", data, err)
 				}
 				assertPendingCheckout(t, clientDir, target)
 				return
@@ -1084,6 +1097,67 @@ func TestLibraryCheckoutPendingUnbindCleansOnlyRegisteredTemp(t *testing.T) {
 				t.Fatalf("registered temporary remains: %v", err)
 			}
 		})
+	}
+}
+
+func TestRegisteredCheckoutTempContent(t *testing.T) {
+	for _, command := range []string{"unbind", "retry"} {
+		for _, tc := range []struct {
+			name, content string
+			valid         bool
+		}{
+			{"empty", "", true}, {"partial", "top-", true}, {"complete", "top-level", true},
+			{"wrong prefix", "user", false}, {"wrong full content", "different", false}, {"too long", "top-level plus", false},
+		} {
+			t.Run(command+"/"+tc.name, func(t *testing.T) {
+				env, target, _, files := importedRemoteCheckout(t)
+				clientDir, worktree := newClientPaths(t)
+				args := bindArgs(clientDir, env.server.URL, testClientLibraryID, worktree, testOtherDeviceID)
+				config := libraryClientConfig{checkFilesystem: func(*os.File) error { return nil }}
+				var temp string
+				stop := errors.New("interrupted write")
+				config.beforeCheckoutFileWrite = func(path, name string) error {
+					if path == "top.txt" {
+						temp = filepath.Join(worktree, name)
+						return stop
+					}
+					return nil
+				}
+				if err := runLibraryWithConfig(t.Context(), args[1:], strings.NewReader(env.token+"\n"), io.Discard, io.Discard, config); !errors.Is(err, stop) {
+					t.Fatalf("interrupt checkout: %v", err)
+				}
+				// Keep the registered identity and vary only the bytes left at that path.
+				if err := os.WriteFile(temp, []byte(tc.content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				config.beforeCheckoutFileWrite = nil
+				if command == "unbind" {
+					args = []string{"library", "unbind", "--client-dir", clientDir, "--worktree", worktree}
+				}
+				err := runLibraryWithConfig(t.Context(), args[1:], strings.NewReader(env.token+"\n"), io.Discard, io.Discard, config)
+				if !tc.valid {
+					if err == nil || !strings.Contains(err.Error(), "temporary file content") {
+						t.Errorf("%s error = %v, want content mismatch", command, err)
+					}
+					if data, err := os.ReadFile(temp); err != nil || string(data) != tc.content {
+						t.Errorf("temporary content changed: %q, %v", data, err)
+					}
+					assertPendingCheckout(t, clientDir, target)
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Lstat(temp); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("temporary path after %s: %v", command, err)
+				}
+				if command == "retry" {
+					if data, err := os.ReadFile(filepath.Join(worktree, "top.txt")); err != nil || !bytes.Equal(data, files["top.txt"]) {
+						t.Errorf("installed content: %q, %v", data, err)
+					}
+				}
+			})
+		}
 	}
 }
 
