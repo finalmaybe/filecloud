@@ -20,6 +20,7 @@ import (
 	libraryapi "github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/opslog"
 	"github.com/mingming-cn/filecloud/internal/storage"
+	"github.com/mingming-cn/filecloud/internal/webconsole"
 )
 
 const (
@@ -93,6 +94,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	flags.SetOutput(stderr)
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
+	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
 	globalKDFCapacity := flags.Int("kdf-global-capacity", _defaultGlobalKDFCapacity, "Global concurrent password KDF capacity")
 	sourceIPKDFCapacity := flags.Int("kdf-source-ip-capacity", _defaultSourceIPKDFCapacity, "Concurrent password KDF capacity per direct source IP")
 	usernameKDFCapacity := flags.Int("kdf-username-capacity", _defaultUsernameKDFCapacity, "Concurrent password KDF capacity per canonical username")
@@ -118,7 +120,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		return err
 	}
 	if *dataDir == "" || flags.NArg() != 0 {
-		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
+		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--web-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
 	}
 	if *globalKDFCapacity < 1 || *sourceIPKDFCapacity < 1 || *usernameKDFCapacity < 1 {
 		return errors.New("kdf concurrency limits must be positive")
@@ -154,7 +156,15 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if historyConfig.GlobalConcurrency < 1 || historyConfig.UserConcurrency < 1 || historyConfig.RequestTimeout <= 0 {
 		return errors.New("history limits must be positive")
 	}
-	return serve(ctx, *dataDir, *listen, stdout, stderr, auth.HandlerConfig{
+	var web http.Handler
+	if *webOrigin != "" {
+		handler, err := webconsole.NewHandler(*webOrigin, *listen)
+		if err != nil {
+			return err
+		}
+		web = handler
+	}
+	return serve(ctx, *dataDir, *listen, stdout, stderr, web, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -359,7 +369,7 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, web http.Handler, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
@@ -385,6 +395,10 @@ func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Write
 	mux.Handle("/v1/libraries", libraries)
 	mux.Handle("/v1/libraries/", libraries)
 	mux.Handle("/", health.NewHandler(store, logger))
+	if web != nil {
+		mux.Handle("/web", web)
+		mux.Handle("/web/", web)
+	}
 	requests := newRequestTracker(mux)
 	server := &http.Server{
 		Handler: requests, ErrorLog: log.New(opslog.RedactedWriter(logger, "serve", "", "http_server"), "", 0),

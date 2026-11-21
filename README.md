@@ -15,6 +15,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 - 客户端使用持久化发布状态和文件系统 journal，从上传、发布或 checkout 中断后继续收敛。
 - CLI 可以浏览主线历史、检查合并来源，并通过“预览 + 精确确认”发布前向恢复提交。
 - 提供定时轮询 `watch`、删除保护、健康检查、优雅停止、离线 GC 和完整性检查。
+- 源码版服务端可[启用内嵌 Web 入口](./docs/operations/deployment-and-client.md#启用网页入口)，默认关闭。当前仅提供公共外壳，登录和管理操作仍使用 CLI。
 
 ## 支持范围
 
@@ -30,7 +31,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 正式发布包提供两个命令入口：`filecloud-server` 用于服务端初始化、运行和本地维护，`filecloud` 用于登录、资料库管理和同步。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署和自动化必须使用 `filecloud-server`。以下能力暂不提供：
 
-- Docker 镜像、Web 管理界面、桌面 GUI 和移动客户端
+- Docker 镜像、桌面 GUI 和移动客户端
 - WebDAV、虚拟盘、S3 或其他对象存储后端
 - 多节点部署、在线 GC、PostgreSQL/MySQL 后端
 - 共享资料库、成员权限、协作锁和公开注册

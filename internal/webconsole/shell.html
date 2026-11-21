@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{.Title}} · Filecloud</title>
+  <link rel="stylesheet" href="/web/assets/console.css">
+  <link rel="icon" type="image/svg+xml" href="/web/assets/atlas.svg">
+</head>
+<body>
+  <a class="skip" href="#content">跳到主要内容</a>
+  <aside class="rail">
+    <a class="brand" href="/web/" aria-label="Filecloud 控制台入口">
+      <svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true"><rect width="36" height="36" rx="10" fill="currentColor"/><path d="m7 12 11-5 11 5-11 5zM7 17l11 5 11-5M7 22l11 5 11-5" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>Filecloud
+    </a>
+    <div class="rail-label">工作空间</div>
+    <nav aria-label="主导航">
+      <a href="/web/" {{if eq .View "home"}}aria-current="page"{{end}}>控制台入口</a>
+      <a href="/web/libraries">资料库</a>
+      <a href="/web/overview">服务概览</a>
+      <a href="/web/accounts">账号管理</a>
+    </nav>
+    <span class="rail-foot">FILECLOUD / SERVER</span>
+  </aside>
+  <main id="content" tabindex="-1">
+    <header class="context"><span>工作空间 <span aria-hidden="true">/</span> {{.Title}}</span><span class="badge">未登录</span></header>
+    {{if eq .View "home"}}
+    <section class="cover" aria-labelledby="title">
+      <div><p class="kicker" lang="en">FILECLOUD / ATLAS</p><h1 id="title">资料库工作台</h1><p>浏览资料库与版本历史的服务端入口。</p></div>
+      <img src="/web/assets/atlas.svg" width="240" height="160" alt="">
+    </section>
+    <h2 class="section-title">访问控制台</h2>
+    <div class="pair">
+      <section class="panel"><p class="kicker">01 / 访问方式</p><h3>从已有账号开始</h3><p>当前版本提供浏览器入口，账号登录与资料库操作请使用 Filecloud CLI。</p><a class="action" href="/web/login">查看登录说明 <span aria-hidden="true">→</span></a></section>
+      <aside class="panel aside"><p class="kicker">02 / 设备端</p><h3>同步留在工作目录</h3><p>在绑定资料库的设备上运行 <code>filecloud library status</code>，配合本机状态目录和工作目录参数查看同步基线。</p></aside>
+    </div>
+    {{else if eq .View "login"}}
+    <section class="panel notice"><p class="kicker" lang="en">WORKSPACE / ACCESS</p><h1>登录与访问</h1><p>浏览器登录尚未开放。请在自己的设备上使用 <code>filecloud login</code> 登录；此页不收集密码或令牌。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
+    {{else}}
+    <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或从控制台入口重新开始。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
+    {{end}}
+  </main>
+</body>
+</html>

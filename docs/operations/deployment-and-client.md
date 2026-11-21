@@ -1,6 +1,6 @@
 # Filecloud 服务端部署与客户端使用
 
-本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。项目暂不提供 Docker 镜像、Web 管理界面、桌面 GUI、移动客户端或 WebDAV。
+本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。源码版包含可选的 Web 入口；账号登录和操作仍使用 CLI。项目暂不提供 Docker 镜像、桌面 GUI、移动客户端或 WebDAV。
 
 ## 1. 支持范围
 
@@ -119,6 +119,17 @@ curl -fsS http://127.0.0.1:8080/readyz
 ```
 
 `healthz` 只检查 HTTP 进程是否存活。`readyz` 还会检查数据库、对象目录写入能力和数据目录锁。
+
+### 启用网页入口
+
+默认不注册 Web 路由。要在本机启用，请用以下命令**替换**上面的 `serve` 命令，然后打开 `http://127.0.0.1:8080/web/`：
+
+```bash
+./filecloud-server serve --data-dir "$DATA_DIR" --listen 127.0.0.1:8080 \
+  --web-origin http://127.0.0.1:8080
+```
+
+`--web-origin` 填浏览器看到的来源（协议、主机及可选端口，不含 `/web/`、尾斜杠、账号信息或查询参数）。启用 Web 时监听回环地址；只有回环来源可使用 HTTP。页面、样式与图像都在二进制内，不用部署静态目录。当前浏览器入口不接收凭据，访问资料库或管理页面会转到登录说明。移除此参数并重启即可关闭入口，既有 CLI 与健康探针路由不变。
 
 ## 4. Linux 生产部署
 
@@ -243,7 +254,7 @@ sudo systemctl start filecloud
 - 回环地址可以使用 HTTP，例如 `http://127.0.0.1:8080`。
 - 非回环地址必须使用 HTTPS，例如 `https://cloud.example.com`。
 
-因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。下面是 Nginx 配置的核心部分：
+因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。若启用 Web，请为回环监听的 `serve` 加上 `--web-origin https://cloud.example.com`，让代理保留浏览器的 Host（含非默认端口）。服务端不从 `X-Forwarded-Host` 等请求头推断来源。下面是 Nginx 配置的核心部分：
 
 ```nginx
 server {
@@ -265,7 +276,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
     }
 }
 ```
@@ -692,7 +703,7 @@ read -rsp "Password: " PASSWORD
 ```text
 filecloud-server version
 filecloud-server init --data-dir PATH
-filecloud-server serve --data-dir PATH [--listen ADDRESS]
+filecloud-server serve --data-dir PATH [--listen ADDRESS] [--web-origin ORIGIN]
 filecloud-server user add --data-dir PATH --username NAME --password-stdin
 filecloud-server user reset-password --data-dir PATH --username NAME --password-stdin
 filecloud version

@@ -224,6 +224,73 @@ func TestServeHealthLockConflictAndShutdown(t *testing.T) {
 	}
 }
 
+func TestServeOptionalWebRoutes(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	if err := run(t.Context(), []string{"init", "--data-dir", dataDir}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			args := []string{"serve", "--data-dir", dataDir, "--listen", "127.0.0.1:0"}
+			if enabled {
+				args = append(args, "--web-origin", "https://console.example")
+			}
+			output := newLineWriter()
+			cmd := startCommand(t, args, output, io.Discard)
+			var base string
+			select {
+			case line := <-output.lines:
+				base = "http://" + strings.TrimPrefix(strings.TrimSpace(line), "listening on ")
+			case <-cmd.done:
+				t.Fatalf("serve exited: %v", cmd.err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("serve did not announce its address")
+			}
+			client := &http.Client{Timeout: 5 * time.Second}
+			webStatus, home, css := 404, "404 page not found", "404 page not found"
+			if enabled {
+				webStatus, home, css = 200, "资料库工作台", ".skip"
+			}
+			for _, tc := range []struct {
+				path   string
+				status int
+				body   string
+			}{
+				{"/web/", webStatus, home},
+				{"/web/assets/console.css", webStatus, css},
+				{"/", 404, "404 page not found"},
+				{"/website", 404, "404 page not found"},
+				{"/healthz", 200, `{"RetCode":0,"Message":"success"}`},
+				{"/readyz", 200, `{"RetCode":0,"Message":"success"}`},
+				{"/v1/libraries", 401, `"RetCode":1001`},
+			} {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+tc.path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.HasPrefix(tc.path, "/web/") {
+					req.Host = "console.example"
+				}
+				res, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := io.ReadAll(res.Body)
+				res.Body.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.StatusCode != tc.status || !strings.Contains(string(body), tc.body) {
+					t.Errorf("GET %s: status %d, want %d with %q", tc.path, res.StatusCode, tc.status, tc.body)
+				}
+				if (!enabled || !strings.HasPrefix(tc.path, "/web/")) && res.Header.Get("Content-Security-Policy") != "default-src 'none'" {
+					t.Errorf("GET %s: legacy CSP changed", tc.path)
+				}
+			}
+		})
+	}
+}
+
 func TestServeHandlesListenOutputError(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	if err := run(t.Context(), []string{"init", "--data-dir", dataDir}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
