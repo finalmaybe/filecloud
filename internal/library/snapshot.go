@@ -50,11 +50,7 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 		}
 		v.CommitID = *item.HeadCommitID
 	}
-	detail, err := c.core.historyDetail(ctx, owner, lib, v.CommitID)
-	if err != nil {
-		return v, err
-	}
-	entry, err := c.pathEntry(ctx, owner, lib, detail.Root, filePath)
+	entry, err := c.publishedEntry(ctx, owner, lib, v.CommitID, filePath)
 	if err != nil {
 		return v, err
 	}
@@ -66,13 +62,9 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 		if offset != 0 {
 			return v, ErrInvalidPage
 		}
-		data, err := c.metadata(ctx, owner, lib, "files", v.ID, object.MaxFileObjectSize)
+		f, err := c.openEntryFile(ctx, owner, lib, entry)
 		if err != nil {
 			return v, err
-		}
-		f, err := object.VerifyFile(data, v.ID)
-		if err != nil {
-			return v, errHistoryCorrupt
 		}
 		v.Size, v.Blocks = f.Size, len(f.Blocks)
 		return v, nil
@@ -92,8 +84,20 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 	return v, nil
 }
 
+func (c *Catalog) publishedEntry(ctx context.Context, owner, lib, commit, filePath string) (object.DirectoryEntry, error) {
+	detail, err := c.core.historyDetail(ctx, owner, lib, commit)
+	if err != nil {
+		return object.DirectoryEntry{}, err
+	}
+	return c.pathEntry(ctx, owner, lib, detail.Root, filePath)
+}
+
 // pathEntry returns a zero entry when the path did not exist in this root.
 func (c *Catalog) pathEntry(ctx context.Context, owner, lib, root, path string) (object.DirectoryEntry, error) {
+	return c.walkPath(ctx, owner, lib, root, path, nil)
+}
+
+func (c *Catalog) walkPath(ctx context.Context, owner, lib, root, path string, visit func(dirID string, index int)) (object.DirectoryEntry, error) {
 	entry := object.DirectoryEntry{Type: "Directory", ID: root}
 	if path == "." {
 		return entry, nil
@@ -109,6 +113,9 @@ func (c *Catalog) pathEntry(ctx context.Context, owner, lib, root, path string) 
 		i := sort.Search(len(d.Entries), func(i int) bool { return d.Entries[i].Name >= name })
 		if i == len(d.Entries) || d.Entries[i].Name != name {
 			return object.DirectoryEntry{}, nil
+		}
+		if visit != nil {
+			visit(entry.ID, i)
 		}
 		entry = d.Entries[i]
 	}

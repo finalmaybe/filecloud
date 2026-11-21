@@ -14,7 +14,7 @@
 Authorization: Bearer <opaque-token>
 ```
 
-启用 `--web-origin` 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
+启用 `--web-origin` 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory、DeleteFileVersion 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 和删除版本 DELETE 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
 
 服务端先鉴权，再查找用户请求的资料库。第一阶段只有资料库所有者可访问。
 
@@ -44,6 +44,7 @@ Authorization: Bearer <opaque-token>
 | 422 | 3004 | HashMismatch | 正文摘要与 URL ObjectId 不一致 |
 | 413 | 3005 | PayloadTooLarge | 正文、对象数量或单批次超限 |
 | 428 | 3006 | PreconditionRequired | Head 更新缺少 `If-Match` |
+| 409 | 3007 | CurrentFileVersion | 不能删除该文件的当前版本 |
 | 429 | 4000 | RateLimited | 超限；响应携带 `Retry-After` |
 | 500 | 5000 | Internal | 未公开的服务端错误 |
 | 503 | 5001 | Unavailable | 存储暂不可用，可重试 |
@@ -188,7 +189,13 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 `CommitId` 必须是固定的已发布主线提交，`Path` 是该提交内文件的规范相对路径，按 URL 查询参数编码。首次请求返回该文件在该提交的状态。更早的记录按主线从新到旧读取，每页检查最多 50 个提交，即使本页没有这个文件的变更也可能有下一页。续页沿用原 `CommitId` 和 `Path`，仅追加 `PageToken`，不跟随新 Head。
 
-响应包含 `RetCode`、`Message` 和 `FileHistory`。后者包含 `LibraryId`、`AnchorCommitId`、`Path`、`Current`（`CommitId`、`FileId`、`ModifiedAt`；续页为 `null`）、`Versions` 数组和 `NextPageToken`（结束时为空字符串）。每条变更另含 `CreatedAt`、`Message`、`Change`（`added`、`content` 或 `modified-time`）。非法参数/游标返回 `400/1000`，无权访问的库、未发布的提交或首次读取时不存在的文件统一返回 `404/2000`；历史读取繁忙返回 `429/4000` 并携带 `Retry-After`。
+响应包含 `RetCode`、`Message` 和 `FileHistory`。后者包含 `LibraryId`、`AnchorCommitId`、`Path`、`Current`（`CommitId`、`FileId`、`ModifiedAt`；续页为 `null`）、`Versions` 数组和 `NextPageToken`（结束时为空字符串）。已在 Web 删除的单文件记录不再列出，不改变发布提交及其快照。`IsCurrent` 标记截至锚定提交该路径最近一次变更，翻页时延续同一判断。每条变更另含 `CreatedAt`、`Message`、`Change`（`added`、`content` 或 `modified-time`）。非法参数/游标返回 `400/1000`，无权访问的库、未发布的提交或首次读取时不存在的文件统一返回 `404/2000`；历史读取繁忙返回 `429/4000` 并携带 `Retry-After`。
+
+## DeleteFileVersion
+
+`DELETE /v1/libraries/{LibraryId}/file-history/{CommitId}?Path=…&AnchorCommitId=…`
+
+`CommitId` 是所选变更记录的提交，`Path` 是该文件的规范相对路径，`AnchorCommitId` 是打开列表时的主线提交。仅所有者可删除。成功返回 `204`，无响应体；只移除该路径的这条记录，不改变 Head 和快照。参数非法返回 `400/1000`，记录不存在或已删除返回 `404/2000`，锚点过期返回 `412/3002`，选中当前版本返回 `409/3007`。
 
 ## GetLibrary
 

@@ -20,6 +20,10 @@ func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, 
 	case errors.Is(err, library.ErrHistoryBusy):
 		code, msg = 429, "历史读取繁忙，请稍后再试。"
 		w.Header().Set("Retry-After", "1")
+	case errors.Is(err, storage.ErrHeadConflict):
+		code, msg = 409, "资料库已更新，请重新打开文件列表，再选择要操作的版本。"
+	case errors.Is(err, library.ErrCurrentVersion):
+		code, msg = 409, "这是当前版本，请选择历史版本。"
 	case errors.Is(err, library.ErrInvalidPath):
 		code, msg = 400, "请选择快照中的规范相对路径。"
 	case errors.Is(err, library.ErrInvalidPage):
@@ -37,7 +41,8 @@ func (c *console) fileHistory(w http.ResponseWriter, r *http.Request, who identi
 		c.problem(w, r, who, err)
 		return
 	}
-	c.show(w, r, who, 200, "文件历史版本", "file-history", data, "")
+	notice := map[string]string{"restored": "已将所选版本恢复为当前版本。", "unchanged": "文件已与所选版本相同。", "deleted": "已从此文件的版本列表删除所选记录。"}
+	c.show(w, r, who, 200, "文件历史版本", "file-history", data, notice[q.Get("result")])
 }
 
 func (c *console) libraryDetail(w http.ResponseWriter, r *http.Request, who identity) {

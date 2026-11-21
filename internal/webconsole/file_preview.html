@@ -1,0 +1,43 @@
+{{define "viewer-dialog"}}
+<dialog class="viewer" id="file-viewer" aria-labelledby="viewer-name">
+  {{template "viewer-toolbar"}}
+  <div class="viewer-body"></div>
+  <footer class="viewer-nav" aria-label="浏览已显示的文件">
+    <button type="button" class="viewer-prev" title="上一个文件（←）" aria-label="上一个文件">{{template "icon" "prev"}}</button>
+    <span class="viewer-count" role="status"></span>
+    <button type="button" class="viewer-next" title="下一个文件（→）" aria-label="下一个文件">{{template "icon" "next"}}</button>
+  </footer>
+</dialog>
+{{end}}
+
+{{define "viewer-toolbar"}}
+<header class="viewer-bar">
+  <div class="viewer-title">{{template "icon" "file"}}<div>
+    <p class="viewer-location">文件预览{{if and . (ne .Parent ".")}} / {{.Parent}}{{end}}</p>
+    <h1 id="viewer-name">{{with .}}{{.Name}}{{end}}</h1>
+  </div></div>
+  <a class="viewer-download" aria-label="下载原文件" title="下载原文件" {{with .}}href="/web/libraries/{{.LibraryID}}/file-preview?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=download"{{end}} download>{{template "icon" "download"}}<span>下载</span></a>
+  {{if .}}<a class="viewer-exit" href="/web/libraries/{{.LibraryID}}?commit={{.CommitID}}&amp;path={{.Parent}}" aria-label="返回文件列表" title="返回文件列表">{{template "icon" "close"}}</a>
+  {{else}}<button type="button" class="viewer-exit" aria-label="关闭预览" title="关闭预览（Esc）" autofocus>{{template "icon" "close"}}</button>{{end}}
+</header>
+{{end}}
+
+{{define "viewer-stage"}}
+{{$resource := printf "/web/libraries/%s/file-preview" .LibraryID}}
+{{if eq .Kind "image"}}
+<section class="viewer-picture" aria-label="图片预览">
+  <input class="sr viewer-zoom" type="checkbox" id="viewer-zoom" aria-label="显示原始尺寸">
+  <div class="picture-scroll" tabindex="0" role="region" aria-label="图片区域"><label class="picture-target" for="viewer-zoom"><img alt="{{.Name}}" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></label></div>
+  <label class="zoom-action" for="viewer-zoom">{{template "icon" "search"}}<span>原始尺寸</span><span>适应窗口</span></label>
+</section>
+{{else if eq .Kind "pdf"}}
+<iframe class="viewer-pdf" title="{{.Name}} 的 PDF 预览" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></iframe>
+{{else if .Text}}
+<section class="viewer-paper-scroll" tabindex="0" aria-label="文本内容"><article class="viewer-paper">
+  {{if .Notice}}<p class="viewer-note">{{.Notice}}</p>{{end}}
+  <pre><code>{{.Text}}</code></pre>
+</article></section>
+{{else}}
+<div class="viewer-message">{{template "icon" "file"}}<p>{{.Notice}}</p></div>
+{{end}}
+{{end}}

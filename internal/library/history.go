@@ -38,6 +38,8 @@ type historyPageToken struct {
 	LibraryID      string `json:"LibraryId"`
 	AnchorCommitID string `json:"AnchorCommitId"`
 	NextCommitID   string `json:"NextCommitId"`
+	FilePathHash   string `json:"FilePathHash,omitempty"`
+	PastCurrent    bool   `json:"PastCurrent,omitempty"`
 	ExpiresAt      string `json:"ExpiresAt"`
 }
 
@@ -125,7 +127,7 @@ func (h *handler) listHistory(w http.ResponseWriter, r *http.Request) {
 	var token historyPageToken
 	if encodedToken != "" {
 		token, err = h.decodeHistoryToken(encodedToken, owner)
-		if err != nil || token.LibraryID != libraryID {
+		if err != nil || token.LibraryID != libraryID || token.FilePathHash != "" {
 			h.writeError(w, http.StatusBadRequest, 1000, "invalid history request")
 			return
 		}
@@ -206,7 +208,7 @@ func (h *handler) historyPage(ctx context.Context, owner, libraryID string, toke
 
 	nextPageToken := ""
 	if nextID != "" {
-		nextPageToken, err = h.encodeHistoryToken(owner, libraryID, *anchorID, nextID)
+		nextPageToken, err = h.encodeHistoryToken(owner, libraryID, historyPageToken{AnchorCommitID: *anchorID, NextCommitID: nextID})
 		if err != nil {
 			return zero, "", errHistoryUnavailable
 		}
@@ -242,15 +244,14 @@ func parseHistoryQuery(rawQuery string) (int, string, error) {
 	return pageSize, query.Get("PageToken"), nil
 }
 
-func (h *handler) encodeHistoryToken(owner, libraryID, anchorID, nextID string) (string, error) {
-	if !validUUID(libraryID) || !object.ValidID(anchorID) || !object.ValidID(nextID) {
+func (h *handler) encodeHistoryToken(owner, libraryID string, token historyPageToken) (string, error) {
+	if !validUUID(libraryID) || !object.ValidID(token.AnchorCommitID) || !object.ValidID(token.NextCommitID) {
 		return "", errHistoryUnavailable
 	}
-	payload, err := json.Marshal(historyPageToken{
-		Version: 1, Purpose: _historyTokenPurpose, OwnerUserID: owner, LibraryID: libraryID,
-		AnchorCommitID: anchorID, NextCommitID: nextID,
-		ExpiresAt: h.now().UTC().Add(_pageTokenLifetime).Format(time.RFC3339Nano),
-	})
+	token.Version, token.Purpose = 1, _historyTokenPurpose
+	token.OwnerUserID, token.LibraryID = owner, libraryID
+	token.ExpiresAt = h.now().UTC().Add(_pageTokenLifetime).Format(time.RFC3339Nano)
+	payload, err := json.Marshal(token)
 	if err != nil {
 		return "", err
 	}

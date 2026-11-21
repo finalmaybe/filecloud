@@ -108,10 +108,34 @@ main.explorer { padding: 0 0 32px; }
 .version-standalone { max-width: 48rem; }
 .current-version { margin: 16px 0; padding: 12px 16px; border-radius: 8px; background: var(--wash); }
 .current-version h3 { margin-top: 0; }
-.version-list { margin: 0; padding: 0 0 0 8px; list-style: none; }
-.version-list li { position: relative; padding: 8px 0 10px 18px; border-left: 2px solid var(--line); }
-.version-list li::before { content: ''; position: absolute; top: 16px; left: -5px; height: 8px; width: 8px; border-radius: 50%; background: var(--blue); }
+.version-list { margin: 0; padding: 0; list-style: none; }
+.version-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding-block: 4px; border-bottom: 1px solid var(--line); }
 .version-details summary { min-height: 44px; padding-block: 10px; color: var(--blue); font-size: 14px; cursor: pointer; }
+.version-label { display: flex; align-items: center; gap: 10px; }
+.version-label strong { display: block; color: var(--ink); }
+.version-label strong::after { content: ''; display: inline-block; width: .4em; height: .4em; margin: 0 0 .14em .55em; border: solid var(--quiet); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+.version-details[open] .version-label strong::after { transform: rotate(45deg); }
+.version-label time { color: var(--quiet); font-variant-numeric: tabular-nums; }
+.version-label:hover strong, .version-details[open] .version-label strong { color: var(--blue); text-decoration: underline; }
+.version-glyph { display: grid; place-items: center; width: 36px; height: 42px; flex: none; border-radius: 8px; background: var(--tint); }
+button.version-menu-toggle { display: grid; place-items: center; width: 44px; margin-top: 8px; padding: 0; border: 0; }
+.version-menu-toggle:hover, .version-row:has(:popover-open) .version-menu-toggle { background: var(--tint); color: var(--deep); }
+.version-actions { width: 10rem; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); box-shadow: 0 4px 18px #172d3b29; }
+@supports (position-area: bottom span-left) {
+  .version-actions { inset: auto; position-area: bottom span-left; justify-self: end; margin: 4px 0; position-try-fallbacks: flip-block; }
+}
+.version-actions :is(summary, a) { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.version-actions :is(summary, a):is(:hover, :focus-visible) { background: var(--wash); }
+.version-actions .destructive { color: var(--orange); }
+.version-actions details[open] p { padding: 4px 8px; }
+.version-actions summary::-webkit-details-marker, .version-label::-webkit-details-marker { display: none; }
+#version-confirm-target { margin-block: 12px; padding: 10px 12px; border-radius: 8px; background: var(--wash); }
+#version-confirm-target strong { color: var(--ink); }
+#version-confirm .dialog-actions { margin-top: 20px; }
+#version-confirm .destructive { background: var(--orange); }
+#version-confirm [role="alert"]:not(:empty) { margin-top: 12px; }
+#version-notice { position: fixed; z-index: 3; right: 16px; bottom: 16px; pointer-events: none; }
+#version-notice:not(:empty) { padding: 8px 16px; border-radius: 8px; background: var(--ink); color: white; }
 .revision-ids { margin: 0 0 10px; font-size: 14px; }
 .revision-ids dt { color: var(--quiet); }
 .revision-ids dd { margin: 0 0 6px; }

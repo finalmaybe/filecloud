@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"path"
@@ -21,6 +22,7 @@ type FileVersion struct {
 	FileRevision
 	Time            string `json:"CreatedAt"`
 	Message, Change string
+	IsCurrent       bool
 }
 
 type FileHistory struct {
@@ -60,6 +62,28 @@ func (c *Catalog) getFileHistory(w http.ResponseWriter, r *http.Request) {
 	}{0, "success", page})
 }
 
+func (c *Catalog) deleteFileVersion(w http.ResponseWriter, r *http.Request) {
+	h := c.core
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	v := VersionTarget{LibraryID: r.PathValue("LibraryId"), CommitID: r.PathValue("CommitId"), Path: q.Get("Path")}
+	anchor := q.Get("AnchorCommitId")
+	if err != nil || !validUUID(v.LibraryID) || len(q) != 2 || len(q["Path"]) != 1 || len(q["AnchorCommitId"]) != 1 || !object.ValidID(anchor) {
+		h.invalid(w)
+		return
+	}
+	owner, _ := auth.UserID(r.Context())
+	switch err := c.DeleteFileVersion(r.Context(), owner, v, anchor); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, storage.ErrHeadConflict):
+		h.writeError(w, http.StatusPreconditionFailed, 3002, "library head changed")
+	case errors.Is(err, ErrCurrentVersion):
+		h.writeError(w, http.StatusConflict, 3007, "cannot delete the current file version")
+	default:
+		h.writeBrowseError(w, err)
+	}
+}
+
 // FileHistory lists mainline commits that introduced a file state at the given path.
 func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath, cursor string) (FileHistory, error) {
 	result := FileHistory{LibraryID: lib, Anchor: anchor, Path: filePath, Parent: path.Dir(filePath), Versions: []FileVersion{}}
@@ -72,7 +96,8 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 	}
 	defer done()
 
-	token := historyPageToken{AnchorCommitID: anchor, NextCommitID: anchor}
+	pathHash := object.ID([]byte(filePath))
+	token := historyPageToken{AnchorCommitID: anchor, NextCommitID: anchor, FilePathHash: pathHash}
 	if cursor == "" {
 		role, found, err := c.core.store.GetPublishedCommitRole(ctx, owner, lib, anchor)
 		if err != nil {
@@ -83,7 +108,7 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 		}
 	} else {
 		token, err = c.core.decodeHistoryToken(cursor, owner)
-		if err != nil || token.LibraryID != lib || token.AnchorCommitID != anchor {
+		if err != nil || token.LibraryID != lib || token.AnchorCommitID != anchor || token.FilePathHash != pathHash {
 			return result, ErrInvalidPage
 		}
 	}
@@ -111,13 +136,28 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 			result.Current = &FileRevision{CommitID: anchor, FileID: entries[i].ID, ModifiedAt: entries[i].ModifiedAt}
 		}
 	}
+	ids := make([]string, 0, len(page.Commits))
+	for _, commit := range page.Commits {
+		ids = append(ids, commit.CommitID)
+	}
+	deleted, err := c.core.store.DeletedFileVersions(ctx, owner, lib, filePath, ids)
+	if err != nil {
+		return result, err
+	}
 	for i, commit := range page.Commits {
 		if i == pageSize {
-			result.Next, err = c.core.encodeHistoryToken(owner, lib, anchor, commit.CommitID)
+			token.NextCommitID = commit.CommitID
+			result.Next, err = c.core.encodeHistoryToken(owner, lib, token)
 			return result, err
 		}
 		current, parent := entries[i], entries[i+1]
 		if current.Type != "File" || current == parent {
+			continue
+		}
+		// The newest change at this path owns the current version, even if its row was hidden.
+		isCurrent := !token.PastCurrent
+		token.PastCurrent = true
+		if deleted[commit.CommitID] {
 			continue
 		}
 		change := "modified-time"
@@ -129,7 +169,7 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 		}
 		result.Versions = append(result.Versions, FileVersion{
 			FileRevision: FileRevision{CommitID: commit.CommitID, FileID: current.ID, ModifiedAt: current.ModifiedAt},
-			Time:         commit.CreatedAt, Message: commit.Message, Change: change,
+			Time:         commit.CreatedAt, Message: commit.Message, Change: change, IsCurrent: isCurrent,
 		})
 	}
 	return result, nil

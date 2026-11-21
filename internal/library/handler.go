@@ -156,11 +156,12 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 	mux := http.NewServeMux()
 	shared := http.NewServeMux()
 	for pattern, handle := range map[string]http.HandlerFunc{
-		"GET /v1/libraries":                          h.list,
-		"GET /v1/libraries/{LibraryId}":              h.get,
-		"PUT /v1/libraries/{LibraryId}":              h.create,
-		"GET /v1/libraries/{LibraryId}/file-history": catalog.getFileHistory,
-		"GET /v1/libraries/{LibraryId}/files":        catalog.listFiles,
+		"GET /v1/libraries":                                        h.list,
+		"GET /v1/libraries/{LibraryId}":                            h.get,
+		"PUT /v1/libraries/{LibraryId}":                            h.create,
+		"GET /v1/libraries/{LibraryId}/file-history":               catalog.getFileHistory,
+		"DELETE /v1/libraries/{LibraryId}/file-history/{CommitId}": catalog.deleteFileVersion,
+		"GET /v1/libraries/{LibraryId}/files":                      catalog.listFiles,
 	} {
 		mux.HandleFunc(pattern, handle)
 		if config.BrowserOrigin != nil {

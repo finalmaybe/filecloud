@@ -8,7 +8,7 @@
 <a href="/web/libraries" id="list-retry" hidden>重新打开资料库列表</a>
 <table class="entry-table libraries" hidden>
   <caption class="sr">资料库索引</caption>
-  <thead><tr><th scope="col">名称</th><th scope="col">发布状态</th><th scope="col">创建日期（UTC）</th></tr></thead>
+  <thead><tr><th scope="col">名称</th><th scope="col">发布状态</th><th scope="col">创建日期（本地）</th></tr></thead>
   <tbody></tbody>
 </table>
 <template id="library-row">
@@ -21,7 +21,7 @@
         </details>
       </div></td>
       <td><span class="state"></span></td>
-      <td class="date"><span class="mobile-label">创建于 </span><time></time></td>
+      <td class="date"><span class="mobile-label">创建于 </span><time data-date-only></time></td>
     </tr>
 </template>
 {{template "info-dialog"}}
@@ -47,11 +47,10 @@
   <a class="tool-link" id="directory-parent" hidden>上一级目录</a>
 </header>
 <noscript>请启用 JavaScript 以浏览文件列表。</noscript>
-<p id="directory-status" role="status" hidden>正在读取文件列表…</p>
-<a id="directory-retry" href="" hidden>重试</a>
 <div class="empty" id="unpublished" hidden>{{template "icon" "folder"}}<h2>尚未发布文件</h2><p>在设备上绑定工作目录并完成首次同步后，文件会显示在这里。</p></div>
 <div class="empty" id="empty-directory" hidden>{{template "icon" "folder"}}<h2>此目录为空。</h2></div>
 {{template "library-files" .}}
+{{template "viewer-dialog"}}
 {{end}}
 
 {{define "row-actions-toggle"}}<summary aria-label="{{.}} 的更多操作">{{template "icon" "more"}}</summary>{{end}}
@@ -60,7 +59,7 @@
     <h3 id="info-name"></h3>
     <dl class="metadata">
       <dt>发布状态</dt><dd><span class="state"></span></dd>
-      <dt>创建时间</dt><dd id="info-created"></dd>
+      <dt>创建时间</dt><dd><time id="info-created"></time></dd>
       <dt>资料库 ID</dt><dd><code id="library-id"></code> <button data-copy="library-id">复制资料库 ID</button></dd>
       <dt id="head-label">当前 Head</dt><dd><code id="head-id"></code> <button data-copy="head-id">复制 Head</button></dd>
     </dl>
@@ -89,13 +88,17 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
 <div class="directory-list">
 <table class="entry-table files" hidden>
   <caption class="sr">文件列表</caption>
-  <thead><tr><th scope="col">名称</th><th scope="col">修改时间（UTC）</th></tr></thead>
+  <thead><tr><th scope="col">名称</th><th scope="col">修改时间（本地）</th></tr></thead>
   <tbody></tbody>
 </table>
 <template id="folder-row">{{template "file-list-row" "Directory"}}</template>
 <template id="file-row">{{template "file-list-row" "File"}}</template>
-{{template "filter-empty"}}
-<footer class="list-footer"><span role="status">本页显示 <b id="visible-count"></b> 个目录项</span><a id="directory-next" class="inline" hidden>下一页目录项</a></footer>
+<p id="filter-empty" class="empty" hidden>已加载的目录项中没有匹配的名称。</p>
+<footer class="list-footer">
+  <span id="directory-count" role="status" hidden>当前显示 <b id="visible-count"></b> 个目录项</span>
+  <span id="directory-status" role="status"></span>
+  <button type="button" id="directory-retry" hidden>重试</button>
+</footer>
 </div>
 <aside id="version-sidebar" data-api="/v1/libraries/{{.ID}}/file-history" aria-label="文件历史版本" hidden>
   {{template "version-sidebar-templates"}}
@@ -111,13 +114,13 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
 <tr>
   <td>{{if eq . "Directory"}}<a class="entry-link folder">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name"></span></a>
     {{else}}<div class="entry-cell">
-      <a class="entry-link open-versions" aria-controls="version-sidebar">{{template "icon" "file"}}<span class="entry-name"></span></a>
+      <a class="entry-link open-preview" aria-haspopup="dialog">{{template "icon" "file"}}<span class="entry-name"></span></a>
       <details class="row-actions" name="row-actions">
         {{template "row-actions-toggle" "文件"}}
         <div class="action-list"><a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a></div>
       </details>
     </div>{{end}}</td>
-  <td class="date"><time></time><span class="mobile-label"> UTC</span></td>
+  <td class="date"><time></time></td>
 </tr>
 {{end}}
 

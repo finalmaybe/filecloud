@@ -84,11 +84,12 @@ func TestSharedLibraryAPIWithCookieJar(t *testing.T) {
 	}
 	const create = `{"Name":"Web-created"}`
 	for _, origin := range []string{"", "null", "https://other.example"} {
-		r := request("PUT", path, create)
-		if origin != "" {
-			r.Header.Set("Origin", origin)
+		for _, r := range []*http.Request{request("PUT", path, create), request("DELETE", path+"/file-history/"+strings.Repeat("a", 64), "")} {
+			if origin != "" {
+				r.Header.Set("Origin", origin)
+			}
+			do(r, 403)
 		}
-		do(r, 403)
 	}
 	r := request("GET", "/v1/libraries", "")
 	r.Host = "other.example"

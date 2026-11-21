@@ -1,11 +1,11 @@
 {{define "file-history"}}
 <header class="section-title"><h1>文件历史版本</h1><p>{{.Path}}</p></header>
 <a class="inline" href="/web/libraries/{{.LibraryID}}?commit={{.Anchor}}&amp;path={{.Parent}}">返回文件列表</a>
-<section class="panel version-standalone">
+<section class="panel version-standalone" data-api="/v1/libraries/{{.LibraryID}}/file-history" tabindex="-1">
   {{if .Current}}{{template "current-version" .}}{{end}}
-  {{if .Versions}}<ol class="version-list" aria-label="文件变更记录（从新到旧）">{{range .Versions}}{{template "version-entry" .}}{{end}}</ol>{{end}}
+  {{if .Versions}}<ol class="version-list" aria-label="文件变更记录（从新到旧）">{{range .Versions}}{{template "version-entry" (versionRow $ .)}}{{end}}</ol>{{end}}
   <div class="version-continuation">
-    {{if not .Versions}}<p>这批记录中没有此文件的变更。</p>{{end}}
+    <p class="no-changes" {{if .Versions}}hidden{{end}}>这批记录中没有此文件的变更。</p>
     {{if .Next}}<a class="version-more tool-link" href="/web/libraries/{{.LibraryID}}/file-history?commit={{.Anchor}}&amp;path={{.Path}}&amp;cursor={{.Next}}">加载更早的记录</a>{{else}}<p>已到最早记录</p>{{end}}
   </div>
 </section>
@@ -32,16 +32,36 @@
 <h3>变更记录</h3>
 {{end}}
 
-{{define "version-entry"}}<li>
-  <strong>{{if eq .Change "added"}}新增文件{{else if eq .Change "content"}}内容更新{{else}}修改时间变更{{end}}</strong>
-  <p>{{template "version-time" .Time}}</p>
-  <details class="version-details"><summary>查看此版</summary>
+{{define "version-entry"}}<li class="version-row">
+  <details class="version-details">
+    <summary class="version-label" id="version-label-{{.CommitID}}" title="查看版本详情">
+      <span class="version-glyph">{{template "icon" "file"}}</span>
+      <span><strong>{{if eq .Change "added"}}新增文件{{else if eq .Change "content"}}内容更新{{else}}修改时间变更{{end}}</strong>{{template "version-time" .Time}}</span>
+    </summary>
     <p class="modified-at">文件修改于 {{template "version-time" .ModifiedAt}}</p>
-    {{template "revision-ids" .FileRevision}}
     <p class="version-message" {{if not .Message}}hidden{{end}}>版本说明：<span>{{.Message}}</span></p>
+    {{template "revision-ids" .FileRevision}}
   </details>
+  <button type="button" class="version-menu-toggle" popovertarget="version-menu-{{.CommitID}}" aria-label="版本操作" aria-describedby="version-label-{{.CommitID}}" title="版本操作">{{template "icon" "more"}}</button>
+  <form class="version-actions" id="version-menu-{{.CommitID}}" popover method="post">
+    <input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="commit" value="{{.CommitID}}"><input type="hidden" name="anchor" value="{{.Anchor}}">
+    {{if not .IsCurrent}}<details><summary>{{template "icon" "history"}}恢复版本</summary><p>将这个版本的内容和修改时间恢复到原路径。其他文件保持不变。</p><button class="version-restore" formaction="/web/libraries/{{.LibraryID}}/file-history/restore">确认恢复</button></details>{{end}}
+    <a class="version-download" href="/web/libraries/{{.LibraryID}}/file-history/download?path={{.Path}}&amp;commit={{.CommitID}}">{{template "icon" "download"}}下载版本</a>
+    {{if not .IsCurrent}}<details class="destructive"><summary>{{template "icon" "trash"}}删除版本</summary><p>只从这个文件的版本列表移除所选记录。当前文件和底层快照会保留。</p><button class="version-delete" formaction="/web/libraries/{{.LibraryID}}/file-history/delete">确认删除</button></details>{{end}}
+  </form>
 </li>{{end}}
+
+{{define "version-confirm"}}
+<dialog id="version-confirm" class="panel library-dialog" aria-labelledby="version-confirm-title" aria-describedby="version-confirm-target version-confirm-effect">
+  <h2 id="version-confirm-title"></h2>
+  <p id="version-confirm-target"><strong></strong><br><time></time> · <code></code></p>
+  <p id="version-confirm-effect"></p>
+  <p role="alert"></p>
+  <div class="dialog-actions"><button type="button" autofocus>取消</button><button type="submit" class="action"></button></div>
+</dialog>
+<p id="version-notice" role="status"></p>
+{{end}}
 
 {{define "revision-ids"}}<dl class="revision-ids"><dt>文件内容标识</dt><dd><code class="file-id">{{.FileID}}</code></dd><dt>版本标识</dt><dd><code class="commit-id">{{.CommitID}}</code></dd></dl>{{end}}
 
-{{define "version-time"}}<time datetime="{{.}}">{{if .}}{{slice . 0 10}} {{slice . 11 19}} UTC{{end}}</time>{{end}}
+{{define "version-time"}}<time datetime="{{.}}">{{.}}</time>{{end}}

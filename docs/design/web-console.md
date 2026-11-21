@@ -2,7 +2,7 @@
 
 状态：范围已确认（[#56](https://github.com/finalmaybe/filecloud/issues/56)），阶段 1 规格（[#57](https://github.com/finalmaybe/filecloud/issues/57)）。下文定义后续实现的验收条件，不是当前版本的使用说明。基线 `8f484e9`；[调研与视觉依据](../research/server-web-console.md)。
 
-**当前 Web 历史入口**已改为文件列表中的单文件版本栏，就地展开版本信息。恢复预览仅在 CLI 中提供。下文的资料库主线工作台、合并来源和快照检查页面属于原阶段设计；CLI 和 `/v1` 的历史契约不变。当前操作见[部署与客户端使用](../operations/deployment-and-client.md#启用网页入口)。
+**当前 Web 历史入口**已改为文件列表中的单文件版本栏，就地展开版本信息。所有者可下载所选版本，或在确认后将该文件恢复到原路径、从文件版本列表删除单条记录。Web 恢复仅替换当前 Head 已有的单个文件，走正常快照校验与 Head CAS；目录叠加和设备工作目录预览仍由 CLI 提供。下文的资料库主线工作台、合并来源和快照检查页面属于原阶段设计；CLI 和 `/v1` 的历史契约不变。当前操作见[部署与客户端使用](../operations/deployment-and-client.md#启用网页入口)。
 
 ## 开关、来源与身份
 
@@ -23,7 +23,7 @@
 
 Web 用 host-only、`Path=/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HTTPS 强制 `Secure`，回环明文试用例外。Web 表单用 POST，共享建库接口用 PUT。所有浏览器会话写请求（含登录、退出）均要求 Origin 精确匹配配置 origin；缺失、不匹配或 `null` 均拒绝，不执行操作。不得在 GET 里改变业务状态。凭据不返回给 JS、不放在 URL、Web Storage、日志或复制命令中；含身份及私有信息的响应 `Cache-Control: no-store`。日志记录操作类别/结果，不记录表单、原始 URL 查询、用户名或文件路径。沿用 `opslog` 脱敏约定。只使用同源嵌入资源，不加载外站脚本或字体。
 
-「我的资料库」用同源 JavaScript 获取列表、创建资料库。`GET /v1/libraries`、`GET /v1/libraries/{LibraryId}` 和 `PUT /v1/libraries/{LibraryId}` 共用 CLI 的 JSON 处理逻辑。文件列表页面地址仍为 `/web/libraries/{LibraryId}`，根目录、子目录和翻页数据由 `GET /v1/libraries/{LibraryId}/files` 提供。目录链接、分页和版本入口使用响应的固定提交。文件版本栏（含续页）使用 `GET /v1/libraries/{LibraryId}/file-history` 获取 JSON；新标签页和失败回退继续打开 `/web/libraries/{LibraryId}/file-history` 完整 HTML 页面，二者读取同一提交、路径和分页游标。启用 Web 后，这些操作在没有 Authorization 头时也接受 Web cookie，沿用 Web Host 和写请求 Origin 校验。其余受保护的 `/v1` 接口仍只认 Bearer；Web 管理操作不接受 Bearer。两种会话保持独立，显式 Authorization 认证失败不回退到 cookie。升级后旧路径 cookie 的用户重新登录一次；登录和退出会清除旧路径 cookie。
+「我的资料库」用同源 JavaScript 获取列表、创建资料库。`GET /v1/libraries`、`GET /v1/libraries/{LibraryId}` 和 `PUT /v1/libraries/{LibraryId}` 共用 CLI 的 JSON 处理逻辑。文件列表页面地址仍为 `/web/libraries/{LibraryId}`，根目录、子目录和翻页数据由 `GET /v1/libraries/{LibraryId}/files` 提供。目录链接、分页、预览和版本入口使用响应的固定提交。点击文件名在原地查看器中预览（[交互依据](../research/nextcloud-file-viewer.md)）；`/web/libraries/{LibraryId}/file-preview` 也可独立打开，两者共用内容模板。「更多 → 历史版本」保留版本栏。预览按所有者和已发布快照路径读取，不开放原始对象接口。文件版本栏（含续页）使用 `GET /v1/libraries/{LibraryId}/file-history` 获取 JSON；新标签页和失败回退继续打开 `/web/libraries/{LibraryId}/file-history` 完整 HTML 页面，二者读取同一提交、路径和分页游标。确认删除单条记录时，网页使用 `DELETE /v1/libraries/{LibraryId}/file-history/{CommitId}`，成功后就地移除该行并保留滚动位置；独立历史页在无脚本时仍可提交表单。启用 Web 后，这些操作在没有 Authorization 头时也接受 Web cookie，沿用 Web Host 和写请求 Origin 校验。其余受保护的 `/v1` 接口仍只认 Bearer；Web 管理操作不接受 Bearer。两种会话保持独立，显式 Authorization 认证失败不回退到 cookie。升级后旧路径 cookie 的用户重新登录一次；登录和退出会清除旧路径 cookie。
 
 ## 功能兼容矩阵
 

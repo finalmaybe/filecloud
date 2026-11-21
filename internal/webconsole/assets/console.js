@@ -1,3 +1,7 @@
+import {setLocalTime} from './local-time.js';
+
+for (const time of document.querySelectorAll('time[datetime]')) setLocalTime(time);
+
 const navToggle = document.querySelector('#nav-toggle');
 if (navToggle) {
   navToggle.hidden = false;
@@ -108,7 +112,9 @@ function enableVersionSidebar(sidebar) {
     selectedRow.classList.remove('viewing-versions');
     (selectedRow.hidden ? document.querySelector('#list-filter') : opener).focus();
   });
-  sidebar.addEventListener('keydown', event => { if (event.key === 'Escape') close.click(); });
+  sidebar.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !sidebar.querySelector(':popover-open')) close.click();
+  });
 }
 
 function renderVersionPage(history, pageURL) {
@@ -123,8 +129,26 @@ function renderVersionPage(history, pageURL) {
   for (const version of history.Versions) {
     const row = document.querySelector('#version-entry-template').content.firstElementChild.cloneNode(true);
     row.querySelector('strong').textContent = {added: '新增文件', content: '内容更新', 'modified-time': '修改时间变更'}[version.Change];
-    setVersionTime(row.querySelector('time'), version.CreatedAt);
+    setLocalTime(row.querySelector('time'), version.CreatedAt);
     fillRevision(row, version);
+    const base = pageURL.pathname;
+    const params = new URLSearchParams({commit: version.CommitId, path: history.Path});
+    row.querySelector('.version-download').href = `${base}/download?${params}`;
+    const actions = row.querySelector('.version-actions');
+    actions.id = `version-menu-${version.CommitId}`;
+    const toggle = row.querySelector('.version-menu-toggle');
+    toggle.setAttribute('popovertarget', actions.id);
+    const label = row.querySelector('.version-label');
+    label.id = `version-label-${version.CommitId}`;
+    toggle.setAttribute('aria-describedby', label.id);
+    if (version.IsCurrent) {
+      for (const choice of actions.querySelectorAll('details')) choice.remove();
+    } else {
+      actions.elements.namedItem('path').value = history.Path;
+      actions.elements.namedItem('commit').value = version.CommitId;
+      actions.elements.namedItem('anchor').value = history.AnchorCommitId;
+      actions.querySelector('.version-restore').formAction = `${base}/restore`;
+    }
     if (version.Message) {
       const message = row.querySelector('.version-message');
       message.querySelector('span').textContent = version.Message;
@@ -148,12 +172,98 @@ function renderVersionPage(history, pageURL) {
 function fillRevision(root, revision) {
   root.querySelector('.file-id').textContent = revision.FileId;
   root.querySelector('.commit-id').textContent = revision.CommitId;
-  setVersionTime(root.querySelector('.modified-at time'), revision.ModifiedAt);
+  setLocalTime(root.querySelector('.modified-at time'), revision.ModifiedAt);
 }
 
-function setVersionTime(time, value) {
-  time.dateTime = value;
-  time.textContent = value.slice(0, 19).replace('T', ' ') + ' UTC';
+const versionConfirm = document.querySelector('#version-confirm');
+if (versionConfirm) enableVersionConfirmation(versionConfirm);
+
+function enableVersionConfirmation(dialog) {
+  const confirm = dialog.querySelector('[type="submit"]');
+  const cancel = dialog.querySelector('[type="button"]');
+  const error = dialog.querySelector('[role="alert"]');
+  const notice = document.querySelector('#version-notice');
+  let noticeTimer;
+  cancel.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('cancel', event => { if (cancel.disabled) event.preventDefault(); });
+  document.addEventListener('click', event => {
+    const menu = event.target.closest('.version-actions');
+    if (!menu) return;
+    if (event.target.closest('.version-download')) {
+      menu.hidePopover();
+      return;
+    }
+    const choice = event.target.closest('summary');
+    if (!choice) return;
+    event.preventDefault();
+    const details = choice.parentElement;
+    const source = details.querySelector('button');
+    const row = menu.closest('.version-row');
+    dialog.querySelector('h2').textContent = `${choice.textContent}？`;
+    dialog.querySelector('strong').textContent = menu.elements.namedItem('path').value;
+    setLocalTime(dialog.querySelector('time'), row.querySelector('time').dateTime);
+    dialog.querySelector('code').textContent = menu.elements.namedItem('commit').value.slice(0, 12);
+    dialog.querySelector('#version-confirm-effect').textContent = details.querySelector('p').textContent;
+    confirm.textContent = source.textContent;
+    const deleting = details.classList.contains('destructive');
+    error.textContent = '';
+    confirm.classList.toggle('destructive', deleting);
+    confirm.type = deleting ? 'button' : 'submit';
+    confirm.onclick = deleting ? () => deleteVersion(menu) : null;
+    confirm.setAttribute('form', menu.id);
+    if (!deleting) confirm.formAction = source.formAction;
+    menu.hidePopover();
+    row.querySelector('.version-menu-toggle').focus({preventScroll: true});
+    dialog.showModal();
+  });
+
+  async function deleteVersion(menu) {
+    const data = new FormData(menu);
+    const query = new URLSearchParams({Path: data.get('path'), AnchorCommitId: data.get('anchor')});
+    const url = `${menu.closest('[data-api]').dataset.api}/${data.get('commit')}?${query}`;
+    cancel.disabled = confirm.disabled = true;
+    confirm.textContent = '正在删除…';
+    error.textContent = '';
+    try {
+      const response = await fetch(url, {method: 'DELETE', redirect: 'error'});
+      if (response.status !== 204) {
+        const messages = {401: '登录已过期，请重新登录。', 404: '找不到该版本，请重新打开版本列表。',
+          409: '当前版本不能删除。', 412: '资料库已更新，请重新打开文件列表后再操作。', 429: '服务繁忙，请稍后重试。'};
+        error.textContent = messages[response.status] || '暂时无法删除版本，请稍后重试。';
+        return;
+      }
+    } catch {
+      error.textContent = '未能确认删除结果，请重新打开版本列表核对。';
+      return;
+    } finally {
+      cancel.disabled = confirm.disabled = false;
+      confirm.textContent = '确认删除';
+    }
+    finishVersionDeletion(dialog, menu.closest('.version-row'));
+    notice.textContent = '版本已删除';
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { notice.textContent = ''; }, 4000);
+  }
+}
+
+function finishVersionDeletion(dialog, row) {
+  const list = row.parentElement;
+  const page = list.parentElement;
+  const neighbor = row.nextElementSibling || row.previousElementSibling;
+  const focus = neighbor?.querySelector('.version-menu-toggle') || page.querySelector('.version-more') || page;
+  const sidebar = row.closest('#version-sidebar');
+  const top = sidebar?.scrollTop;
+  const {scrollX, scrollY} = window;
+  dialog.close();
+  row.remove();
+  if (!list.childElementCount) {
+    list.hidden = true;
+    const empty = page.querySelector('.no-changes');
+    if (empty) empty.hidden = false;
+  }
+  focus.focus({preventScroll: true});
+  if (sidebar) sidebar.scrollTop = top;
+  window.scrollTo(scrollX, scrollY);
 }
 
 const cancelReset = document.querySelector('#cancel-reset');
@@ -171,7 +281,7 @@ probe?.addEventListener('click', async () => {
     } catch { /* No probe response: the storage state is unknown. */ }
     document.getElementById(id).textContent = state;
   }));
-  document.getElementById('checked').textContent = new Date().toISOString();
+  setLocalTime(document.getElementById('checked'), new Date().toISOString());
   probe.disabled = false;
 });
 

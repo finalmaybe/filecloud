@@ -98,6 +98,15 @@ func metadataMigrations() []migration {
 			`CREATE INDEX published_commit_roles_mainline
 				ON published_commit_roles(owner_user_id, library_id, mainline_commit_id, role, commit_id)`,
 		}, apply: backfillPublishedCommitRoles},
+		{version: 7, statements: []string{
+			`CREATE TABLE deleted_file_versions (
+				owner_user_id TEXT NOT NULL, library_id TEXT NOT NULL,
+				path TEXT NOT NULL, commit_id TEXT NOT NULL,
+				PRIMARY KEY(owner_user_id, library_id, path, commit_id),
+				FOREIGN KEY(owner_user_id, library_id, commit_id)
+					REFERENCES published_commits(owner_user_id, library_id, commit_id) ON DELETE CASCADE
+			)`,
+		}},
 	}
 }
 

@@ -66,14 +66,33 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 	if p.Versions == nil || len(p.Versions) != 0 || p.Next == "" || p.Current == nil || p.Current.FileID != changed || p.Current.ModifiedAt != "2026-08-09T00:00:01Z" {
 		t.Fatalf("unchanged page: %d versions, continuation=%t", len(p.Versions), p.Next != "")
 	}
-	publish(empty) // Advancing Head does not change the file or commits selected by the cursor.
+	deleteURL := "/v1/libraries/" + _headLibraryID + "/file-history/" + restored + "?"
+	deleteQuery := url.Values{"AnchorCommitId": {head}, "Path": {path}}.Encode()
+	assertStatusCode(t, serve(h, "DELETE", deleteURL+deleteQuery, "", ""), 401, 1001)
+	for _, invalid := range []string{"Path=a", "AnchorCommitId=bad&Path=a", deleteQuery + "&Path=b", deleteQuery + "&extra=value"} {
+		assertStatusCode(t, serve(h, "DELETE", deleteURL+invalid, "", _ownerToken), 400, 1000)
+	}
+	assertStatusCode(t, serve(h, "DELETE", deleteURL+deleteQuery, "", _ownerToken), 409, 3007)
+	current := VersionTarget{LibraryID: _headLibraryID, Path: path, CommitID: restored}
+	if _, err := c.RestoreFileVersion(ctx, _ownerID, current, head); !errors.Is(err, ErrCurrentVersion) {
+		t.Fatalf("restore current file after unrelated commits: %v", err)
+	}
+	if err := c.DeleteFileVersion(ctx, _ownerID, current, head); !errors.Is(err, ErrCurrentVersion) {
+		t.Fatalf("delete current file after unrelated commits: %v", err)
+	}
+	newHead := publish(dir("notes", "Directory", dir("a.txt", "File", file, 2), 2)) // The cursor is still anchored at head.
 	query.Set("PageToken", p.Next)
+	otherPath := url.Values{"CommitId": {head}, "Path": {"notes/other.txt"}, "PageToken": {p.Next}}
+	assertStatusCode(t, serve(h, "GET", endpoint+otherPath.Encode(), "", _ownerToken), 400, 1000)
 	p = readPage()
 	if p.Next != "" || p.Anchor != head {
 		t.Fatalf("older page: continuation=%t", p.Next != "")
 	}
 	var got, changes []string
 	for _, v := range p.Versions {
+		if v.IsCurrent != (v.CommitID == restored) {
+			t.Fatal("only the newest change at the anchor is current, even when an older change has identical content and mtime")
+		}
 		got = append(got, v.CommitID)
 		changes = append(changes, v.Change)
 	}
@@ -82,6 +101,16 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{restored, touched, updated, initial}) {
 		t.Fatalf("unexpected versions: %v", got)
+	}
+	query.Del("PageToken")
+	query.Set("CommitId", newHead)
+	p = readPage()
+	if len(p.Versions) != 1 || !p.Versions[0].IsCurrent || p.Versions[0].CommitID != newHead || p.Next == "" {
+		t.Fatal("expected the current version on the first page at the new anchor")
+	}
+	query.Set("PageToken", p.Next)
+	if older := readPage(); len(older.Versions) == 0 || slices.ContainsFunc(older.Versions, func(v FileVersion) bool { return v.IsCurrent }) {
+		t.Fatal("a later page marked an older version as current")
 	}
 	query.Del("PageToken")
 	params := query.Encode()

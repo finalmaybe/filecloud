@@ -6,11 +6,16 @@
   <meta name="color-scheme" content="light">
   <title>{{.Title}} · Filecloud</title>
   <link rel="stylesheet" href="/web/assets/console.css">
-  <script defer src="/web/assets/console.js"></script>
+  <script type="module" src="/web/assets/console.js"></script>
   {{if eq .View "libraries"}}<script type="module" src="/web/assets/libraries.js"></script>{{else if eq .View "library"}}<script type="module" src="/web/assets/files.js"></script>{{end}}
+  {{if or (eq .View "file-preview") (eq .View "library")}}<link rel="stylesheet" href="/web/assets/viewer.css"><script type="module" src="/web/assets/viewer.js"></script>{{end}}
   <link rel="icon" type="image/svg+xml" href="/web/assets/atlas.svg">
 </head>
-<body{{if not .SignedIn}} class="standalone"{{end}}>
+<body{{if eq .View "file-preview"}} class="viewer-page"{{else if not .SignedIn}} class="standalone"{{end}}>
+  {{if eq .View "file-preview"}}
+  {{template "symbols"}}
+  <main class="viewer" aria-label="文件预览">{{template "viewer-toolbar" .Data}}<div class="viewer-body">{{template "viewer-stage" .Data}}</div></main>
+  {{else}}
   {{if .SignedIn}}
   <a class="skip" href="#content">跳到主要内容</a>
   {{template "symbols"}}
@@ -21,7 +26,8 @@
       <span class="app-label">工作空间</span>
     </div>
     {{if or (eq .View "libraries") (eq .View "library")}}
-    <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="按名称筛选本页" placeholder="按名称筛选本页" autocomplete="off"></label>
+    {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{end}}
+    <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"></label>
     {{end}}
     <form class="logout" action="/web/logout" method="post"><button>{{template "icon" "logout"}}退出登录</button></form>
   </header>
@@ -47,7 +53,7 @@
     <section class="panel notice"><p class="kicker" lang="en">FILECLOUD</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/web/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
     {{else if eq .View "libraries"}}{{template "libraries" .}}
     {{else if eq .View "library"}}{{template "library" .Data}}
-    {{else if eq .View "file-history"}}{{template "file-history" .Data}}
+    {{else if eq .View "file-history"}}{{if .Message}}<p role="status">{{.Message}}</p>{{end}}{{template "file-history" .Data}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/web/libraries">重新打开资料库列表</a></section>
     {{else if eq .View "accounts"}}{{template "accounts" .}}
     {{else if eq .View "confirm"}}{{template "confirm" .}}
@@ -56,6 +62,8 @@
     <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或返回首页。</p><a class="action" href="/web/">返回首页 <span aria-hidden="true">→</span></a></section>
     {{end}}
   </main>
+  {{if or (eq .View "library") (eq .View "file-history")}}{{template "version-confirm"}}{{end}}
 <div id="feedback" class="sr" role="status"></div>
+  {{end}}
 </body>
 </html>

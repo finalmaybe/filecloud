@@ -106,6 +106,7 @@ func TestEmbeddedRoutes(t *testing.T) {
 		{"GET", "/web/assets/console.css", 200, "", "text/css", ".skip"},
 		{"GET", "/web/assets/atlas.svg", 200, "", "image/svg+xml", "<svg"},
 		{"GET", "/web/assets/libraries.js", 200, "", "text/javascript", "loadLibraries"},
+		{"GET", "/web/assets/local-time.js", 200, "", "text/javascript", "setLocalTime"},
 		{"POST", "/web/login", 403, "", "", ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {

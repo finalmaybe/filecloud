@@ -85,20 +85,29 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 	if _, err := f.db.UpdateLibraryHead(ctx, user.ID, id, &commit, 1, head, nil, f.now); err != nil {
 		t.Fatal(err)
 	}
-	apiQuery := url.Values{"Path": {"docs/A+B & C.txt"}, "CommitId": {head}}
+	// This publication changes the directory's timestamp, not the selected file.
+	root = put("directories", strings.Replace(fmt.Sprintf(dir, touched, "docs", "Directory"), "00:00:00Z", "00:00:02Z", 1))
+	anchor := put("commits", fmt.Sprintf(`{"AuthorUserId":%q,"CreatedAt":"2026-08-09T00:00:02Z","DeviceId":%q,"Message":"directory only","Parents":[%q],"Root":%q,"Type":"Commit","Version":1}`, user.ID, id, head, root))
+	if _, err := f.db.UpdateLibraryHead(ctx, user.ID, id, &head, 2, anchor, nil, f.now); err != nil {
+		t.Fatal(err)
+	}
+	apiQuery := url.Values{"Path": {"docs/A+B & C.txt"}, "CommitId": {anchor}}
 	api := f.libraryAPI("GET", "/"+id+"/file-history?"+apiQuery.Encode(), "")
 	var result struct {
 		FileHistory struct {
 			AnchorCommitId, Path string
 			Current              struct{ CommitId, FileId string }
-			Versions             []struct{ CommitId, Change string }
+			Versions             []struct {
+				CommitId, Change string
+				IsCurrent        bool
+			}
 		}
 	}
 	if api.Code != 200 || !strings.HasPrefix(api.Header().Get("Content-Type"), "application/json") || json.Unmarshal(api.Body.Bytes(), &result) != nil {
 		t.Fatal("expected file history JSON using a Web session")
 	}
 	h := result.FileHistory
-	if h.AnchorCommitId != head || h.Current.CommitId != head || h.Current.FileId != file || h.Path != "docs/A+B & C.txt" || len(h.Versions) != 2 || h.Versions[0].Change != "modified-time" || h.Versions[1].CommitId != commit {
+	if h.AnchorCommitId != anchor || h.Current.CommitId != anchor || h.Current.FileId != file || h.Path != "docs/A+B & C.txt" || len(h.Versions) != 2 || h.Versions[0].Change != "modified-time" || h.Versions[1].CommitId != commit || !h.Versions[0].IsCurrent || h.Versions[1].IsCurrent {
 		t.Fatal("incorrect sidebar file history")
 	}
 	q := url.Values{"path": {h.Path}, "commit": {h.AnchorCommitId}, "panel": {"1"}}
@@ -109,6 +118,19 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 	}
 	if !strings.Contains(body, commit) || strings.Contains(body, "设备端恢复预览") || strings.Contains(body, "filecloud library restore") {
 		t.Fatal("expected older revision details without a device restore preview")
+	}
+	for _, version := range []string{head, commit} {
+		menu := "version-menu-" + version
+		_, after, found := strings.Cut(body, `id="`+menu+`"`)
+		form, _, _ := strings.Cut(after, "</form>")
+		if !found || !strings.Contains(body, `popovertarget="`+menu+`"`) || !strings.Contains(form, `name="commit" value="`+version+`"`) || !strings.Contains(form, "下载版本") {
+			t.Fatal("expected a version menu targeting its own revision")
+		}
+		for _, action := range []string{"恢复版本", "删除版本"} {
+			if strings.Contains(form, action) != (version == commit) {
+				t.Fatalf("only the older file version should offer %s", action)
+			}
+		}
 	}
 	for _, legacy := range []string{base + "/history", base + "/snapshot/" + commit} {
 		if strings.Contains(body, legacy) || f.req("GET", legacy, nil).Code != 404 {

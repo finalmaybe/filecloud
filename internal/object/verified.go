@@ -15,12 +15,7 @@ type File struct {
 }
 
 // DirectoryEntry describes one typed child reference.
-type DirectoryEntry struct {
-	ID         string
-	ModifiedAt string
-	Name       string
-	Type       string
-}
+type DirectoryEntry = directoryEntry
 
 // Directory describes references needed while validating a persisted snapshot.
 type Directory struct {
@@ -35,6 +30,14 @@ type Commit struct {
 	Message      string
 	Parents      []string
 	Root         string
+}
+
+// Bytes encodes the directory in canonical object format.
+func (d Directory) Bytes() []byte { return appendDirectory(nil, directoryObject{Entries: d.Entries}) }
+
+// Bytes encodes the commit in canonical object format.
+func (c Commit) Bytes() []byte {
+	return appendCommit(nil, commitObject{AuthorUserID: c.AuthorUserID, CreatedAt: c.CreatedAt, DeviceID: c.DeviceID, Message: &c.Message, Parents: c.Parents, Root: c.Root})
 }
 
 // VerifyFile revalidates canonical bytes and identity before exposing references.
@@ -64,11 +67,7 @@ func VerifyDirectory(data []byte, id string) (Directory, error) {
 	if err != nil {
 		return Directory{}, ErrInvalidPersistedObject
 	}
-	result := Directory{Entries: make([]DirectoryEntry, len(value.Entries))}
-	for index, entry := range value.Entries {
-		result.Entries[index] = DirectoryEntry{ID: entry.ID, ModifiedAt: entry.ModifiedAt, Name: entry.Name, Type: entry.Type}
-	}
-	return result, nil
+	return Directory{Entries: value.Entries}, nil
 }
 
 // VerifyCommit revalidates canonical bytes and identity before exposing publication fields.

@@ -40,7 +40,7 @@ type page struct {
 // NewHandler builds the Web routes for one configured public origin.
 // The server itself speaks HTTP; remote HTTPS terminates at a local reverse proxy.
 func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error) {
-	shell, err := template.New("shell.html").ParseFS(files, "*.html")
+	shell, err := template.New("shell.html").Funcs(template.FuncMap{"versionRow": versionRow}).ParseFS(files, "*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -69,13 +69,17 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 		c.show(w, r, who, 200, "我的资料库", "libraries", nil, "")
 	}))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
+	mux.HandleFunc("GET /web/libraries/{library}/file-preview", c.private(c.previewFile))
 	mux.HandleFunc("GET /web/libraries/{library}/file-history", c.private(c.fileHistory))
+	mux.HandleFunc("GET /web/libraries/{library}/file-history/download", c.private(c.downloadVersion))
+	mux.HandleFunc("POST /web/libraries/{library}/file-history/restore", c.private(c.restoreVersion))
+	mux.HandleFunc("POST /web/libraries/{library}/file-history/delete", c.private(c.deleteVersion))
 	mux.HandleFunc("GET /web/overview", c.admin(c.overview))
 	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
 	mux.HandleFunc("POST /web/accounts/review", c.admin(c.reviewReset))
 	mux.HandleFunc("POST /web/accounts/create", c.admin(c.saveAccount))
 	mux.HandleFunc("POST /web/accounts/reset", c.admin(c.saveAccount))
-	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/libraries.js", "assets/files.js"} {
+	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css"} {
 		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})
@@ -106,13 +110,21 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 }
 
 func (c *console) render(w http.ResponseWriter, r *http.Request, status int, p page) {
+	if p.View == "library" {
+		// The directory viewer needs a frame for the browser's native PDF reader.
+		w.Header().Set("Content-Security-Policy", w.Header().Get("Content-Security-Policy")+"; frame-src 'self'")
+	}
+	c.renderTemplate(w, r, status, "shell.html", p)
+}
+
+func (c *console) renderTemplate(w http.ResponseWriter, r *http.Request, status int, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if r.Method == http.MethodHead {
 		w.WriteHeader(status)
 		return
 	}
 	var body bytes.Buffer
-	if err := c.shell.ExecuteTemplate(&body, "shell.html", p); err != nil {
+	if err := c.shell.ExecuteTemplate(&body, name, data); err != nil {
 		http.Error(w, "页面暂不可用", 500)
 		return
 	}

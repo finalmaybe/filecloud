@@ -95,7 +95,7 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 	if h.afterHeadValidationAdmit != nil {
 		h.afterHeadValidationAdmit(validationRequest.Context())
 	}
-	missing, roles, err := h.validateCandidate(validationRequest, owner, libraryID, current.HeadCommitID, commitID)
+	missing, roles, err := h.validateCandidate(validationRequest.Context(), owner, libraryID, current.HeadCommitID, commitID)
 	releaseValidation()
 	switch {
 	case errors.Is(err, object.ErrPayloadTooLarge):
@@ -261,7 +261,7 @@ func decodeHeadRequest(data []byte) (string, error) {
 
 type validationState struct {
 	h           *handler
-	r           *http.Request
+	ctx         context.Context
 	owner       string
 	libraryID   string
 	missing     missingObjects
@@ -299,12 +299,12 @@ type directoryWork struct {
 	ancestor *directoryPath
 }
 
-func (h *handler) validateCandidate(r *http.Request, owner, libraryID string, currentHead *string, commitID string) (missingObjects, []storage.PublishedCommitRole, error) {
-	if err := r.Context().Err(); err != nil {
+func (h *handler) validateCandidate(ctx context.Context, owner, libraryID string, currentHead *string, commitID string) (missingObjects, []storage.PublishedCommitRole, error) {
+	if err := ctx.Err(); err != nil {
 		return missingObjects{}, nil, err
 	}
 	state := validationState{
-		h: h, r: r, owner: owner, libraryID: libraryID,
+		h: h, ctx: ctx, owner: owner, libraryID: libraryID,
 		missing: missingObjects{seen: make(map[string]struct{})},
 		planned: make(map[string]struct{}), commits: make(map[string]commitResult),
 		directories: make(map[string]directoryResult), files: make(map[string]struct{}),
@@ -318,7 +318,7 @@ func (h *handler) validateCandidate(r *http.Request, owner, libraryID string, cu
 		return state.missing, nil, errInvalidSnapshot
 	}
 	if currentHead != nil {
-		parentRole, found, err := h.store.GetPublishedCommitRole(r.Context(), owner, libraryID, *currentHead)
+		parentRole, found, err := h.store.GetPublishedCommitRole(ctx, owner, libraryID, *currentHead)
 		if err != nil {
 			return state.missing, nil, err
 		}
@@ -337,7 +337,7 @@ func (h *handler) validateCandidate(r *http.Request, owner, libraryID string, cu
 	seen := make(map[string]struct{})
 	current := commit.Parents[1]
 	for depth := 1; current != ""; depth++ {
-		if err := state.r.Context().Err(); err != nil {
+		if err := state.ctx.Err(); err != nil {
 			return state.missing, nil, err
 		}
 		if depth > state.h.headValidation.MaxCommitDepth {
@@ -350,14 +350,14 @@ func (h *handler) validateCandidate(r *http.Request, owner, libraryID string, cu
 		if err := state.addContext(); err != nil {
 			return state.missing, nil, err
 		}
-		role, roleFound, err := state.h.store.GetPublishedCommitRole(state.r.Context(), owner, libraryID, current)
+		role, roleFound, err := state.h.store.GetPublishedCommitRole(state.ctx, owner, libraryID, current)
 		if err != nil {
 			return state.missing, nil, err
 		}
 		if roleFound || role.CommitID != "" {
 			return state.missing, nil, errInvalidSnapshot
 		}
-		published, err := state.h.store.IsCommitPublished(state.r.Context(), owner, libraryID, current)
+		published, err := state.h.store.IsCommitPublished(state.ctx, owner, libraryID, current)
 		if err != nil {
 			return state.missing, nil, err
 		}
@@ -377,12 +377,12 @@ func (h *handler) validateCandidate(r *http.Request, owner, libraryID string, cu
 		if len(roles)-1 == state.h.headValidation.MaxIntroducedCommits {
 			return state.missing, nil, object.ErrPayloadTooLarge
 		}
-		parentRole, parentFound, err := state.h.store.GetPublishedCommitRole(state.r.Context(), owner, libraryID, value.Parents[0])
+		parentRole, parentFound, err := state.h.store.GetPublishedCommitRole(state.ctx, owner, libraryID, value.Parents[0])
 		if err != nil {
 			return state.missing, nil, err
 		}
 		if !parentFound {
-			published, err := state.h.store.IsCommitPublished(state.r.Context(), owner, libraryID, value.Parents[0])
+			published, err := state.h.store.IsCommitPublished(state.ctx, owner, libraryID, value.Parents[0])
 			if err != nil {
 				return state.missing, nil, err
 			}
@@ -424,7 +424,7 @@ func (state *validationState) loadCommit(id string) (object.Commit, bool, error)
 	if err := state.plan("commits", id); err != nil {
 		return object.Commit{}, false, err
 	}
-	data, found, err := state.h.readMetadata(state.r, state.owner, state.libraryID, "commits", id, _maxCommitBody)
+	data, found, err := state.h.readMetadata(state.ctx, state.owner, state.libraryID, "commits", id, _maxCommitBody)
 	if err != nil {
 		return object.Commit{}, false, err
 	}
@@ -451,7 +451,7 @@ func (state *validationState) validateRoot(root string) error {
 	rootPath := &directoryPath{id: root}
 	queue := []directoryWork{{id: root, depth: 1, ancestor: rootPath}}
 	for len(queue) > 0 {
-		if err := state.r.Context().Err(); err != nil {
+		if err := state.ctx.Err(); err != nil {
 			return err
 		}
 		work := queue[0]
@@ -510,7 +510,7 @@ func hasDirectoryAncestor(path *directoryPath, id string) bool {
 }
 
 func (state *validationState) addContext() error {
-	if err := state.r.Context().Err(); err != nil {
+	if err := state.ctx.Err(); err != nil {
 		return err
 	}
 	if state.contexts == state.h.headValidation.MaxTraversalContexts {
@@ -521,7 +521,7 @@ func (state *validationState) addContext() error {
 }
 
 func (state *validationState) plan(kind, id string) error {
-	if err := state.r.Context().Err(); err != nil {
+	if err := state.ctx.Err(); err != nil {
 		return err
 	}
 	key := kind + "/" + id
@@ -539,7 +539,7 @@ func (state *validationState) loadDirectory(id string) (object.Directory, bool, 
 	if cached, exists := state.directories[id]; exists {
 		return cached.value, cached.found, nil
 	}
-	data, found, err := state.h.readMetadata(state.r, state.owner, state.libraryID, "directories", id, _maxDirectoryBody)
+	data, found, err := state.h.readMetadata(state.ctx, state.owner, state.libraryID, "directories", id, _maxDirectoryBody)
 	if err != nil {
 		return object.Directory{}, false, err
 	}
@@ -564,7 +564,7 @@ func (state *validationState) validateFile(fileID string) error {
 		return err
 	}
 	state.files[fileID] = struct{}{}
-	data, found, err := state.h.readMetadata(state.r, state.owner, state.libraryID, "files", fileID, _maxFileBody)
+	data, found, err := state.h.readMetadata(state.ctx, state.owner, state.libraryID, "files", fileID, _maxFileBody)
 	if err != nil {
 		return err
 	}
@@ -584,7 +584,7 @@ func (state *validationState) validateFile(fileID string) error {
 			if err := state.plan("blocks", blockID); err != nil {
 				return err
 			}
-			reader, actualSize, err := state.h.store.GetObject(state.r.Context(), state.owner, state.libraryID, "blocks", blockID)
+			reader, actualSize, err := state.h.store.GetObject(state.ctx, state.owner, state.libraryID, "blocks", blockID)
 			if errors.Is(err, storage.ErrObjectNotFound) {
 				state.missing.add(blockID)
 				state.blocks[blockID] = blockResult{}
@@ -595,7 +595,7 @@ func (state *validationState) validateFile(fileID string) error {
 				return err
 			}
 			hash := sha256.New()
-			_, copyErr := io.Copy(hash, contextReader{ctx: state.r.Context(), reader: reader})
+			_, copyErr := io.Copy(hash, contextReader{ctx: state.ctx, reader: reader})
 			closeErr := reader.Close()
 			if copyErr != nil || closeErr != nil {
 				return errors.Join(copyErr, closeErr)
@@ -621,8 +621,8 @@ func (state *validationState) validateFile(fileID string) error {
 	return nil
 }
 
-func (h *handler) readMetadata(r *http.Request, owner, libraryID, kind, id string, maximum int64) ([]byte, bool, error) {
-	file, size, err := h.store.GetObject(r.Context(), owner, libraryID, kind, id)
+func (h *handler) readMetadata(ctx context.Context, owner, libraryID, kind, id string, maximum int64) ([]byte, bool, error) {
+	file, size, err := h.store.GetObject(ctx, owner, libraryID, kind, id)
 	if errors.Is(err, storage.ErrObjectNotFound) {
 		return nil, false, nil
 	}
@@ -633,7 +633,7 @@ func (h *handler) readMetadata(r *http.Request, owner, libraryID, kind, id strin
 	if size > maximum {
 		return nil, false, errCorruptObject
 	}
-	data, err := io.ReadAll(io.LimitReader(contextReader{ctx: r.Context(), reader: file}, maximum+1))
+	data, err := io.ReadAll(io.LimitReader(contextReader{ctx: ctx, reader: file}, maximum+1))
 	if err != nil {
 		return nil, false, fmt.Errorf("read persisted object: %w", err)
 	}

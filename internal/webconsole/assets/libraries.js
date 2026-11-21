@@ -1,3 +1,5 @@
+import {setLocalTime} from './local-time.js';
+
 const table = document.querySelector('.libraries');
 const info = document.querySelector('#info-dialog');
 const dialog = document.querySelector('#library-dialog');
@@ -68,13 +70,13 @@ function appendLibrary(library) {
   const path = `/web/libraries/${library.LibraryId}`;
   row.querySelector('.entry-link').href = path;
   row.querySelector('.entry-name').textContent = library.Name;
-  row.querySelector('time').textContent = library.CreatedAt.slice(0, 10);
+  setLocalTime(row.querySelector('time'), library.CreatedAt);
   setLibraryState(row, library);
   const toggle = row.querySelector('summary');
   toggle.setAttribute('aria-label', library.Name + ' 的更多操作');
   row.querySelector('button').addEventListener('click', () => {
     info.querySelector('#info-name').textContent = library.Name;
-    info.querySelector('#info-created').textContent = library.CreatedAt.slice(0, 19).replace('T', ' ') + ' UTC';
+    setLocalTime(info.querySelector('#info-created'), library.CreatedAt);
     info.querySelector('#library-id').textContent = library.LibraryId;
     info.querySelector('.bind-library-id').textContent = library.LibraryId;
     info.querySelector('#info-files').href = path;
