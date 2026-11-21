@@ -9,16 +9,6 @@ import (
 
 var ErrHistoryBusy = errors.New("history traversal busy")
 
-type HistoryRow struct {
-	ID, Message, Device, Time, Role string
-	Merge                           bool
-}
-type BrowserHistory struct {
-	Rows                                                []HistoryRow
-	Anchor, Next, Selected, Expanded, Cursor, LibraryID string
-	Detail                                              historyCommitDetailResponse
-}
-
 func (h *handler) historyDetail(ctx context.Context, owner, lib, id string) (historyCommitDetailResponse, error) {
 	var result historyCommitDetailResponse
 	role, found, err := h.store.GetPublishedCommitRole(ctx, owner, lib, id)
@@ -60,67 +50,4 @@ func (c *Catalog) admit(ctx context.Context, owner string) (context.Context, fun
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.core.history.RequestTimeout)
 	return ctx, func() { cancel(); release() }, nil
-}
-func (c *Catalog) History(ctx context.Context, owner, lib, cursor, selected, expanded string) (BrowserHistory, error) {
-	result := BrowserHistory{Selected: selected, Expanded: expanded, Cursor: cursor, LibraryID: lib}
-	ctx, done, err := c.admit(ctx, owner)
-	if err != nil {
-		return result, err
-	}
-	defer done()
-	var token historyPageToken
-	if cursor != "" {
-		token, err = c.core.decodeHistoryToken(cursor, owner)
-		if err != nil || token.LibraryID != lib {
-			return result, ErrInvalidPage
-		}
-	}
-	p, _, err := c.core.historyPage(ctx, owner, lib, token, 50)
-	if err != nil {
-		return result, err
-	}
-	if p.AnchorCommitID != nil {
-		result.Anchor = *p.AnchorCommitID
-		if cursor == "" {
-			result.Cursor, err = c.core.encodeHistoryToken(owner, lib, result.Anchor, result.Anchor)
-			if err != nil {
-				return result, err
-			}
-		}
-	}
-	result.Next = p.NextPageToken
-	for _, commit := range p.Commits {
-		merge := len(commit.Parents) == 2
-		result.Rows = append(result.Rows, HistoryRow{commit.CommitID, commit.Message, commit.DeviceID, commit.CreatedAt, "主线", merge})
-		if !merge || commit.CommitID != expanded {
-			continue
-		}
-		seen := map[string]bool{}
-		id := commit.Parents[1]
-		for {
-			if seen[id] || len(seen) >= 1024 {
-				return result, errHistoryCorrupt
-			}
-			seen[id] = true
-			source, err := c.core.historyDetail(ctx, owner, lib, id)
-			if err != nil {
-				return result, err
-			}
-			if source.Role != _historyRoleMergeSource || source.MainlineCommitID != expanded || len(source.Parents) == 0 {
-				return result, errHistoryCorrupt
-			}
-			result.Rows = append(result.Rows, HistoryRow{id, source.Message, source.DeviceID, source.CreatedAt, "合并来源", false})
-			if len(source.Parents) == 1 {
-				break
-			}
-			id = source.Parents[1]
-		}
-	}
-	if result.Selected == "" && len(result.Rows) > 0 {
-		result.Selected = result.Rows[0].ID
-	}
-	if result.Selected != "" {
-		result.Detail, err = c.core.historyDetail(ctx, owner, lib, result.Selected)
-	}
-	return result, err
 }

@@ -46,8 +46,7 @@
     <a href="?commit={{.Files.CommitID}}&amp;path=.">{{.Name}}</a><span aria-hidden="true">/</span><h1>{{.Files.Path}}</h1>
     {{else}}<h1>{{.Name}}</h1>{{end}}
   </div>
-  {{if and .HeadCommitID (ne .Files.Path ".")}}<a class="tool-link" href="?commit={{.Files.CommitID}}&amp;path={{.Files.Parent}}">上一级目录</a>
-  {{else if .HeadCommitID}}<a class="tool-link" href="/web/libraries/{{.ID}}/history">{{template "icon" "history"}}浏览主线历史</a>{{end}}
+  {{if and .HeadCommitID (ne .Files.Path ".")}}<a class="tool-link" href="?commit={{.Files.CommitID}}&amp;path={{.Files.Parent}}">上一级目录</a>{{end}}
 </header>
 {{if .HeadCommitID}}{{template "library-files" .Files}}
 {{else}}<div class="empty">{{template "icon" "folder"}}<h2>尚未发布文件</h2><p>在设备上绑定工作目录并完成首次同步后，文件会显示在这里。</p></div>{{end}}
@@ -89,6 +88,8 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
 
 {{define "library-files"}}
 {{if .Entries}}
+<div class="file-workspace">
+<div class="directory-list">
 <table class="entry-table files">
   <caption class="sr">文件列表</caption>
   <thead><tr><th scope="col">名称</th><th scope="col">修改时间（UTC）</th></tr></thead>
@@ -97,10 +98,10 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
     <tr>
       <td>{{if eq .Type "Directory"}}<a class="entry-link folder" href="?commit={{$.CommitID}}&amp;path={{$path}}">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name">{{.Name}}</span></a>
         {{else}}<div class="entry-cell">
-          <a class="entry-link" href="/web/libraries/{{$.LibraryID}}/snapshot/{{$.CommitID}}?path={{$path}}">{{template "icon" "file"}}<span class="entry-name">{{.Name}}</span></a>
+          <a class="entry-link open-versions" aria-controls="version-sidebar" href="/web/libraries/{{$.LibraryID}}/file-history?commit={{$.CommitID}}&amp;path={{$path}}">{{template "icon" "file"}}<span class="entry-name">{{.Name}}</span></a>
           <details class="row-actions" name="row-actions">
             {{template "row-actions-toggle" .Name}}
-            <div class="action-list"><a href="/web/libraries/{{$.LibraryID}}/file-history?commit={{$.CommitID}}&amp;path={{$path}}" aria-label="查看 {{.Name}} 的历史版本">{{template "icon" "history"}}历史版本</a></div>
+            <div class="action-list"><a class="open-versions" aria-controls="version-sidebar" href="/web/libraries/{{$.LibraryID}}/file-history?commit={{$.CommitID}}&amp;path={{$path}}" aria-label="查看 {{.Name}} 的历史版本">{{template "icon" "history"}}历史版本</a></div>
           </details>
         </div>{{end}}</td>
       <td class="date"><time datetime="{{.ModifiedAt}}">{{slice .ModifiedAt 0 10}} {{slice .ModifiedAt 11 19}}</time><span class="mobile-label"> UTC</span></td>
@@ -108,6 +109,14 @@ filecloud library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interv
 </table>
 {{template "filter-empty"}}
 <footer class="list-footer"><span role="status">本页显示 <b id="visible-count">{{len .Entries}}</b> 个目录项</span>{{if .Next}}<a class="inline" href="?commit={{.CommitID}}&amp;path={{.Path}}&amp;offset={{.Next}}">下一页目录项</a>{{end}}</footer>
+</div>
+<aside id="version-sidebar" aria-label="文件历史版本" hidden>
+  <header class="version-heading"><div><p>文件历史版本</p><h2 id="version-filename"></h2></div><button type="button" id="close-versions">关闭</button></header>
+  <div id="version-content"></div>
+  <p id="version-status" role="status"></p>
+  <a id="version-fallback" class="tool-link" hidden>打开该文件的历史版本</a>
+</aside>
+</div>
 {{else}}<div class="empty">{{template "icon" "folder"}}<h2>此目录为空。</h2></div>{{end}}
 {{end}}
 

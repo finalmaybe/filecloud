@@ -2,6 +2,8 @@
 
 状态：范围已确认（[#56](https://github.com/finalmaybe/filecloud/issues/56)），阶段 1 规格（[#57](https://github.com/finalmaybe/filecloud/issues/57)）。下文定义后续实现的验收条件，不是当前版本的使用说明。基线 `8f484e9`；[调研与视觉依据](../research/server-web-console.md)。
 
+**当前 Web 历史入口**已改为文件列表中的单文件版本栏，就地展开版本信息。恢复预览仅在 CLI 中提供。下文的资料库主线工作台、合并来源和快照检查页面属于原阶段设计；CLI 和 `/v1` 的历史契约不变。当前操作见[部署与客户端使用](../operations/deployment-and-client.md#启用网页入口)。
+
 ## 开关、来源与身份
 
 - 新增 `filecloud-server serve --web-origin <origin>`。省略即关闭全部 Web 页面/资产；配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后只挂载 `/web/`，不接管 `/`、`/v1` 或探针。未知 Web 页面返回 404，不回落到首页。

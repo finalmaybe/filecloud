@@ -8,12 +8,18 @@ import (
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
+type FileRevision struct {
+	CommitID, FileID, ModifiedAt string
+}
+
 type FileVersion struct {
-	CommitID, Time, Message string
+	FileRevision
+	Time, Message, Change string
 }
 
 type FileHistory struct {
 	LibraryID, Anchor, Path, Parent, Next string
+	Current                               *FileRevision // Only on the first page.
 	Versions                              []FileVersion
 }
 
@@ -61,8 +67,11 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 				return result, err
 			}
 		}
-		if i == 0 && cursor == "" && entries[i].Type != "File" {
-			return result, storage.ErrLibraryNotFound
+		if i == 0 && cursor == "" {
+			if entries[i].Type != "File" {
+				return result, storage.ErrLibraryNotFound
+			}
+			result.Current = &FileRevision{CommitID: anchor, FileID: entries[i].ID, ModifiedAt: entries[i].ModifiedAt}
 		}
 	}
 	for i, commit := range page.Commits {
@@ -70,9 +79,21 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 			result.Next, err = c.core.encodeHistoryToken(owner, lib, anchor, commit.CommitID)
 			return result, err
 		}
-		if entries[i].Type == "File" && entries[i] != entries[i+1] {
-			result.Versions = append(result.Versions, FileVersion{commit.CommitID, commit.CreatedAt, commit.Message})
+		current, parent := entries[i], entries[i+1]
+		if current.Type != "File" || current == parent {
+			continue
 		}
+		change := "modified-time"
+		switch {
+		case parent.Type != "File":
+			change = "added"
+		case current.ID != parent.ID:
+			change = "content"
+		}
+		result.Versions = append(result.Versions, FileVersion{
+			FileRevision: FileRevision{CommitID: commit.CommitID, FileID: current.ID, ModifiedAt: current.ModifiedAt},
+			Time:         commit.CreatedAt, Message: commit.Message, Change: change,
+		})
 	}
 	return result, nil
 }

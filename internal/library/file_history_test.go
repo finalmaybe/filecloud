@@ -49,7 +49,7 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 	}
 	const path = "notes/a.txt"
 	p, err := c.FileHistory(ctx, _ownerID, _headLibraryID, head, path, "")
-	if err != nil || len(p.Versions) != 0 || p.Next == "" {
+	if err != nil || len(p.Versions) != 0 || p.Next == "" || p.Current == nil || p.Current.FileID != changed || p.Current.ModifiedAt != "2026-08-09T00:00:01Z" {
 		t.Fatalf("unchanged page: %d versions, continuation=%t, err=%v", len(p.Versions), p.Next != "", err)
 	}
 	publish(empty) // Advancing Head does not change the file or commits selected by the cursor.
@@ -57,9 +57,13 @@ func TestFileHistoryFollowsPathAcrossMainlinePages(t *testing.T) {
 	if err != nil || p.Next != "" || p.Anchor != head {
 		t.Fatalf("older page: continuation=%t, err=%v", p.Next != "", err)
 	}
-	var got []string
+	var got, changes []string
 	for _, v := range p.Versions {
 		got = append(got, v.CommitID)
+		changes = append(changes, v.Change)
+	}
+	if p.Current != nil || !slices.Equal(changes, []string{"added", "modified-time", "content", "added"}) {
+		t.Fatalf("unexpected continuation metadata: %v, %v", p.Current, changes)
 	}
 	if !slices.Equal(got, []string{restored, touched, updated, initial}) {
 		t.Fatalf("unexpected versions: %v", got)

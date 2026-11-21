@@ -68,20 +68,15 @@ func (c *console) createLibrary(w http.ResponseWriter, r *http.Request, who iden
 		http.Redirect(w, r, "/web/libraries/"+item.ID, 303)
 	}
 }
-func (c *console) history(w http.ResponseWriter, r *http.Request, who identity) {
-	q := r.URL.Query()
-	data, err := c.Catalog.History(r.Context(), who.user, r.PathValue("library"), q.Get("cursor"), q.Get("commit"), q.Get("merge"))
-	if err != nil {
-		c.problem(w, r, who, err)
-		return
-	}
-	c.show(w, r, who, 200, "主线历史", "history", data, "")
-}
 func (c *console) fileHistory(w http.ResponseWriter, r *http.Request, who identity) {
 	q := r.URL.Query()
 	data, err := c.Catalog.FileHistory(r.Context(), who.user, r.PathValue("library"), q.Get("commit"), q.Get("path"), q.Get("cursor"))
 	if err != nil {
 		c.problem(w, r, who, err)
+		return
+	}
+	if q.Get("panel") == "1" {
+		c.renderTemplate(w, r, http.StatusOK, "version-page", data)
 		return
 	}
 	c.show(w, r, who, 200, "文件历史版本", "file-history", data, "")

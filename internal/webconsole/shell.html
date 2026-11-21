@@ -28,11 +28,10 @@
     <nav aria-label="主导航">
       <p class="rail-label">文件空间</p>
       <a href="/web/libraries" {{if eq .View "libraries"}}aria-current="page"{{end}}>{{template "icon" "folder"}}资料库</a>
-      {{$lib := ""}}{{if eq .View "library"}}{{$lib = .Data.ID}}{{else if or (eq .View "file-history") (eq .View "history") (eq .View "snapshot") (eq .View "handoff")}}{{$lib = .Data.LibraryID}}{{end}}
+      {{$lib := ""}}{{if eq .View "library"}}{{$lib = .Data.ID}}{{else if eq .View "file-history"}}{{$lib = .Data.LibraryID}}{{end}}
       {{if $lib}}
       <p class="rail-label">当前资料库</p>
       <a href="/web/libraries/{{$lib}}" {{if eq .View "library"}}aria-current="page"{{end}}>{{template "icon" "file"}}文件列表</a>
-      <a href="/web/libraries/{{$lib}}/history" {{if eq .View "history"}}aria-current="page"{{end}}>{{template "icon" "history"}}主线历史</a>
       {{end}}
       {{if .Admin}}
       <p class="rail-label">服务管理</p>
@@ -49,9 +48,6 @@
     {{else if eq .View "library"}}{{template "library" .Data}}
     {{else if eq .View "file-history"}}{{template "file-history" .Data}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/web/libraries">重新打开资料库列表</a></section>
-    {{else if eq .View "handoff"}}{{template "handoff" .Data}}
-    {{else if eq .View "snapshot"}}{{template "snapshot" .Data}}
-    {{else if eq .View "history"}}{{template "history" .Data}}
     {{else if eq .View "accounts"}}{{template "accounts" .}}
     {{else if eq .View "confirm"}}{{template "confirm" .}}
     {{else if eq .View "overview"}}{{template "overview" .Data}}

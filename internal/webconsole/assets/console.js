@@ -42,6 +42,75 @@ if (entries) {
   });
 }
 
+const versionSidebar = document.querySelector('#version-sidebar');
+if (versionSidebar) enableVersionSidebar(versionSidebar);
+
+function enableVersionSidebar(sidebar) {
+  const workspace = sidebar.closest('.file-workspace');
+  const close = sidebar.querySelector('#close-versions');
+  const content = sidebar.querySelector('#version-content');
+  const status = sidebar.querySelector('#version-status');
+  const fallback = sidebar.querySelector('#version-fallback');
+  let selectedRow, opener, request;
+
+  workspace.addEventListener('click', async event => {
+    const link = event.target.closest('.open-versions, .version-more');
+    if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const more = link.classList.contains('version-more');
+    if (!more) {
+      selectedRow?.classList.remove('viewing-versions');
+      selectedRow = link.closest('tr');
+      selectedRow.classList.add('viewing-versions');
+      sidebar.querySelector('#version-filename').textContent = selectedRow.querySelector('.entry-name').textContent;
+      const menu = link.closest('.row-actions');
+      opener = menu ? menu.querySelector('summary') : link;
+      if (menu) menu.open = false;
+      content.replaceChildren();
+      sidebar.hidden = false;
+      sidebar.scrollTop = 0;
+      close.focus();
+    }
+
+    request?.abort();
+    request = new AbortController();
+    const {signal} = request;
+    const url = new URL(link.href);
+    url.searchParams.set('panel', '1');
+    fallback.hidden = true;
+    status.textContent = '正在读取版本记录…';
+    content.setAttribute('aria-busy', 'true');
+    try {
+      const response = await fetch(url, {signal, redirect: 'error'});
+      if (!response.ok) throw new Error();
+      const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const page = doc.querySelector('.version-page');
+      if (!page) throw new Error();
+      if (signal.aborted) return;
+      const focusPage = more && document.activeElement === link;
+      if (more) link.closest('.version-continuation').remove();
+      content.append(page);
+      if (focusPage) page.focus();
+      status.textContent = '';
+    } catch {
+      if (signal.aborted) return;
+      status.textContent = '未能读取这批记录。可打开该文件的历史版本重试。';
+      fallback.href = link.href;
+      fallback.hidden = false;
+    } finally {
+      if (!signal.aborted) content.removeAttribute('aria-busy');
+    }
+  });
+
+  close.addEventListener('click', () => {
+    request?.abort();
+    sidebar.hidden = true;
+    selectedRow.classList.remove('viewing-versions');
+    (selectedRow.hidden ? document.querySelector('#list-filter') : opener).focus();
+  });
+  sidebar.addEventListener('keydown', event => { if (event.key === 'Escape') close.click(); });
+}
+
 const libraryTable = document.querySelector('.libraries');
 if (libraryTable) {
   const infoDialog = document.querySelector('#info-dialog');

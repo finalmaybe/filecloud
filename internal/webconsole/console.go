@@ -75,8 +75,6 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries", c.private(c.libraries))
 	mux.HandleFunc("POST /web/libraries", c.private(c.createLibrary))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
-	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
-	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
 	mux.HandleFunc("GET /web/libraries/{library}/file-history", c.private(c.fileHistory))
 	mux.HandleFunc("GET /web/overview", c.admin(c.overview))
 	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
@@ -130,13 +128,17 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 }
 
 func (c *console) render(w http.ResponseWriter, r *http.Request, status int, p page) {
+	c.renderTemplate(w, r, status, "shell.html", p)
+}
+
+func (c *console) renderTemplate(w http.ResponseWriter, r *http.Request, status int, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if r.Method == http.MethodHead {
 		w.WriteHeader(status)
 		return
 	}
 	var body bytes.Buffer
-	if err := c.shell.ExecuteTemplate(&body, "shell.html", p); err != nil {
+	if err := c.shell.ExecuteTemplate(&body, name, data); err != nil {
 		http.Error(w, "页面暂不可用", 500)
 		return
 	}

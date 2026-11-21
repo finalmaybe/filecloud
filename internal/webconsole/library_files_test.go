@@ -13,7 +13,7 @@ import (
 	"github.com/mingming-cn/filecloud/internal/object"
 )
 
-func TestFileListLinksToHistoryAndPinnedFile(t *testing.T) {
+func TestFileListOpensFileScopedVersions(t *testing.T) {
 	f := newFixture(t)
 	f.login()
 	ctx := t.Context()
@@ -67,18 +67,33 @@ func TestFileListLinksToHistoryAndPinnedFile(t *testing.T) {
 	if !strings.Contains(menu, `href="`+base+`/file-history?commit=`+commit) {
 		t.Fatal("file actions should link to history at the listed commit")
 	}
-	for _, target := range []string{"file-history", "snapshot/" + commit} {
-		pattern := `href="(` + regexp.QuoteMeta(base+"/"+target+"?") + `[^"]+)"`
-		match := regexp.MustCompile(pattern).FindStringSubmatch(page.Body.String())
-		if len(match) == 0 {
-			t.Fatalf("missing %s link", target)
-		}
-		page = f.req("GET", html.UnescapeString(match[1]), nil)
-		if page.Code != 200 || !strings.Contains(html.UnescapeString(page.Body.String()), "docs/A+B & C.txt") {
-			t.Fatalf("%s did not open the selected path (status %d)", target, page.Code)
-		}
+	historyLinks := regexp.MustCompile(`href="(`+regexp.QuoteMeta(base+"/file-history?")+`[^"]+)"`).FindAllStringSubmatch(page.Body.String(), -1)
+	if len(historyLinks) != 2 || historyLinks[0][1] != historyLinks[1][1] {
+		t.Fatal("file name and menu should open the same file history")
 	}
-	if !strings.Contains(page.Body.String(), file) {
-		t.Fatal("version did not show the file in the selected snapshot")
+	page = f.req("GET", html.UnescapeString(historyLinks[0][1]), nil)
+	if page.Code != 200 || !strings.Contains(html.UnescapeString(page.Body.String()), "docs/A+B & C.txt") || !strings.Contains(page.Body.String(), file) {
+		t.Fatal("expected file details at the selected path and version")
+	}
+
+	touched := put("directories", strings.Replace(fmt.Sprintf(dir, file, "A+B & C.txt", "File"), "00:00:00Z", "00:00:01Z", 1))
+	root = put("directories", fmt.Sprintf(dir, touched, "docs", "Directory"))
+	head := put("commits", fmt.Sprintf(`{"AuthorUserId":%q,"CreatedAt":"2026-08-09T00:00:01Z","DeviceId":%q,"Message":"touch","Parents":[%q],"Root":%q,"Type":"Commit","Version":1}`, user.ID, id, commit, root))
+	if _, err := f.db.UpdateLibraryHead(ctx, user.ID, id, &commit, 1, head, nil, f.now); err != nil {
+		t.Fatal(err)
+	}
+	q := url.Values{"path": {"docs/A+B & C.txt"}, "commit": {head}, "panel": {"1"}}
+	panel := f.req("GET", base+"/file-history?"+q.Encode(), nil)
+	body := panel.Body.String()
+	if panel.Code != 200 || strings.Contains(body, "<html") || !strings.Contains(body, "当前版本") || !strings.Contains(body, "修改时间变更") {
+		t.Fatal("expected a sidebar fragment for the selected file")
+	}
+	if !strings.Contains(body, commit) || strings.Contains(body, "设备端恢复预览") || strings.Contains(body, "filecloud library restore") {
+		t.Fatal("expected older revision details without a device restore preview")
+	}
+	for _, legacy := range []string{base + "/history", base + "/snapshot/" + commit} {
+		if strings.Contains(body, legacy) || f.req("GET", legacy, nil).Code != 404 {
+			t.Fatal("removed history or snapshot view still reachable")
+		}
 	}
 }
