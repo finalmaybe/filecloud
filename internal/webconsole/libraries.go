@@ -17,6 +17,8 @@ func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, 
 	case errors.Is(err, library.ErrHistoryBusy):
 		code, msg = 429, "历史读取繁忙，请稍后再试。"
 		w.Header().Set("Retry-After", "1")
+	case errors.Is(err, library.ErrInvalidPath):
+		code, msg = 400, "请选择快照中的规范相对路径。"
 	case errors.Is(err, library.ErrInvalidPage):
 		code, msg = 400, "分页链接已失效，请重新打开第一页。"
 	case errors.Is(err, storage.ErrLibraryNotFound):

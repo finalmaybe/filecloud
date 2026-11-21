@@ -81,6 +81,12 @@ func (c *Catalog) History(ctx context.Context, owner, lib, cursor, selected, exp
 	}
 	if p.AnchorCommitID != nil {
 		result.Anchor = *p.AnchorCommitID
+		if cursor == "" {
+			result.Cursor, err = c.core.encodeHistoryToken(owner, lib, result.Anchor, result.Anchor)
+			if err != nil {
+				return result, err
+			}
+		}
 	}
 	result.Next = p.NextPageToken
 	for _, commit := range p.Commits {

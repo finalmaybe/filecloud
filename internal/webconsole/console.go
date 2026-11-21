@@ -57,6 +57,7 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries", c.private(c.libraries))
 	mux.HandleFunc("POST /web/libraries", c.private(c.createLibrary))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
+	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
 	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
 	for _, path := range []string{"overview", "accounts"} {
 		mux.HandleFunc("GET /web/"+path, c.private(c.workspace))
