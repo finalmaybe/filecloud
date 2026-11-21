@@ -94,6 +94,64 @@ func (f *fixture) login() {
 	}
 	f.cookie = w.Result().Cookies()[0]
 }
+func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
+	f := newFixture(t)
+	f.login()
+	admin := f.cookie
+	target := url.Values{"username": {"field-device"}, "password": {rand.Text()}}
+	if f.req("POST", "/web/accounts/create", target).Code != 403 {
+		t.Fatal("owner could create accounts")
+	}
+	f.config.AdminUsers = []string{"observer"}
+	f.mount()
+	if f.req("POST", "/web/accounts/create", target).Code != 303 || f.req("POST", "/web/accounts/create", target).Code != 409 {
+		t.Fatal("create or duplicate")
+	}
+	id, _ := auth.NewUserID(nil)
+	lib := url.Values{"id": {id}, "name": {"Atlas"}}
+	if f.req("POST", "/web/libraries", lib).Code != 303 || f.req("POST", "/web/libraries", lib).Code != 303 {
+		t.Fatal("idempotent create")
+	}
+	id2, _ := auth.NewUserID(nil)
+	if f.req("POST", "/web/libraries", url.Values{"id": {id2}, "name": {"Atlas"}}).Code != 409 {
+		t.Fatal("duplicate library name")
+	}
+	if f.req("GET", "/web/libraries?cursor=invalid", nil).Code != 400 {
+		t.Fatal("cursor error")
+	}
+	w := f.req("POST", "/web/login", target)
+	if w.Code != 303 {
+		t.Fatal("new login")
+	}
+	other := w.Result().Cookies()[0]
+	f.cookie = other
+	if f.req("GET", "/web/libraries/"+id, nil).Code != 404 {
+		t.Fatal("foreign library visible")
+	}
+	lib.Set("name", "Other")
+	if f.req("POST", "/web/libraries", lib).Code != 303 {
+		t.Fatal("same UUID in separate owner scope")
+	}
+	f.cookie = admin
+	if strings.Contains(f.req("GET", "/web/libraries/"+id, nil).Body.String(), "Other") {
+		t.Fatal("library crossed owners")
+	}
+	if f.req("POST", "/web/accounts/review", url.Values{"username": {"field-device"}}).Code != 200 {
+		t.Fatal("reset review")
+	}
+	reset := url.Values{"username": {"field-device"}, "password": {rand.Text()}}
+	if f.req("POST", "/web/accounts/reset", reset).Code != 400 {
+		t.Fatal("missing confirmation")
+	}
+	reset.Set("confirm", "yes")
+	if f.req("POST", "/web/accounts/reset", reset).Code != 303 {
+		t.Fatal("reset failed")
+	}
+	f.cookie = other
+	if f.req("GET", "/web/libraries", nil).Code != 303 || f.req("POST", "/web/login", target).Code != 401 || f.req("POST", "/web/login", reset).Code != 303 {
+		t.Fatal("reset login semantics")
+	}
+}
 func TestAdminGrantAndRevocation(t *testing.T) {
 	f := newFixture(t)
 	f.login()

@@ -1,3 +1,7 @@
+document.addEventListener('submit', event => {
+  if (event.submitter) {event.submitter.disabled = true; event.submitter.textContent = '正在提交…';}
+});
+window.addEventListener('pageshow', event => {if (event.persisted) location.reload();});
 document.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-copy]');
   if (!button) return;

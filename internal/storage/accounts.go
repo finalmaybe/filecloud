@@ -119,6 +119,19 @@ func (s *Store) CreateSession(ctx context.Context, userID string, tokenHash [sha
 	return nil
 }
 
+// CreateVerifiedSession stores the token only while the password that authorized it is current.
+func (s *Store) CreateVerifiedSession(ctx context.Context, user User, tokenHash [sha256.Size]byte, device string, now, expires time.Time) error {
+	res, err := s.db.ExecContext(ctx, `INSERT INTO access_tokens(user_id,token_hash,device_name,created_at,expires_at) SELECT id,?,?,?,? FROM users WHERE id=? AND password_hash=?`, tokenHash[:], device, formatTime(now), formatTime(expires), user.ID, user.PasswordHash)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return ErrSessionNotFound
+	}
+	return err
+}
+
 // FindActiveSession returns the user owning an active, unexpired token hash.
 func (s *Store) FindActiveSession(ctx context.Context, tokenHash [sha256.Size]byte, now time.Time) (string, error) {
 	var userID string

@@ -72,9 +72,11 @@ func NewHandler(rawOrigin, listen string, config Config) (http.Handler, error) {
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
 	mux.HandleFunc("GET /web/libraries/{library}/snapshot/{commit}", c.private(c.snapshot))
 	mux.HandleFunc("GET /web/libraries/{library}/history", c.private(c.history))
-	for _, path := range []string{"overview", "accounts"} {
-		mux.HandleFunc("GET /web/"+path, c.admin(c.workspace))
-	}
+	mux.HandleFunc("GET /web/overview", c.admin(c.workspace))
+	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
+	mux.HandleFunc("POST /web/accounts/review", c.admin(c.reviewReset))
+	mux.HandleFunc("POST /web/accounts/create", c.admin(c.saveAccount))
+	mux.HandleFunc("POST /web/accounts/reset", c.admin(c.saveAccount))
 	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js"} {
 		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)

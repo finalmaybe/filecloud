@@ -63,7 +63,10 @@ func (h *handler) issue(ctx context.Context, req createSessionRequest, remote, n
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
 	now := h.config.Now().UTC()
 	expires := now.Add(_sessionLifetime)
-	if err := h.store.CreateSession(ctx, user.ID, sha256.Sum256([]byte(namespace+token)), req.DeviceName, now, expires); err != nil {
+	if err := h.store.CreateVerifiedSession(ctx, user, sha256.Sum256([]byte(namespace+token)), req.DeviceName, now, expires); err != nil {
+		if errors.Is(err, storage.ErrSessionNotFound) {
+			return Session{}, ErrCredentials
+		}
 		return Session{}, err
 	}
 	return Session{token, expires.Truncate(time.Second), user.ID}, nil
@@ -77,6 +80,33 @@ func (s *Sessions) BrowserUser(ctx context.Context, token string) (string, error
 		return "", storage.ErrSessionNotFound
 	}
 	return s.core.store.FindActiveSession(ctx, sha256.Sum256([]byte(browserNamespace+token)), s.core.config.Now())
+}
+
+// SetAccountPassword shares the login KDF budget with online account administration.
+func (s *Sessions) SetAccountPassword(ctx context.Context, name, password, remote string, create bool) error {
+	display, err := ValidateUsername(name)
+	if err != nil || ValidatePassword([]byte(password)) != nil {
+		return ErrInvalidLogin
+	}
+	_, key := storage.CanonicalUsername(display)
+	release, ok := s.core.config.limiter.tryAcquire(sourceIP(remote), key)
+	if !ok {
+		return ErrKDFBusy
+	}
+	defer release()
+	hash, err := HashPassword([]byte(password), s.core.config.Params, s.core.config.Random)
+	if err != nil {
+		return err
+	}
+	now := s.core.config.Now().UTC()
+	if !create {
+		return s.core.store.ResetPassword(ctx, display, hash, now)
+	}
+	id, err := NewUserID(s.core.config.Random)
+	if err != nil {
+		return err
+	}
+	return s.core.store.CreateUser(ctx, storage.User{ID: id, Username: display, PasswordHash: hash}, now)
 }
 func (s *Sessions) LogoutBrowser(ctx context.Context, token string) error {
 	_, err := s.core.store.RevokeSession(ctx, sha256.Sum256([]byte(browserNamespace+token)), s.core.config.Now())

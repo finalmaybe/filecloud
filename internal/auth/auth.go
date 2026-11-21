@@ -429,6 +429,8 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, 429, 4000, "authentication busy")
 	case errors.Is(err, ErrInvalidLogin):
 		h.writeError(w, 400, 1000, "invalid request")
+	case errors.Is(err, _errHashParamsMismatch), errors.Is(err, _errInvalidHash):
+		h.internal(w, "verify password hash", err)
 	case err != nil:
 		h.internal(w, "create session", err)
 	default:
