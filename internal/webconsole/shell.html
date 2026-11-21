@@ -18,9 +18,9 @@
     <div class="rail-label">工作空间</div>
     <nav aria-label="主导航">
       <a href="/web/" {{if eq .View "home"}}aria-current="page"{{end}}>控制台入口</a>
-      <a href="/web/libraries">资料库</a>
-      {{if .Admin}}<a href="/web/overview">服务概览</a>
-      <a href="/web/accounts">账号管理</a>{{end}}
+      <a href="/web/libraries" {{if or (eq .View "libraries") (eq .View "library") (eq .View "history") (eq .View "snapshot") (eq .View "handoff")}}aria-current="page"{{end}}>资料库</a>
+      {{if .Admin}}<a href="/web/overview" {{if eq .View "overview"}}aria-current="page"{{end}}>服务概览</a>
+      <a href="/web/accounts" {{if or (eq .View "accounts") (eq .View "confirm")}}aria-current="page"{{end}}>账号管理</a>{{end}}
     </nav>
     <span class="rail-foot">FILECLOUD / SERVER</span>
   </aside>
@@ -51,5 +51,6 @@
     <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或从控制台入口重新开始。</p><a class="action" href="/web/">返回控制台入口 <span aria-hidden="true">→</span></a></section>
     {{end}}
   </main>
+<div id="feedback" class="sr" role="status"></div>
 </body>
 </html>

@@ -26,6 +26,7 @@ document.addEventListener('click', async (event) => {
   try {
     await navigator.clipboard.writeText(text.textContent);
     button.textContent = '已复制';
+    document.querySelector('#feedback').textContent = '已复制到剪贴板';
   } catch {
     const range = document.createRange();
     range.selectNodeContents(text);
@@ -33,5 +34,6 @@ document.addEventListener('click', async (event) => {
     selection.removeAllRanges();
     selection.addRange(range);
     button.textContent = '已选中，请手动复制';
+    document.querySelector('#feedback').textContent = button.textContent;
   }
 });

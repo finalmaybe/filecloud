@@ -56,6 +56,9 @@ input, select { min-width: 0; padding: 8px; border: 1px solid #7b828b; border-ra
 .row:hover, .row[aria-current] { background: #edf1ff; color: var(--blue); }
 .source { margin-inline-start: 1em; border-inline-start: 2px dashed var(--orange); }
 .panel strong, .panel p, .panel dd, h1 { overflow-wrap: anywhere; }
+.sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+.row[aria-current] { box-shadow: inset 3px 0 var(--blue); }
+.source[aria-current] { background: #fff0e4; box-shadow: inset 3px 0 var(--orange); color: var(--orange); }
 small { color: var(--quiet); } .pair > * { min-width: 0; }
 .inline { display: inline-block; color: var(--blue); padding: 8px; text-decoration: underline; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #edf1ff; padding: 12px; }

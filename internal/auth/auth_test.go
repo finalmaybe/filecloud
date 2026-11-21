@@ -287,6 +287,20 @@ func TestCreateSessionEachKDFCapacityReturnsImmediately(t *testing.T) {
 	}
 }
 
+func TestWebLoginAndOnlineAccountHashShareAPIBudget(t *testing.T) {
+	limiter, _ := newKDFLimiter(1, 1, 1)
+	h, s, _ := newTestHandler(t, limiter, nil)
+	defer closeTestStore(t, s)
+	release, _ := limiter.tryAcquire("fixture", "occupied")
+	defer release()
+	sessions := h.(*Sessions)
+	if _, err := sessions.LoginBrowser(t.Context(), "alice", "test", "127.0.0.1:1234"); !errors.Is(err, ErrKDFBusy) {
+		t.Fatal("Web login did not share the API budget")
+	}
+	if err := sessions.SetAccountPassword(t.Context(), "new", "test", "127.0.0.1:1234", true); !errors.Is(err, ErrKDFBusy) {
+		t.Fatal("account management did not share the API budget")
+	}
+}
 func TestCreateSessionReleasesLimiterOnStorageError(t *testing.T) {
 	limiter, err := newKDFLimiter(1, 1, 1)
 	if err != nil {
