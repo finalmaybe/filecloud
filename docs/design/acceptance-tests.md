@@ -23,7 +23,7 @@
 | 尾块边界 | `4 MiB - 1` |
 | 完整块 | `4 MiB` |
 | 两个块 | `4 MiB + 1` |
-| Unicode | NFC/NFD 输入、Unicode 15.1 大小写折叠碰撞 |
+| Unicode | Unicode 17.0 NFC/NFD 输入、大小写折叠碰撞（含 Beria Erfe 大小写字母） |
 | UUID | 规范小写通过，大写/无连字符拒绝 |
 | JSON | key 顺序变化得到同一规范字节；对象/请求中的重复 key、浮点和未知字段拒绝 |
 
@@ -133,14 +133,14 @@ NFS、SMB、FAT/exFAT 和网络映射盘必须拒绝绑定，除非后续 ADR �
 1B 必须分别在 Linux/ext4、macOS/APFS 和 Windows/NTFS 的本地 checkout 中显式运行。三平台使用同一测试名、场景清单和证明 schema；普通 `go test ./...` 中跳过重型矩阵或交叉编译不构成通过：
 
 ```bash
-export GOTOOLCHAIN=go1.26.6
+export GOTOOLCHAIN=go1.27.4
 FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
   -run '^TestCrossPlatformAcceptanceMatrix$' \
   -count=1 -timeout=30m -v
 ```
 
 ```powershell
-$env:GOTOOLCHAIN = 'go1.26.6'
+$env:GOTOOLCHAIN = 'go1.27.4'
 $env:FILECLOUD_RUN_1B=1
 go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```

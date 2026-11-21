@@ -43,12 +43,12 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 正式版本可从 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。每个归档都包含 `filecloud` 和 `filecloud-server` 两个二进制、项目许可证、部署说明和对应目标平台的第三方依赖许可材料。
 
-从源码构建和测试请固定使用 Go 1.26.6。Go 1.27 会选择不同的 Unicode 表，无法通过文件名规范化和大小写折叠的协议测试。
+从源码构建和测试使用 Go 1.27，推荐 Go 1.27.4。客户端和服务端按 Unicode 17.0 处理文件名的 NFC 规范化和大小写折叠。
 
 ```bash
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
-export GOTOOLCHAIN=go1.26.6
+export GOTOOLCHAIN=go1.27.4
 go version
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
@@ -169,7 +169,7 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 在仓库根目录运行普通回归测试，后面的门禁沿用同一工具链：
 
 ```bash
-export GOTOOLCHAIN=go1.26.6
+export GOTOOLCHAIN=go1.27.4
 go version
 go test ./...
 ```
@@ -185,7 +185,7 @@ FILECLOUD_RUN_1B=1 go test ./internal/clientapp \
 PowerShell 使用同一入口：
 
 ```powershell
-$env:GOTOOLCHAIN = 'go1.26.6'
+$env:GOTOOLCHAIN = 'go1.27.4'
 $env:FILECLOUD_RUN_1B=1
 go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1 -timeout=30m -v
 ```

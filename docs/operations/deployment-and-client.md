@@ -23,12 +23,12 @@
 
 正式版本可从项目的 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。归档中包含二进制、项目许可证、第三方模块清单和许可证文本。
 
-从源码构建时固定使用 Go 1.26.6，以使用协议测试锁定的 Unicode 表：
+从源码构建时使用 Go 1.27（推荐 1.27.4），客户端和服务端均采用 Unicode 17.0 名称规则：
 
 ```bash
 git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
-export GOTOOLCHAIN=go1.26.6
+export GOTOOLCHAIN=go1.27.4
 go version
 CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
 CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server

@@ -187,11 +187,31 @@ func TestMetadataJSONNestingBudget(t *testing.T) {
 	}
 }
 
-func TestUnicodeTablesRemainProtocolEquivalent(t *testing.T) {
-	// Unicode 15.1 only added characters without NFC or default case-fold mappings,
-	// so 15.0 tables are equivalent for the protocol. Fail on dependency/build drift.
-	if norm.Version != "15.0.0" || cases.UnicodeVersion != "15.0.0" {
-		t.Fatalf("Unicode tables = norm %s/cases %s, want protocol-equivalent 15.0.0 tables", norm.Version, cases.UnicodeVersion)
+func TestProtocolUnicodeTables(t *testing.T) {
+	const want = "17.0.0"
+	if norm.Version != want || cases.UnicodeVersion != want {
+		t.Fatalf("Unicode tables: NFC %s, case folding %s; want %s", norm.Version, cases.UnicodeVersion, want)
+	}
+}
+
+func TestUnicode17DirectoryNames(t *testing.T) {
+	// TODHRI LETTER EI is the NFC composition of TODHRI LETTER I and COMBINING DOT ABOVE.
+	if !object.ValidPath("docs/\U000105C9.txt") || object.ValidPath("docs/\U000105D2\u0307.txt") {
+		t.Fatal("expected only the NFC spelling of the Todhri filename to be valid")
+	}
+
+	for _, pair := range [][2]string{
+		{"\u1C89.txt", "\u1C8A.txt"},         // Cyrillic Tje
+		{"\U00016EA0.txt", "\U00016EBB.txt"}, // Beria Erfe, added in Unicode 17
+	} {
+		dir := object.Directory{}
+		for _, name := range pair {
+			dir.Entries = append(dir.Entries, object.DirectoryEntry{Name: name, Type: "File",
+				ID: strings.Repeat("a", 64), ModifiedAt: "2026-08-09T00:00:00Z"})
+		}
+		if _, _, err := object.Canonicalize("directories", dir.Bytes()); err == nil || err.Error() != "directory name collision" {
+			t.Errorf("directory with %q: got %v, want a name collision", pair, err)
+		}
 	}
 }
 
