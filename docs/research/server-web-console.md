@@ -31,7 +31,9 @@
 
 浏览器走同源会话，生产使用 HTTPS、HttpOnly/Secure/SameSite cookie；状态变更校验 CSRF，个人页面不被共享缓存。沿用 CLI 登录的 KDF 并发预算，服务端每次检查会话是否有效、操作是否授权。账号管理权仅限账号操作，不含直接浏览他人内容。已有 Bearer 路由不接收 Web cookie。依据：[现有鉴权](../../internal/auth/auth.go)、[OWASP 会话指南](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)。
 
-## 视觉方向：用版本脉络表达科技感
+## 第一轮视觉调研：用版本脉络表达科技感
+
+以下是第一轮探索记录。维护者随后指定亮色风格和 [DesignBookmark Motion](https://designbookmark.com/motion) 作为组件参考；当前原型、用到的组件和实测截图见[第二轮设计评审](../design/web-console-prototype/README.md)。
 
 | 一手参考 | 借鉴什么 | 在 Filecloud 的落点 |
 |---|---|---|
