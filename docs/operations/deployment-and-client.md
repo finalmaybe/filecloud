@@ -1,6 +1,6 @@
 # Filecloud 服务端部署与客户端使用
 
-本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。源码版包含可选的 Web 入口；账号登录和操作仍使用 CLI。项目暂不提供 Docker 镜像、桌面 GUI、移动客户端或 WebDAV。
+本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。源码版还包含可选的同源 Web 控制台，与 CLI 共用账号。项目暂不提供 Docker 镜像、桌面 GUI、移动客户端或 WebDAV。
 
 ## 1. 支持范围
 
@@ -129,7 +129,13 @@ curl -fsS http://127.0.0.1:8080/readyz
   --web-origin http://127.0.0.1:8080
 ```
 
-`--web-origin` 填浏览器看到的来源（协议、主机及可选端口，不含 `/web/`、尾斜杠、账号信息或查询参数）。启用 Web 时监听回环地址；只有回环来源可使用 HTTP。页面、样式与图像都在二进制内，不用部署静态目录。当前浏览器入口不接收凭据，访问资料库或管理页面会转到登录说明。移除此参数并重启即可关闭入口，既有 CLI 与健康探针路由不变。
+`--web-origin` 填浏览器看到的来源（协议、主机及可选端口，不含 `/web/`、尾斜杠、账号信息或查询参数）。启用 Web 时监听回环地址；只有回环来源可使用 HTTP。页面、样式与图像都在二进制内，不用部署静态目录。浏览器登录使用独立的 HttpOnly、SameSite 会话 cookie；HTTPS 配置还会设置 Secure。会话最长 30 天，退出只撤销本次登录。移除 Web 相关参数并重启即可关闭入口，既有 CLI 与健康探针路由不变。
+
+**管理员授权**：先在停服的主机上用 `user add` 创建第一个账号。启动时在 `--web-origin` 之外，按需为每个管理员重复指定 `--web-admin-user ACCOUNT_NAME`。服务端按规范用户名解析已有账号，配置不存在的账号将拒绝启动；默认没有 Web 管理员。移除某个账号参数并重启后，该账号旧的浏览器会话随即失去管理权限，自己的资料库仍可访问。保留本机停服管理命令作为救援入口。
+
+**日常操作**：从「资料库」创建或选择资料库，再沿主线历史展开合并来源、检查固定提交中的文件和目录。从选中路径获取 POSIX shell 或 PowerShell 预览命令，在绑定设备核对资料库 ID，替换目录占位符，先同步再预览；确认必须使用本机预览实际给出的候选前缀。绑定、watch、冲突处理和中断续跑仍在设备端执行。
+
+**管理与维护**：管理员的「账号管理」可以在线开户或重置密码；确认重置会撤销目标用户所有 Web/CLI 会话，不赋予管理员直接读取其他资料库的权限。「服务概览」分开检查存活和就绪，并提供可提前复制的维护清单。GC、完整性检查、完整数据目录的备份与恢复仍在停服后于服务器本地执行。
 
 ## 4. Linux 生产部署
 
@@ -703,7 +709,7 @@ read -rsp "Password: " PASSWORD
 ```text
 filecloud-server version
 filecloud-server init --data-dir PATH
-filecloud-server serve --data-dir PATH [--listen ADDRESS] [--web-origin ORIGIN]
+filecloud-server serve --data-dir PATH [--listen ADDRESS] [--web-origin ORIGIN] [--web-admin-user USERNAME ...]
 filecloud-server user add --data-dir PATH --username NAME --password-stdin
 filecloud-server user reset-password --data-dir PATH --username NAME --password-stdin
 filecloud version

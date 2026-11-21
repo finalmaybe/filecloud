@@ -106,6 +106,9 @@ func smoke(ctx context.Context, clientBinary, serverBinary, expectedVersion stri
 		return err
 	}
 
+	if err := checkPackagedWeb(ctx, absoluteServer, dataDir); err != nil {
+		return err
+	}
 	server, err := startServer(ctx, absoluteServer, dataDir)
 	if err != nil {
 		return err
@@ -202,9 +205,38 @@ type runningServer struct {
 	stderr *bytes.Buffer
 }
 
-func startServer(parent context.Context, binary, dataDir string) (*runningServer, error) {
+func checkPackagedWeb(ctx context.Context, binary, dataDir string) error {
+	const host = "console.example"
+	server, err := startServer(ctx, binary, dataDir, "--web-origin", "https://"+host)
+	if err != nil {
+		return err
+	}
+	defer server.stop()
+	for path, marker := range map[string]string{"/web/login": "autocomplete=\"current-password\"", "/web/assets/console.css": ".skip", "/web/assets/atlas.svg": "<svg", "/web/assets/console.js": "clipboard"} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.url+path, nil)
+		if err != nil {
+			return err
+		}
+		req.Host = host
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		data, readErr := io.ReadAll(io.LimitReader(res.Body, 128<<10))
+		err = errors.Join(readErr, res.Body.Close())
+		if err != nil {
+			return err
+		}
+		if res.StatusCode != 200 || !bytes.Contains(data, []byte(marker)) {
+			return fmt.Errorf("packaged Web resource %s unavailable (%d)", path, res.StatusCode)
+		}
+	}
+	return nil
+}
+
+func startServer(parent context.Context, binary, dataDir string, extra ...string) (*runningServer, error) {
 	ctx, cancel := context.WithCancel(parent)
-	command := exec.CommandContext(ctx, binary, "serve", "--data-dir", dataDir, "--listen", "127.0.0.1:0")
+	command := exec.CommandContext(ctx, binary, append([]string{"serve", "--data-dir", dataDir, "--listen", "127.0.0.1:0"}, extra...)...)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		cancel()
