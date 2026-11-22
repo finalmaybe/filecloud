@@ -210,7 +210,8 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusRequestEntityTooLarge, 3005, "request body too large")
 		return
 	}
-	name, err := decodeCreateRequest(data)
+	var policy storage.Retention
+	name, err := decodeCreateRequest(data, &policy)
 	if err != nil {
 		h.invalid(w)
 		return
@@ -226,7 +227,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	createdLibrary, created, err := h.store.CreateLibrary(r.Context(), storage.Library{
-		ID: libraryID, OwnerUserID: userID, Name: name,
+		ID: libraryID, OwnerUserID: userID, Name: name, Retention: policy,
 	}, h.now().UTC().Truncate(time.Second))
 	if errors.Is(err, storage.ErrLibraryObjectConflict) {
 		h.writeError(w, http.StatusConflict, 3001, "library conflicts with existing id")
@@ -294,8 +295,13 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	for i, item := range libraries {
 		responses[i] = responseFromLibrary(item)
 	}
+	defaults, err := h.store.Defaults(r.Context())
+	if err != nil {
+		h.internal(w, "read retention defaults", err)
+		return
+	}
 	h.writeJSON(w, http.StatusOK, listResponse{
-		RetCode: 0, Message: "success", Libraries: responses, NextPageToken: nextPageToken,
+		DefaultRetention: defaults, RetCode: 0, Message: "success", Libraries: responses, NextPageToken: nextPageToken,
 	})
 }
 
@@ -713,6 +719,7 @@ func objectKind(typeName string) (string, bool) {
 }
 
 type libraryResponse struct {
+	storage.Retention
 	LibraryID    string `json:"LibraryId"`
 	OwnerUserID  string `json:"OwnerUserId,omitempty"`
 	Name         string
@@ -723,15 +730,16 @@ type libraryResponse struct {
 }
 
 type listResponse struct {
-	RetCode       int
-	Message       string
-	Libraries     []libraryResponse
-	NextPageToken string
+	DefaultRetention storage.Retention
+	RetCode          int
+	Message          string
+	Libraries        []libraryResponse
+	NextPageToken    string
 }
 
 func responseFromLibrary(library storage.Library) libraryResponse {
 	return libraryResponse{
-		LibraryID: library.ID, OwnerUserID: library.OwnerUserID, Name: library.Name, HeadCommitID: library.HeadCommitID,
+		Retention: library.Retention, LibraryID: library.ID, OwnerUserID: library.OwnerUserID, Name: library.Name, HeadCommitID: library.HeadCommitID,
 		ETag: headETag(library.HeadVersion), CreatedAt: library.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: library.UpdatedAt.Format(time.RFC3339),
 	}
@@ -751,7 +759,7 @@ func headETag(version int64) string {
 	return `"head-version-` + strconv.FormatInt(version, 10) + `"`
 }
 
-func decodeCreateRequest(data []byte) (string, error) {
+func decodeCreateRequest(data []byte, policy *storage.Retention) (string, error) {
 	if !utf8.Valid(data) {
 		return "", errors.New("request is not valid utf-8")
 	}
@@ -762,8 +770,23 @@ func decodeCreateRequest(data []byte) (string, error) {
 	}
 	var name string
 	seen := false
+	seenDays := map[string]bool{}
 	for decoder.More() {
 		field, err := decoder.Token()
+		if field == "TrashDays" || field == "HistoryDays" {
+			key := field.(string)
+			var days int
+			if seenDays[key] || decoder.Decode(&days) != nil || days < 1 || days > 36500 {
+				return "", errors.New("invalid retention days")
+			}
+			seenDays[key] = true
+			if key == "TrashDays" {
+				policy.TrashDays = days
+			} else {
+				policy.HistoryDays = days
+			}
+			continue
+		}
 		if err != nil || field != "Name" || seen {
 			return "", errors.New("invalid field")
 		}

@@ -131,6 +131,8 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 }
 ```
 
+可选整数字段 `TrashDays`、`HistoryDays` 各自取 1–36500；省略表示跟随全局默认（初始为 30、60）。创建请求重放不会覆盖后续修改的保留设置。返回的同名字段中 0 表示继承，`HistoryDays=-1` 表示永久历史。
+
 首次创建响应 `201`；相同用户以同一 LibraryId 和 Name 重试返回 `200`；同一 ID 携带不同 Name 返回 `ObjectConflict`。响应：
 
 ```json
@@ -141,6 +143,8 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
     "LibraryId": "<UUID>",
     "OwnerUserId": "<UUID>",
     "Name": "Documents",
+    "TrashDays": 0,
+    "HistoryDays": 0,
     "HeadCommitId": null,
     "ETag": "\"head-version-0\"",
     "CreatedAt": "2026-08-09T00:00:00Z",
@@ -195,7 +199,7 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 `DELETE /v1/libraries/{LibraryId}/file-history/{CommitId}?Path=…&AnchorCommitId=…`
 
-`CommitId` 是所选变更记录的提交，`Path` 是该文件的规范相对路径，`AnchorCommitId` 是打开列表时的主线提交。仅所有者可删除。成功返回 `204`，无响应体；只移除该路径的这条记录，不改变 Head 和快照。参数非法返回 `400/1000`，记录不存在或已删除返回 `404/2000`，锚点过期返回 `412/3002`，选中当前版本返回 `409/3007`。
+`CommitId` 是所选变更记录的提交，`Path` 是该文件的规范相对路径，`AnchorCommitId` 是打开列表时的主线提交。仅所有者可删除。成功返回 `204`，无响应体；该路径的这条记录移入回收站，不改变 Head 和快照。在回收站中放回记录也不发布 Head。参数非法返回 `400/1000`，记录不存在或已删除返回 `404/2000`，锚点过期返回 `412/3002`，选中当前版本返回 `409/3007`。
 
 ## GetLibrary
 

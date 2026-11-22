@@ -107,6 +107,7 @@ func metadataMigrations() []migration {
 					REFERENCES published_commits(owner_user_id, library_id, commit_id) ON DELETE CASCADE
 			)`,
 		}},
+		{version: 8, statements: retentionMigration},
 	}
 }
 
@@ -283,9 +284,12 @@ func ensureLayout(dataDir string, syncDir func(string) error) error {
 	return nil
 }
 
-func openDB(path string) (*sql.DB, error) {
+func openDB(path string) (*sql.DB, error) { return openDBMode(path, "rwc") }
+
+func openDBMode(path, mode string) (*sql.DB, error) {
 	u := &url.URL{Scheme: "file", Path: sqliteURLPath(path)}
 	query := u.Query()
+	query.Set("mode", mode)
 	query.Add("_pragma", "foreign_keys(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", _busyTimeoutMillis))
 	u.RawQuery = query.Encode()

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // DeletedFileVersions returns the removed timeline entries among the supplied commits.
@@ -32,10 +33,15 @@ func (s *Store) DeletedFileVersions(ctx context.Context, owner, lib, path string
 }
 
 // DeleteFileVersion removes a timeline entry without changing immutable snapshots.
-func (s *Store) DeleteFileVersion(ctx context.Context, owner, lib, path, commit, head string) error {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO deleted_file_versions(owner_user_id,library_id,path,commit_id)
+func (s *Store) DeleteFileVersion(ctx context.Context, owner, lib string, t TrashEntry, head string, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO deleted_file_versions(owner_user_id,library_id,path,commit_id)
 		SELECT owner_user_id,id,?,? FROM libraries WHERE owner_user_id=? AND id=? AND head_commit_id=?
-		ON CONFLICT DO NOTHING`, path, commit, owner, lib, head)
+		ON CONFLICT DO NOTHING`, t.Path, t.Source, owner, lib, head)
 	if err != nil {
 		return err
 	}
@@ -43,5 +49,17 @@ func (s *Store) DeleteFileVersion(ctx context.Context, owner, lib, path, commit,
 	if err == nil && n == 0 {
 		return ErrHeadConflict
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM trash_entries WHERE owner=? AND library=? AND path=? AND source=? AND kind='Version' AND restored<>0`, owner, lib, t.Path, t.Source); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM trash_versions WHERE path=? AND source=? AND trash_id IN (SELECT id FROM trash_entries WHERE owner=? AND library=? AND restored<>0)`, t.Path, t.Source, owner, lib); err != nil {
+		return err
+	}
+	if err = insertTrash(ctx, tx, owner, lib, t, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

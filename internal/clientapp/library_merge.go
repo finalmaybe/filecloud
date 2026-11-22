@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,7 +105,7 @@ func prepareSyncMergePublication(ctx context.Context, session *_lockedBoundWorkt
 	}
 	basePaths, err := _verifiedRemotePaths(ctx, options, binding.SyncBaseRoot, budget)
 	if err != nil {
-		return _preparedSyncPublication{}, fmt.Errorf("verify merge Base snapshot: %w", err)
+		return _preparedSyncPublication{}, fmt.Errorf("verify merge Base snapshot: %w", baselineReadError(err))
 	}
 	deleted, tracked := deletionStats(_trackedPathSet(basePaths), prepared.paths)
 	return _preparedSyncPublication{session: session, snapshot: snapshot,
@@ -543,6 +544,14 @@ func _mergeDirectoryTrees(ctx context.Context, options bindOptions, snapshot wor
 	return root, objects, paths, nil
 }
 
+func baselineReadError(err error) error {
+	var status *remoteStatusError
+	if errors.As(err, &status) && status.status == http.StatusNotFound {
+		return fmt.Errorf("sync baseline unavailable locally and on the server; keep this worktree intact, bind a new empty directory and reconcile local edits there: %w", err)
+	}
+	return err
+}
+
 func (merger *_treeMerger) merge(baseID, localID, remoteID, path string, depth int) (string, error) {
 	if depth > _mergeMaxDepth {
 		return "", errors.New("recursive merge exceeds directory depth limit")
@@ -555,7 +564,7 @@ func (merger *_treeMerger) merge(baseID, localID, remoteID, path string, depth i
 	defer delete(merger.active, key)
 	base, err := merger.loadDirectory(baseID)
 	if err != nil {
-		return "", fmt.Errorf("load merge Base directory at %q: %w", path, err)
+		return "", fmt.Errorf("load merge Base directory at %q: %w", path, baselineReadError(err))
 	}
 	local, err := merger.loadDirectory(localID)
 	if err != nil {

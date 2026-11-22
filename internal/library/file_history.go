@@ -96,6 +96,13 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 	}
 	defer done()
 
+	expired, err := c.core.store.SnapshotExpired(ctx, owner, lib, anchor, c.core.now())
+	if err != nil {
+		return result, err
+	}
+	if expired {
+		return result, storage.ErrLibraryNotFound
+	}
 	pathHash := object.ID([]byte(filePath))
 	token := historyPageToken{AnchorCommitID: anchor, NextCommitID: anchor, FilePathHash: pathHash}
 	if cursor == "" {
@@ -144,6 +151,10 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 	if err != nil {
 		return result, err
 	}
+	archives, err := c.core.store.ArchivedAtPath(ctx, owner, lib, filePath, ids, c.core.now())
+	if err != nil {
+		return result, err
+	}
 	for i, commit := range page.Commits {
 		if i == pageSize {
 			token.NextCommitID = commit.CommitID
@@ -151,7 +162,11 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 			return result, err
 		}
 		current, parent := entries[i], entries[i+1]
-		if current.Type != "File" || current == parent {
+		row, pinned := archives[commit.CommitID]
+		synthetic := pinned && (current.Type != "File" || current == parent || current.ID != row.FileID || current.ModifiedAt != row.Modified)
+		if synthetic {
+			current = object.DirectoryEntry{Name: path.Base(filePath), Type: "File", ID: row.FileID, ModifiedAt: row.Modified}
+		} else if current.Type != "File" || current == parent {
 			continue
 		}
 		// The newest change at this path owns the current version, even if its row was hidden.
@@ -160,12 +175,24 @@ func (c *Catalog) FileHistory(ctx context.Context, owner, lib, anchor, filePath,
 		if deleted[commit.CommitID] {
 			continue
 		}
+		if !isCurrent && !pinned {
+			expired, err := c.core.store.SnapshotExpired(ctx, owner, lib, commit.CommitID, c.core.now())
+			if err != nil {
+				return result, err
+			}
+			if expired {
+				continue
+			}
+		}
 		change := "modified-time"
 		switch {
 		case parent.Type != "File":
 			change = "added"
 		case current.ID != parent.ID:
 			change = "content"
+		}
+		if synthetic {
+			change = row.Change
 		}
 		result.Versions = append(result.Versions, FileVersion{
 			FileRevision: FileRevision{CommitID: commit.CommitID, FileID: current.ID, ModifiedAt: current.ModifiedAt},

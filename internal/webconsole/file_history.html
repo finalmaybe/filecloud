@@ -47,7 +47,7 @@
     <input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="commit" value="{{.CommitID}}"><input type="hidden" name="anchor" value="{{.Anchor}}">
     {{if not .IsCurrent}}<details><summary>{{template "icon" "history"}}恢复版本</summary><p>将这个版本的内容和修改时间恢复到原路径。其他文件保持不变。</p><button class="version-restore" formaction="/web/libraries/{{.LibraryID}}/file-history/restore">确认恢复</button></details>{{end}}
     <a class="version-download" href="/web/libraries/{{.LibraryID}}/file-history/download?path={{.Path}}&amp;commit={{.CommitID}}">{{template "icon" "download"}}下载版本</a>
-    {{if not .IsCurrent}}<details class="destructive"><summary>{{template "icon" "trash"}}删除版本</summary><p>只从这个文件的版本列表移除所选记录。当前文件和底层快照会保留。</p><button class="version-delete" formaction="/web/libraries/{{.LibraryID}}/file-history/delete">确认删除</button></details>{{end}}
+    {{if not .IsCurrent}}<details class="destructive"><summary>{{template "icon" "trash"}}删除版本</summary><p>将所选记录移入资料库回收站，不改变当前文件。到期前可以放回版本列表。</p><button class="version-delete" formaction="/web/libraries/{{.LibraryID}}/file-history/delete">确认删除</button></details>{{end}}
   </form>
 </li>{{end}}
 

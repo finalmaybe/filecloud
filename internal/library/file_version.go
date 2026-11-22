@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"io"
+	"path"
 
 	"github.com/mingming-cn/filecloud/internal/object"
 	"github.com/mingming-cn/filecloud/internal/storage"
@@ -106,7 +107,7 @@ func (c *Catalog) versionEntry(ctx context.Context, owner string, v VersionTarge
 	if !object.ValidPath(v.Path) || v.Path == "." || !object.ValidID(v.CommitID) {
 		return object.DirectoryEntry{}, ErrInvalidPath
 	}
-	commit, err := c.core.historyDetail(ctx, owner, v.LibraryID, v.CommitID)
+	commit, err := c.core.commitDetail(ctx, owner, v.LibraryID, v.CommitID)
 	if err != nil {
 		return object.DirectoryEntry{}, err
 	}
@@ -120,12 +121,37 @@ func (c *Catalog) versionEntry(ctx context.Context, owner string, v VersionTarge
 	if deleted[v.CommitID] {
 		return object.DirectoryEntry{}, storage.ErrLibraryNotFound
 	}
+	archived, err := c.core.store.ArchivedAtPath(ctx, owner, v.LibraryID, v.Path, []string{v.CommitID}, c.core.now())
+	if err != nil {
+		return object.DirectoryEntry{}, err
+	}
+	if row, ok := archived[v.CommitID]; ok {
+		return object.DirectoryEntry{Name: path.Base(v.Path), Type: "File", ID: row.FileID, ModifiedAt: row.Modified}, nil
+	}
 	entry, err := c.pathEntry(ctx, owner, v.LibraryID, commit.Root, v.Path)
 	if err != nil {
 		return entry, err
 	}
 	if entry.Type != "File" {
 		return entry, storage.ErrLibraryNotFound
+	}
+	expired, err := c.core.store.SnapshotExpired(ctx, owner, v.LibraryID, v.CommitID, c.core.now())
+	if err != nil {
+		return entry, err
+	}
+	if expired {
+
+		lib, err := c.core.store.GetLibrary(ctx, owner, v.LibraryID)
+		if err != nil {
+			return entry, err
+		}
+		current, err := c.publishedEntry(ctx, owner, v.LibraryID, *lib.HeadCommitID, v.Path)
+		if err != nil {
+			return entry, err
+		}
+		if current != entry {
+			return entry, storage.ErrLibraryNotFound
+		}
 	}
 	// An unchanged snapshot is not a separate timeline record.
 	if len(commit.Parents) > 0 {

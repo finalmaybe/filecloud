@@ -86,8 +86,9 @@ function renderDirectory({CommitId, Path, Parent, Entries}) {
     row.querySelector('.entry-name').textContent = entry.Name;
     const query = link(path);
     row.querySelector('.entry-link').href = folder ? query : `${directoryPath}/file-preview${query}`;
+    row.querySelector('summary').setAttribute('aria-label', entry.Name + ' 的更多操作');
+    row.querySelector('.move-trash').href = `${directoryPath}/trash/move${query}`;
     if (!folder) {
-      row.querySelector('summary').setAttribute('aria-label', entry.Name + ' 的更多操作');
       const versions = row.querySelector('.open-versions');
       versions.href = `${directoryPath}/file-history${query}`;
       versions.setAttribute('aria-label', '查看 ' + entry.Name + ' 的历史版本');

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/mingming-cn/filecloud/internal/fscompat"
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -94,13 +95,21 @@ func (c *IntegrityChecker) Check(ctx context.Context) (IntegrityReport, error) {
 	if err != nil {
 		return IntegrityReport{}, err
 	}
+	pruned, err := expiredRoots(ctx, c.db, `SELECT owner_user_id,library_id,commit_id FROM published_commits WHERE pruned=1`)
+	if err != nil {
+		return IntegrityReport{}, err
+	}
+	pins, err := trashRoots(ctx, c.db, time.Now())
+	if err != nil {
+		return IntegrityReport{}, err
+	}
 	report := IntegrityReport{Libraries: len(libraries)}
 	for _, library := range libraries {
 		if library.head == "" {
 			continue
 		}
 		state := integrityState{
-			checker: c,
+			checker: c, pruned: pruned,
 			ctx:     ctx,
 			owner:   library.owner,
 			library: library.id,
@@ -109,6 +118,22 @@ func (c *IntegrityChecker) Check(ctx context.Context) (IntegrityReport, error) {
 			blocks:  make(map[string]integrityBlock),
 		}
 		state.checkCommitGraph(library.head)
+		for _, p := range pins {
+			if p.owner == library.owner && p.library == library.id {
+				if p.kind == "Directory" {
+					state.checkSnapshot(p.id)
+				} else {
+					state.checkFile(p.id)
+				}
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return IntegrityReport{}, err
+		}
+		state.metadataOnly = true
+		for _, root := range state.baselines {
+			state.checkSnapshot(root)
+		}
 		if err := ctx.Err(); err != nil {
 			return IntegrityReport{}, err
 		}
@@ -191,13 +216,16 @@ type integrityFinding struct {
 }
 
 type integrityState struct {
-	checker *IntegrityChecker
-	ctx     context.Context
-	owner   string
-	library string
-	seen    map[integrityObjectKey]struct{}
-	issues  map[integrityFinding]struct{}
-	blocks  map[string]integrityBlock
+	checker      *IntegrityChecker
+	pruned       map[gcRoot]bool
+	baselines    []string
+	metadataOnly bool
+	ctx          context.Context
+	owner        string
+	library      string
+	seen         map[integrityObjectKey]struct{}
+	issues       map[integrityFinding]struct{}
+	blocks       map[string]integrityBlock
 }
 
 func (s *integrityState) checkCommitGraph(head string) {
@@ -221,7 +249,11 @@ func (s *integrityState) checkCommitGraph(head string) {
 			s.addIssue("Commit", id, "corrupt")
 		}
 		commits = append(commits, commit.Parents...)
-		s.checkSnapshot(commit.Root)
+		if !s.pruned[gcRoot{s.owner, s.library, id}] {
+			s.checkSnapshot(commit.Root)
+		} else {
+			s.baselines = append(s.baselines, commit.Root)
+		}
 	}
 }
 
@@ -263,6 +295,9 @@ func (s *integrityState) checkFile(id string) {
 	file, err := object.VerifyFile(data, id)
 	if err != nil {
 		s.addIssue("File", id, "corrupt")
+		return
+	}
+	if s.metadataOnly {
 		return
 	}
 	var total int64

@@ -9,9 +9,25 @@ import (
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
+var ErrSnapshotExpired = errors.New("snapshot retention expired")
 var ErrHistoryBusy = errors.New("history traversal busy")
 
 func (h *handler) historyDetail(ctx context.Context, owner, lib, id string) (historyCommitDetailResponse, error) {
+	commit, err := h.commitDetail(ctx, owner, lib, id)
+	if err != nil {
+		return historyCommitDetailResponse{}, err
+	}
+	expired, err := h.store.SnapshotExpired(ctx, owner, lib, id, h.now())
+	if err != nil {
+		return historyCommitDetailResponse{}, err
+	}
+	if expired {
+		return historyCommitDetailResponse{}, ErrSnapshotExpired
+	}
+	return commit, nil
+}
+
+func (h *handler) commitDetail(ctx context.Context, owner, lib, id string) (historyCommitDetailResponse, error) {
 	var result historyCommitDetailResponse
 	role, found, err := h.store.GetPublishedCommitRole(ctx, owner, lib, id)
 	if err != nil {
@@ -47,6 +63,8 @@ func (h *handler) historyDetail(ctx context.Context, owner, lib, id string) (his
 }
 func (h *handler) writeBrowseError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrSnapshotExpired):
+		h.writeError(w, http.StatusGone, 2001, "snapshot expired")
 	case errors.Is(err, ErrInvalidPath), errors.Is(err, ErrInvalidPage):
 		h.invalid(w)
 	case errors.Is(err, storage.ErrLibraryNotFound):

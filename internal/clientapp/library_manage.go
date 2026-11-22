@@ -27,6 +27,8 @@ func runLibraryCreate(ctx context.Context, args []string, stdin io.Reader, stdou
 	server := flags.String("server", "", "Filecloud server URL")
 	libraryID := flags.String("library-id", "", "Library ID")
 	name := flags.String("name", "", "Library name")
+	trashDays := flags.Int("trash-days", 0, "Recycle bin retention in days (omit to inherit)")
+	historyDays := flags.Int("history-days", 0, "Snapshot retention in days (omit to inherit)")
 	tokenStdin := flags.Bool("token-stdin", false, "Read token from standard input")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -47,7 +49,11 @@ func runLibraryCreate(ctx context.Context, args []string, stdin io.Reader, stdou
 		return err
 	}
 	defer clear(token)
-	body, err := json.Marshal(struct{ Name string }{Name: *name})
+	body, err := json.Marshal(struct {
+		Name        string
+		TrashDays   int `json:",omitempty"`
+		HistoryDays int `json:",omitempty"`
+	}{Name: *name, TrashDays: *trashDays, HistoryDays: *historyDays})
 	if err != nil {
 		return fmt.Errorf("encode library: %w", err)
 	}

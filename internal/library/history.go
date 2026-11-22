@@ -94,6 +94,10 @@ func (h *handler) getHistoryCommit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response, err := h.historyDetail(request.Context(), owner, libraryID, commitID)
+	if errors.Is(err, ErrSnapshotExpired) {
+		h.writeBrowseError(w, err)
+		return
+	}
 	if errors.Is(err, storage.ErrLibraryNotFound) {
 		h.writeError(w, 404, 2000, "history commit not found")
 		return
@@ -186,6 +190,16 @@ func (h *handler) historyPage(ctx context.Context, owner, libraryID string, toke
 	commits := make([]historyCommitResponse, 0, pageSize)
 	for len(commits) < pageSize && nextID != "" {
 		commitID := nextID
+		if token.FilePathHash == "" {
+			expired, err := h.store.SnapshotExpired(ctx, owner, libraryID, commitID, h.now())
+			if err != nil {
+				return zero, commitID, err
+			}
+			if expired {
+				nextID = ""
+				break
+			}
+		}
 		commit, err := h.readHistoryCommit(ctx, owner, libraryID, commitID)
 		if err != nil {
 			return zero, commitID, err
@@ -208,6 +222,15 @@ func (h *handler) historyPage(ctx context.Context, owner, libraryID string, toke
 
 	nextPageToken := ""
 	if nextID != "" {
+		if token.FilePathHash == "" {
+			expired, err := h.store.SnapshotExpired(ctx, owner, libraryID, nextID, h.now())
+			if err != nil {
+				return zero, nextID, err
+			}
+			if expired {
+				return historyListResponse{AnchorCommitID: anchorID, Commits: commits}, "", nil
+			}
+		}
 		nextPageToken, err = h.encodeHistoryToken(owner, libraryID, historyPageToken{AnchorCommitID: *anchorID, NextCommitID: nextID})
 		if err != nil {
 			return zero, "", errHistoryUnavailable

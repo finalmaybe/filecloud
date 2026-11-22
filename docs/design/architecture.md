@@ -293,9 +293,9 @@ JCS 本身不做 Unicode 规范化，因此进入目录对象的名称必须已�
 
 ## GC 与完整性
 
-完整历史永久可达，因此已发布 Commit 及其祖先都必须作为 GC roots。GC 标记所有 roots 的目录、文件和 blocks；未发布上传残留经过安全宽限期后才可删除。第一阶段 GC 是管理员手工离线命令，必须取得与 `serve` 互斥的数据目录独占锁。管理员使用 `filecloud-server gc --data-dir <path> --dry-run` 预览，再去掉 `--dry-run` 执行；默认宽限期为 24 小时，可用 `--grace-period` 显式延长。
+全部已发布 Commit 及祖先仍是同步基线元数据（Commit、Directory、File）的 GC roots。内容块单独按当前快照、未过期快照和回收站记录及其随附版本取并集标记。离线 GC 在删除前持久化已清理的快照边界，延长保留期不会复活已清理的内容。未发布上传残留也要经过安全宽限期才可删除。参见[保留设置与回收站](../operations/deployment-and-client.md#12-服务端维护)。第一阶段 GC 是管理员手工离线命令，必须取得与 `serve` 互斥的数据目录独占锁。管理员使用 `filecloud-server gc --data-dir <path> --dry-run` 预览，再去掉 `--dry-run` 执行；默认宽限期为 24 小时，可用 `--grace-period` 显式延长。
 
-Head 发布验证当前 Root；合并提交还验证第二 parent 首次引入发布历史的子图，但不重复扫描已经发布的永久历史。完整性检查独立于 GC，但同样是离线管理员命令并取得与 `serve` 互斥的数据目录独占锁；它遍历每个 Head 历史，重算元数据和 block 摘要并报告缺失/损坏，第一阶段不自动修复或改写 Head。
+Head 发布验证当前 Root；合并提交还验证第二 parent 首次引入发布历史的子图，但不重复验证已经发布的祖先。完整性检查独立于 GC，但同样是离线管理员命令并取得与 `serve` 互斥的数据目录独占锁；它遍历每个 Head 历史，重算元数据和 block 摘要并报告缺失/损坏，第一阶段不自动修复或改写 Head。
 
 ## 后续客户端边界
 

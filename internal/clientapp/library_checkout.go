@@ -537,7 +537,7 @@ func cachedRemoteObject(ctx context.Context, options bindOptions, kind, id strin
 			return nil, err
 		}
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("server returned %s", http.StatusText(status))
+			return nil, remoteResponseError(fmt.Sprintf("server returned %s", http.StatusText(status)), status)
 		}
 		return data, nil
 	}, validate)

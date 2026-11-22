@@ -96,6 +96,10 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 		h.afterHeadValidationAdmit(validationRequest.Context())
 	}
 	missing, roles, err := h.validateCandidate(validationRequest.Context(), owner, libraryID, current.HeadCommitID, commitID)
+	var removed []storage.TrashEntry
+	if err == nil && len(missing.ids) == 0 {
+		removed, err = (&Catalog{core: h}).removedPaths(validationRequest.Context(), owner, libraryID, current.HeadCommitID, commitID)
+	}
 	releaseValidation()
 	switch {
 	case errors.Is(err, object.ErrPayloadTooLarge):
@@ -129,7 +133,7 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	updated, err := h.store.UpdateLibraryHeadWithRoles(r.Context(), owner, libraryID, current.HeadCommitID, current.HeadVersion, commitID, roles, h.now().UTC().Truncate(0))
+	updated, err := h.store.PublishHead(r.Context(), owner, libraryID, current.HeadCommitID, current.HeadVersion, commitID, roles, h.now().UTC().Truncate(0), storage.HeadChange{Removed: removed})
 	if errors.Is(err, storage.ErrHeadConflict) {
 		latest, getErr := h.store.GetLibrary(r.Context(), owner, libraryID)
 		if getErr != nil {

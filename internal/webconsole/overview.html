@@ -3,6 +3,6 @@
 3. 检查：filecloud-server integrity check --data-dir DATA_DIR
 4. 先预演：filecloud-server gc --data-dir DATA_DIR --dry-run --grace-period 24h
    核对后执行：filecloud-server gc --data-dir DATA_DIR --grace-period 24h
-   GC 只清理超过宽限期的未发布对象，至少保留 24 小时。
+   GC 清理超过宽限期的未发布对象和过期历史独占的数据块；当前快照、保留中的快照和回收站内容仍受保护。
 5. 备份整个已停服数据目录（SQLite 元数据及对象一起保存）。恢复到一致的完整目录，核对权限，再离线检查完整性。
 6. 按记录的参数重启 serve。检查 /healthz 与 /readyz，再让客户端继续同步。</pre><button data-copy="maintenance">复制停服清单</button></section>{{end}}

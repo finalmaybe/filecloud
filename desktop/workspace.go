@@ -57,6 +57,7 @@ type LibraryView struct {
 	Paused, Running                             bool
 }
 type View struct {
+	DefaultTrashDays, DefaultHistoryDays                        int
 	Revision                                                    int
 	Server                                                      string
 	SignedIn, CatalogSession, LogoutPending, CatalogFresh, More bool
@@ -83,6 +84,7 @@ type Workspace struct {
 	selection                                 choice
 	selectionID                               string
 	createID, createName                      string
+	defaultTrashDays, defaultHistoryDays      int
 	fresh                                     bool
 	closed                                    atomic.Bool
 	pick                                      func() (string, error)
@@ -126,6 +128,7 @@ func (s *Workspace) loadProfile() error {
 	s.review = nil
 	s.selectionID = ""
 	s.cursor = ""
+	s.defaultTrashDays, s.defaultHistoryDays = 0, 0
 	s.fresh = false
 	s.createID = ""
 	s.running = ""
@@ -211,7 +214,7 @@ func (s *Workspace) locked() bool {
 	return s.closed.Load() || s.active.LogoutPending || s.active.UserID == ""
 }
 func (s *Workspace) publish() {
-	v := &View{Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "", LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
+	v := &View{DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "", LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
 	if prev := s.view.Load(); prev != nil {
 		v.Revision = prev.Revision + 1
 	}
@@ -383,8 +386,9 @@ func (s *Workspace) catalog(more bool) error {
 		args = append(args, "--page-token", s.cursor)
 	}
 	var r struct {
-		Libraries     []struct{ LibraryId, Name string }
-		NextPageToken string
+		DefaultRetention struct{ TrashDays, HistoryDays int }
+		Libraries        []struct{ LibraryId, Name string }
+		NextPageToken    string
 	}
 	if err := s.query(&r, s.token, args...); err != nil {
 		s.fresh = false
@@ -400,11 +404,12 @@ func (s *Workspace) catalog(more bool) error {
 	for _, l := range r.Libraries {
 		s.data.Names[l.LibraryId] = l.Name
 	}
+	s.defaultTrashDays, s.defaultHistoryDays = r.DefaultRetention.TrashDays, r.DefaultRetention.HistoryDays
 	s.cursor = r.NextPageToken
 	s.fresh = true
 	return s.save()
 }
-func (s *Workspace) CreateLibrary(name string) error {
+func (s *Workspace) CreateLibrary(name string, trashDays, historyDays int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.publish()
@@ -415,7 +420,14 @@ func (s *Workspace) CreateLibrary(name string) error {
 		s.createID = newUUID()
 		s.createName = name
 	}
-	if err := s.query(nil, s.token, "library", "create", "--server", s.active.Server, "--library-id", s.createID, "--name", name, "--token-stdin"); err != nil {
+	args := []string{"library", "create", "--server", s.active.Server, "--library-id", s.createID, "--name", name, "--token-stdin"}
+	if trashDays != 0 {
+		args = append(args, "--trash-days", fmt.Sprint(trashDays))
+	}
+	if historyDays != 0 {
+		args = append(args, "--history-days", fmt.Sprint(historyDays))
+	}
+	if err := s.query(nil, s.token, args...); err != nil {
 		return err
 	}
 	s.data.Names[s.createID] = name

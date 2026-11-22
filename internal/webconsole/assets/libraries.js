@@ -25,9 +25,12 @@ form.addEventListener('submit', async event => {
   submit.textContent = '正在创建…';
   error.hidden = true;
   try {
+    const request = {Name: form.elements.name.value};
+    if (form.elements.trashDays.value) request.TrashDays = form.elements.trashDays.valueAsNumber;
+    if (form.elements.historyDays.value) request.HistoryDays = form.elements.historyDays.valueAsNumber;
     const {Library} = await libraryRequest(`/v1/libraries/${createID}`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({Name: form.elements.name.value}),
+      body: JSON.stringify(request),
     });
     location.assign(`/web/libraries/${Library.LibraryId}`);
   } catch (err) {

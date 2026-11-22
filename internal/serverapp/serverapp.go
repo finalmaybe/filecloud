@@ -95,6 +95,9 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
+	trashDays := flags.Int("trash-days", 0, "Set saved default recycle bin retention (initially 30 days)")
+	historyDays := flags.Int("history-days", 0, "Set saved default snapshot retention (initially 60 days)")
+	confirmHistory := flags.String("confirm-history-preview", "", "Confirm the reported impact of shortening the global history window")
 	var admins []string
 	flags.Func("web-admin-user", "Authorize an existing local account for Web administration (repeatable)", func(value string) error { admins = append(admins, value); return nil })
 	globalKDFCapacity := flags.Int("kdf-global-capacity", _defaultGlobalKDFCapacity, "Global concurrent password KDF capacity")
@@ -161,7 +164,10 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if len(admins) > 0 && *webOrigin == "" {
 		return errors.New("web-admin-user requires web-origin")
 	}
-	return serve(ctx, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
+	if *trashDays < 0 || *historyDays < 0 || *trashDays > 36500 || *historyDays > 36500 {
+		return errors.New("retention must be 1–36500 days")
+	}
+	return serve(ctx, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -366,13 +372,37 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, confirmHistory string, defaults storage.Retention, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, store.Close()) }()
 
+	previous, err := store.Defaults(ctx)
+	if err != nil {
+		return err
+	}
+	if defaults.TrashDays == 0 {
+		defaults.TrashDays = previous.TrashDays
+	}
+	if defaults.HistoryDays == 0 {
+		defaults.HistoryDays = previous.HistoryDays
+	}
+	if defaults.HistoryDays < previous.HistoryDays {
+		p, err := store.PreviewDefaultHistory(ctx, defaults.HistoryDays, time.Now())
+		if err != nil {
+			return err
+		}
+		if p.Token != "" && p.Token != confirmHistory {
+			return fmt.Errorf("global history preview: %d expired snapshots (%s to %s UTC), %d restored records, %d reclaimable block bytes; rerun with --confirm-history-preview %s", p.Count, p.First, p.Last, p.RestoredRecords, p.Bytes, p.Token)
+		}
+	}
+	if defaults != previous {
+		if err := store.SetDefaults(ctx, defaults, time.Now()); err != nil {
+			return err
+		}
+	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)

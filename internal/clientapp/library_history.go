@@ -166,6 +166,10 @@ func buildHistoryListEntries(ctx context.Context, client *historyInspectClient, 
 			}
 			lineageSeen[current] = struct{}{}
 			source, err := client.fetchCommit(ctx, current)
+			var status *remoteStatusError
+			if errors.As(err, &status) && status.status == http.StatusGone {
+				break
+			}
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", _incompleteMergedHistoryError, err)
 			}

@@ -32,6 +32,9 @@
   <h2 id="create-title">创建资料库</h2>
   <form class="fields" method="dialog">
     <label>资料库名称<input name="name" required autofocus aria-describedby="create-error"></label>
+    <label>回收站保留天数<input type="number" min="1" max="36500" name="trashDays" placeholder="跟随全局默认（{{.Data.TrashDays}} 天）"></label>
+    <label>历史快照保留天数<input type="number" min="1" max="36500" name="historyDays" placeholder="跟随全局默认（{{.Data.HistoryDays}} 天）"></label>
+    <p>留空跟随全局默认；当前文件始终保留。</p>
     <p id="create-error" role="alert" hidden></p>
     <div class="dialog-actions"><button type="button" id="cancel-create" commandfor="library-dialog" command="close">取消</button><button type="submit" class="action">确定创建</button></div>
   </form>
@@ -112,14 +115,13 @@ filecloud-client library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' -
 
 {{define "file-list-row"}}
 <tr>
-  <td>{{if eq . "Directory"}}<a class="entry-link folder">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name"></span></a>
-    {{else}}<div class="entry-cell">
-      <a class="entry-link open-preview" aria-haspopup="dialog">{{template "icon" "file"}}<span class="entry-name"></span></a>
+  <td><div class="entry-cell">{{if eq . "Directory"}}<a class="entry-link folder">{{template "icon" "folder"}}<span class="sr">目录：</span><span class="entry-name"></span></a>
+    {{else}}<a class="entry-link open-preview" aria-haspopup="dialog">{{template "icon" "file"}}<span class="entry-name"></span></a>{{end}}
       <details class="row-actions" name="row-actions">
-        {{template "row-actions-toggle" "文件"}}
-        <div class="action-list"><a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a></div>
+        {{template "row-actions-toggle" .}}
+        <div class="action-list">{{if ne . "Directory"}}<a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a>{{end}}<a class="move-trash">{{template "icon" "trash"}}移入回收站</a></div>
       </details>
-    </div>{{end}}</td>
+    </div></td>
   <td class="date"><time></time></td>
 </tr>
 {{end}}

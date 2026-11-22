@@ -21,8 +21,8 @@ export function ConfirmDeletion(v: $models.Review): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.ConfirmDeletion", v);
 }
 
-export function CreateLibrary(name: string): $CancellablePromise<void> {
-    return $Call.ByName("main.Workspace.CreateLibrary", name);
+export function CreateLibrary(name: string, trashDays: number, historyDays: number): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.CreateLibrary", name, trashDays, historyDays);
 }
 
 export function ForgetUnavailableSession(): $CancellablePromise<void> {

@@ -323,8 +323,19 @@ function libraryList(libs: LibraryView[]) {
   collection.append(
     button("创建资料库", async () => {
       const f = field("资料库名称");
-      if ((await question("创建资料库", [f.l], "创建")) && f.i.value.trim())
-        await api.CreateLibrary(f.i.value.trim());
+      const trash = field("回收站保留天数", "number");
+      const history = field("历史快照保留天数", "number");
+      for (const [i, days] of [[trash.i, view?.DefaultTrashDays], [history.i, view?.DefaultHistoryDays]] as const) {
+        i.required = false;
+        i.min = "1";
+        i.max = "36500";
+        i.placeholder = days ? `跟随全局默认（${days} 天）` : "留空跟随服务端默认";
+      }
+      if (await question("创建资料库", [f.l, trash.l, history.l], "创建")) {
+        if (!f.i.value.trim() || !trash.i.checkValidity() || !history.i.checkValidity())
+          throw new Error("请填写名称；保留天数应为 1–36500，或留空跟随默认。");
+        await api.CreateLibrary(f.i.value.trim(), Number(trash.i.value), Number(history.i.value));
+      }
     }),
   );
   const chosen = libs.find((l) => l.ID === selected);

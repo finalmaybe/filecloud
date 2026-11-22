@@ -23,6 +23,7 @@ var (
 
 // Library is one owner-isolated library control-plane record.
 type Library struct {
+	Retention
 	ID           string
 	OwnerUserID  string
 	Name         string
@@ -56,9 +57,9 @@ func (s *Store) CreateLibrary(ctx context.Context, library Library, now time.Tim
 	}()
 
 	result, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO libraries(id, owner_user_id, name, name_key, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		library.ID, library.OwnerUserID, display, key, timestamp, timestamp)
+		INSERT OR IGNORE INTO libraries(id, owner_user_id, name, name_key, created_at, updated_at, trash_days, history_days)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		library.ID, library.OwnerUserID, display, key, timestamp, timestamp, library.TrashDays, library.HistoryDays)
 	if err != nil {
 		return Library{}, false, fmt.Errorf("create library: %w", err)
 	}
@@ -78,7 +79,7 @@ func (s *Store) CreateLibrary(ctx context.Context, library Library, now time.Tim
 
 	existing, err := scanLibrary(tx.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, name, head_commit_id, head_version, created_at, updated_at
-		FROM libraries WHERE owner_user_id = ? AND id = ?`, library.OwnerUserID, library.ID))
+		, trash_days, history_days FROM libraries WHERE owner_user_id = ? AND id = ?`, library.OwnerUserID, library.ID))
 	if err == nil {
 		if existing.Name != display {
 			return Library{}, false, ErrLibraryObjectConflict
@@ -98,7 +99,7 @@ func (s *Store) CreateLibrary(ctx context.Context, library Library, now time.Tim
 func (s *Store) GetLibrary(ctx context.Context, ownerUserID, libraryID string) (Library, error) {
 	return scanLibrary(s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, name, head_commit_id, head_version, created_at, updated_at
-		FROM libraries WHERE owner_user_id = ? AND id = ?`, ownerUserID, libraryID))
+		, trash_days, history_days FROM libraries WHERE owner_user_id = ? AND id = ?`, ownerUserID, libraryID))
 }
 
 // IsCommitPublished reports whether commitID is reachable from a successfully published Head.
@@ -150,7 +151,12 @@ func (s *Store) UpdateLibraryHead(ctx context.Context, ownerUserID, libraryID st
 }
 
 // UpdateLibraryHeadWithRoles atomically advances Head and records the supplied history roles.
-func (s *Store) UpdateLibraryHeadWithRoles(ctx context.Context, ownerUserID, libraryID string, expectedHead *string, expectedVersion int64, commitID string, roles []PublishedCommitRole, now time.Time) (ret Library, retErr error) {
+func (s *Store) UpdateLibraryHeadWithRoles(ctx context.Context, ownerUserID, libraryID string, expectedHead *string, expectedVersion int64, commitID string, roles []PublishedCommitRole, now time.Time) (Library, error) {
+	return s.PublishHead(ctx, ownerUserID, libraryID, expectedHead, expectedVersion, commitID, roles, now, HeadChange{})
+}
+
+// PublishHead commits the new Head and its recycle-bin changes in the same transaction.
+func (s *Store) PublishHead(ctx context.Context, ownerUserID, libraryID string, expectedHead *string, expectedVersion int64, commitID string, roles []PublishedCommitRole, now time.Time, change HeadChange) (ret Library, retErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Library{}, fmt.Errorf("begin update library head: %w", err)
@@ -199,8 +205,8 @@ func (s *Store) UpdateLibraryHeadWithRoles(ctx context.Context, ownerUserID, lib
 			return Library{}, errors.New("introduced published commit role is invalid")
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO published_commits(owner_user_id, library_id, commit_id)
-			VALUES (?, ?, ?)`, ownerUserID, libraryID, role.CommitID); err != nil {
+			INSERT OR IGNORE INTO published_commits(owner_user_id, library_id, commit_id, published_at)
+			VALUES (?, ?, ?, ?)`, ownerUserID, libraryID, role.CommitID, now.Unix()); err != nil {
 			return Library{}, fmt.Errorf("record published commit: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -225,9 +231,19 @@ func (s *Store) UpdateLibraryHeadWithRoles(ctx context.Context, ownerUserID, lib
 	if !candidateRoleFound {
 		return Library{}, errors.New("candidate published commit role is missing")
 	}
+	for _, t := range change.Removed {
+		if err := insertTrash(ctx, tx, ownerUserID, libraryID, t, now); err != nil {
+			return Library{}, err
+		}
+	}
+	if change.RestoreID != 0 {
+		if err := consumeTrash(ctx, tx, ownerUserID, libraryID, change, now); err != nil {
+			return Library{}, err
+		}
+	}
 	ret, err = scanLibrary(tx.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, name, head_commit_id, head_version, created_at, updated_at
-		FROM libraries WHERE owner_user_id = ? AND id = ?`, ownerUserID, libraryID))
+		, trash_days, history_days FROM libraries WHERE owner_user_id = ? AND id = ?`, ownerUserID, libraryID))
 	if err != nil {
 		return Library{}, err
 	}
@@ -245,7 +261,7 @@ func (s *Store) ListLibraries(ctx context.Context, ownerUserID string, cursorTim
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_user_id, name, head_commit_id, head_version, created_at, updated_at
-		FROM libraries
+		, trash_days, history_days FROM libraries
 		WHERE owner_user_id = ? AND (? = '' OR created_at > ? OR (created_at = ? AND id > ?))
 		ORDER BY created_at, id
 		LIMIT ?`, ownerUserID, cursor, cursor, cursor, cursorID, limit)
@@ -277,7 +293,7 @@ func scanLibrary(scanner libraryScanner) (Library, error) {
 	var library Library
 	var head sql.NullString
 	var createdAt, updatedAt string
-	if err := scanner.Scan(&library.ID, &library.OwnerUserID, &library.Name, &head, &library.HeadVersion, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&library.ID, &library.OwnerUserID, &library.Name, &head, &library.HeadVersion, &createdAt, &updatedAt, &library.TrashDays, &library.HistoryDays); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Library{}, ErrLibraryNotFound
 		}

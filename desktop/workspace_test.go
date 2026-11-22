@@ -61,7 +61,7 @@ func TestDesktopTwoDevices(t *testing.T) {
 		return s
 	}
 	a := makeDevice("a")
-	must(t, a.CreateLibrary("资料库"))
+	must(t, a.CreateLibrary("资料库", 0, 0))
 	b := makeDevice("b")
 	if len(b.Snapshot().Libraries) != 1 {
 		t.Fatal("missing remote library")

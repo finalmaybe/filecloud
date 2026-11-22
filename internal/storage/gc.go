@@ -69,7 +69,7 @@ func OpenGarbageCollector(ctx context.Context, dataDir string) (*GarbageCollecto
 	if !info.IsDir() {
 		return nil, errors.Join(errors.New("data directory is not a directory"), lock.Close())
 	}
-	db, err := openReadOnlyDB(ctx, filepath.Join(dataDir, _databaseName))
+	db, err := openDBMode(filepath.Join(dataDir, _databaseName), "rw")
 	if err != nil {
 		return nil, errors.Join(err, lock.Close())
 	}
@@ -95,12 +95,27 @@ func (g *GarbageCollector) Collect(ctx context.Context, options GarbageCollectio
 	if options.Now.IsZero() {
 		options.Now = time.Now()
 	}
-	marked, err := g.markPublished(ctx)
+	marked, err := g.markPublished(ctx, options.Now)
 	if err != nil {
 		return GarbageCollectionReport{}, err
 	}
 	candidates, report, err := g.plan(ctx, marked, options.Now.Add(-options.GracePeriod))
 	if err != nil || options.DryRun {
+		return report, err
+	}
+	// Persist the boundary before unlinking: later policy extensions cannot revive swept snapshots.
+	tx, err := g.db.BeginTx(ctx, nil)
+	if err != nil {
+		return report, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE published_commits SET pruned=1 WHERE pruned=0 AND (owner_user_id,library_id,commit_id) IN (SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE `+expiredPredicate+`)`, options.Now.Unix()); err != nil {
+		return report, err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM trash_entries WHERE id IN (SELECT id FROM trash_lifetimes WHERE keep_until<=?)`, options.Now.Unix()); err != nil {
+		return report, err
+	}
+	if err = tx.Commit(); err != nil {
 		return report, err
 	}
 	for _, candidate := range candidates {
@@ -155,19 +170,42 @@ type gcCandidate struct {
 	size int64
 }
 
-func (g *GarbageCollector) markPublished(ctx context.Context) (map[gcObjectKey]struct{}, error) {
+func (g *GarbageCollector) markPublished(ctx context.Context, now time.Time) (map[gcObjectKey]struct{}, error) {
 	roots, err := g.publishedRoots(ctx)
 	if err != nil {
 		return nil, err
 	}
+	expired, err := expiredRoots(ctx, g.db, `SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE `+expiredPredicate, now.Unix())
+	if err != nil {
+		return nil, err
+	}
 	marked := make(map[gcObjectKey]struct{})
+	metadata := make(map[gcObjectKey]struct{})
 	for _, root := range roots {
 		if !validObjectScopeID(root.owner) || !validObjectScopeID(root.library) || !object.ValidID(root.id) {
 			return nil, errors.New("invalid published object location")
 		}
-		if err := g.markCommitGraph(ctx, marked, root); err != nil {
+		if err := g.markCommitGraph(ctx, marked, metadata, expired, root); err != nil {
 			return nil, err
 		}
+	}
+	pins, err := trashRoots(ctx, g.db, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range pins {
+		if p.kind == "Directory" {
+			err = g.markSnapshot(ctx, marked, p.owner, p.library, p.id, true)
+		} else {
+			err = g.markFile(ctx, marked, p.owner, p.library, p.id, true)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Merge metadata only after pinning content, since the mark set deduplicates whole subtrees.
+	for key := range metadata {
+		marked[key] = struct{}{}
 	}
 	return marked, nil
 }
@@ -197,7 +235,7 @@ func (g *GarbageCollector) publishedRoots(ctx context.Context) (roots []gcRoot, 
 	return roots, nil
 }
 
-func (g *GarbageCollector) markCommitGraph(ctx context.Context, marked map[gcObjectKey]struct{}, root gcRoot) error {
+func (g *GarbageCollector) markCommitGraph(ctx context.Context, marked, metadata map[gcObjectKey]struct{}, expired map[gcRoot]bool, root gcRoot) error {
 	commits := []string{root.id}
 	for len(commits) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -219,14 +257,19 @@ func (g *GarbageCollector) markCommitGraph(ctx context.Context, marked map[gcObj
 		}
 		marked[key] = struct{}{}
 		commits = append(commits, commit.Parents...)
-		if err := g.markSnapshot(ctx, marked, root.owner, root.library, commit.Root); err != nil {
+		target := marked
+		keepContent := !expired[gcRoot{root.owner, root.library, id}]
+		if !keepContent {
+			target = metadata
+		}
+		if err := g.markSnapshot(ctx, target, root.owner, root.library, commit.Root, keepContent); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (g *GarbageCollector) markSnapshot(ctx context.Context, marked map[gcObjectKey]struct{}, owner, library, rootID string) error {
+func (g *GarbageCollector) markSnapshot(ctx context.Context, marked map[gcObjectKey]struct{}, owner, library, rootID string, keepContent bool) error {
 	directories := []string{rootID}
 	for len(directories) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -252,7 +295,7 @@ func (g *GarbageCollector) markSnapshot(ctx context.Context, marked map[gcObject
 			case "Directory":
 				directories = append(directories, entry.ID)
 			case "File":
-				if err := g.markFile(ctx, marked, owner, library, entry.ID); err != nil {
+				if err := g.markFile(ctx, marked, owner, library, entry.ID, keepContent); err != nil {
 					return err
 				}
 			default:
@@ -263,7 +306,7 @@ func (g *GarbageCollector) markSnapshot(ctx context.Context, marked map[gcObject
 	return nil
 }
 
-func (g *GarbageCollector) markFile(ctx context.Context, marked map[gcObjectKey]struct{}, owner, library, id string) error {
+func (g *GarbageCollector) markFile(ctx context.Context, marked map[gcObjectKey]struct{}, owner, library, id string, keepContent bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -280,6 +323,9 @@ func (g *GarbageCollector) markFile(ctx context.Context, marked map[gcObjectKey]
 		return fmt.Errorf("verify published file: %w", err)
 	}
 	marked[key] = struct{}{}
+	if !keepContent {
+		return nil
+	}
 	for _, blockID := range file.Blocks {
 		marked[gcObjectKey{owner: owner, library: library, kind: "blocks", id: blockID}] = struct{}{}
 	}

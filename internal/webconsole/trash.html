@@ -1,0 +1,17 @@
+{{define "move-trash"}}<section class="panel"><h1>移入回收站？</h1><p><strong>{{.Path}}</strong></p><p>{{if eq .Kind "Directory"}}整个目录将作为一条记录移入回收站。{{else}}文件将移入回收站。{{end}}其他设备在下次同步时收到删除，到期前可从回收站恢复。</p><form method="post" action="/web/libraries/{{.LibraryID}}/trash/move"><input type="hidden" name="commit" value="{{.CommitID}}"><input type="hidden" name="path" value="{{.Path}}"><a href="/web/libraries/{{.LibraryID}}?path={{.Parent}}">取消</a> <button>确认移入回收站</button></form></section>{{end}}
+{{define "trash"}}
+<header class="list-toolbar"><h1>回收站</h1><a href="/web/libraries/{{.Data.LibraryID}}">返回文件列表</a></header>
+{{if .Message}}<p role="status">{{.Message}}</p>{{end}}
+{{range .Data.Entries}}
+<section class="panel"><h2>{{.Path}}</h2><p>{{if eq .Kind "Version"}}历史版本 · {{printf "%.12s" .Source}}{{else if eq .Kind "Directory"}}目录（整体恢复）{{else}}文件{{end}}</p>
+<p>删除于 <time datetime="{{.DeletedAt.Format "2006-01-02T15:04:05Z"}}">{{.DeletedAt.Format "2006-01-02 15:04 UTC"}}</time> · 到期于 <time datetime="{{.ExpiresAt.Format "2006-01-02T15:04:05Z"}}">{{.ExpiresAt.Format "2006-01-02 15:04 UTC"}}</time></p>
+<form method="post" class="fields" action="/web/libraries/{{$.Data.LibraryID}}/trash/restore"><input type="hidden" name="id" value="{{.ID}}">
+{{if eq .Kind "Version"}}<button>放回版本列表</button>{{else}}<label>恢复路径<input name="destination" placeholder="{{.Path}}"></label><p>留空恢复到原位置。如有同名条目，请填写新路径。</p><button>恢复{{if eq .Kind "Directory"}}整个目录{{else}}文件{{end}}</button>{{end}}</form></section>
+{{else}}<p class="empty">回收站为空。</p>{{end}}
+{{if .Data.Next}}<a class="tool-link" href="?before={{.Data.Next}}">下一页</a>{{end}}
+{{end}}
+{{define "retention"}}<section class="panel"><h1>保留设置</h1>{{if .Message}}<p role="status">{{.Message}}</p>{{end}}
+<form class="fields" method="post"><label>回收站保留天数<input name="trash" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.TrashDays}} 天）" {{if gt .Data.Policy.TrashDays 0}}value="{{.Data.Policy.TrashDays}}"{{end}}></label>
+<label>历史快照保留天数<input name="history" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.HistoryDays}} 天）" {{if gt .Data.Policy.HistoryDays 0}}value="{{.Data.Policy.HistoryDays}}"{{end}}></label>
+<label><input type="checkbox" name="permanent" {{if eq .Data.Policy.HistoryDays -1}}checked{{end}}>永久保留历史（优先于天数）</label><p>天数留空跟随全局设置。当前快照始终保留，已在回收站中的条目维持原到期日。</p>
+{{with .Data.Preview}}{{if .Token}}<p>将过期 {{.Count}} 份快照{{if .Count}}，发布时间 {{.First}} 至 {{.Last}}（UTC）{{end}}。{{if .RestoredRecords}}已放回的版本记录中有 {{.RestoredRecords}} 条将结束保留。{{end}}预计可回收 {{.Bytes}} 字节的独占内容块，由离线 GC 释放。</p><input type="hidden" name="confirm" value="{{.Token}}"><button>确认修改保留期</button>{{else}}<button>保存设置</button>{{end}}{{end}}</form></section>{{end}}

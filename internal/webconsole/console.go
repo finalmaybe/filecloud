@@ -66,9 +66,20 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 	mux.HandleFunc("POST /web/login", c.login)
 	mux.HandleFunc("POST /web/logout", c.private(c.logout))
 	mux.HandleFunc("GET /web/libraries", c.private(func(w http.ResponseWriter, r *http.Request, who identity) {
-		c.show(w, r, who, 200, "我的资料库", "libraries", nil, "")
+		defaults, err := c.Store.Defaults(r.Context())
+		if err != nil {
+			c.problem(w, r, who, err)
+			return
+		}
+		c.show(w, r, who, 200, "我的资料库", "libraries", defaults, "")
 	}))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
+	mux.HandleFunc("GET /web/libraries/{library}/trash", c.private(c.trash))
+	mux.HandleFunc("GET /web/libraries/{library}/trash/move", c.private(c.moveTrash))
+	mux.HandleFunc("POST /web/libraries/{library}/trash/move", c.private(c.moveTrash))
+	mux.HandleFunc("POST /web/libraries/{library}/trash/restore", c.private(c.restoreTrash))
+	mux.HandleFunc("GET /web/libraries/{library}/retention", c.private(c.retention))
+	mux.HandleFunc("POST /web/libraries/{library}/retention", c.private(c.retention))
 	mux.HandleFunc("GET /web/libraries/{library}/file-preview", c.private(c.previewFile))
 	mux.HandleFunc("GET /web/libraries/{library}/file-history", c.private(c.fileHistory))
 	mux.HandleFunc("GET /web/libraries/{library}/file-history/download", c.private(c.downloadVersion))

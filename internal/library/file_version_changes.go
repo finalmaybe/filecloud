@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -18,11 +19,11 @@ func (c *Catalog) DeleteFileVersion(ctx context.Context, owner string, v Version
 		return err
 	}
 	defer done()
-	_, _, err = c.versionChange(ctx, owner, v, anchor)
+	entry, _, err := c.versionChange(ctx, owner, v, anchor)
 	if err != nil {
 		return err
 	}
-	return c.core.store.DeleteFileVersion(ctx, owner, v.LibraryID, v.Path, v.CommitID, anchor)
+	return c.core.store.DeleteFileVersion(ctx, owner, v.LibraryID, storage.TrashEntry{Kind: "Version", Path: v.Path, Source: v.CommitID, Entry: entry, Versions: []storage.ArchivedVersion{{Path: v.Path, Source: v.CommitID, FileID: entry.ID, Modified: entry.ModifiedAt, Change: "content"}}}, anchor, c.core.now())
 }
 
 // RestoreFileVersion replaces a single existing file in the displayed Head and publishes forward.
@@ -43,7 +44,7 @@ func (c *Catalog) RestoreFileVersion(ctx context.Context, owner string, v Versio
 	if err != nil {
 		return "", err
 	}
-	root, err := c.replaceVersionFile(ctx, owner, v, head.Root, source)
+	root, err := c.replacePathEntry(ctx, owner, v, head.Root, source)
 	if err != nil {
 		return "", err
 	}
@@ -51,23 +52,30 @@ func (c *Catalog) RestoreFileVersion(ctx context.Context, owner string, v Versio
 		return anchor, nil
 	}
 
+	return c.publishWebRoot(ctx, owner, current, root, "恢复文件历史版本", storage.HeadChange{})
+}
+
+func (c *Catalog) publishWebRoot(ctx context.Context, owner string, current storage.Library, root, message string, change storage.HeadChange) (string, error) {
+	h := c.core
+	anchor := *current.HeadCommitID
+	lib := current.ID
 	now := h.now().UTC()
 	// One stable logical device identifies publications made by the Web console.
 	const webDevice = "0db7e081-c11d-4afa-86ed-93cdba397d53"
 	commit := object.Commit{Root: root, Parents: []string{anchor}, AuthorUserID: owner, DeviceID: webDevice,
-		CreatedAt: now.Format(time.RFC3339), Message: "恢复文件历史版本"}
-	id, err := c.putVersionObject(ctx, owner, v.LibraryID, "commits", commit.Bytes())
+		CreatedAt: now.Format(time.RFC3339), Message: message}
+	id, err := c.putVersionObject(ctx, owner, lib, "commits", commit.Bytes())
 	if err != nil {
 		return "", err
 	}
-	missing, roles, err := h.validateCandidate(ctx, owner, v.LibraryID, &anchor, id)
+	missing, roles, err := h.validateCandidate(ctx, owner, lib, &anchor, id)
 	if errors.Is(err, errCorruptObject) || len(missing.ids) != 0 {
 		return "", errHistoryCorrupt
 	}
 	if err != nil {
 		return "", err
 	}
-	_, err = h.store.UpdateLibraryHeadWithRoles(ctx, owner, v.LibraryID, &anchor, current.HeadVersion, id, roles, now)
+	_, err = h.store.PublishHead(ctx, owner, lib, &anchor, current.HeadVersion, id, roles, now, change)
 	return id, err
 }
 
@@ -113,7 +121,8 @@ func (c *Catalog) requireHistoricalVersion(ctx context.Context, owner string, v 
 	return ErrCurrentVersion
 }
 
-func (c *Catalog) replaceVersionFile(ctx context.Context, owner string, v VersionTarget, root string, source object.DirectoryEntry) (string, error) {
+// An empty source removes the leaf; neither operation changes sibling entries.
+func (c *Catalog) replacePathEntry(ctx context.Context, owner string, v VersionTarget, root string, source object.DirectoryEntry) (string, error) {
 	// Keep only ancestor IDs and entry positions; a deep path may contain large directories.
 	type ancestor struct {
 		id    string
@@ -126,7 +135,7 @@ func (c *Catalog) replaceVersionFile(ctx context.Context, owner string, v Versio
 	if err != nil {
 		return "", err
 	}
-	if entry.Type != "File" {
+	if entry.Type == "" || (source.Type != "" && entry.Type != "File") {
 		return "", storage.ErrLibraryNotFound
 	}
 	if entry == source {
@@ -139,9 +148,13 @@ func (c *Catalog) replaceVersionFile(ctx context.Context, owner string, v Versio
 		if err != nil {
 			return "", err
 		}
-		dir.Entries[parent.index].ID = id
-		if i == len(ancestors)-1 {
-			dir.Entries[parent.index].ModifiedAt = source.ModifiedAt
+		if i == len(ancestors)-1 && source.Type == "" {
+			dir.Entries = slices.Delete(dir.Entries, parent.index, parent.index+1)
+		} else {
+			dir.Entries[parent.index].ID = id
+			if i == len(ancestors)-1 {
+				dir.Entries[parent.index].ModifiedAt = source.ModifiedAt
+			}
 		}
 		id, err = c.putVersionObject(ctx, owner, v.LibraryID, "directories", dir.Bytes())
 		if err != nil {

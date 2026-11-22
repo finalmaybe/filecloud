@@ -38,6 +38,8 @@ export interface Review {
 }
 
 export interface View {
+    "DefaultTrashDays": number;
+    "DefaultHistoryDays": number;
     "Revision": number;
     "Server": string;
     "SignedIn": boolean;
