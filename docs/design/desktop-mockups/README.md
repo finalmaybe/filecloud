@@ -2,6 +2,8 @@
 
 状态：第二轮静态评审稿，沿用原预览图路径。三张图展示同一个流程的三个时刻，三端共用这些操作。资料库、路径、时间和活动都是示例数据。
 
+配套文档：[首版 PRD 与验收场景](../desktop-client-prd.md) · [技术方案与交付顺序](../desktop-client-architecture.md) · [三端官方设计资料](../../research/desktop-platform-design.md)。
+
 ![从左到右：Linux 选择资料库、Windows 查看本机活动、macOS 核对删除影响](overview.webp)
 
 | 单端高清稿 | 建议走查的问题 |
