@@ -178,6 +178,8 @@ func (s *Store) PreviewDefaultHistory(ctx context.Context, days int, now time.Ti
 }
 
 func (s *Store) SetRetention(ctx context.Context, l Library, next Retention, now time.Time) error {
+	done := s.UseLibrary(l.OwnerUserID, l.ID)
+	defer done()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

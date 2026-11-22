@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mingming-cn/filecloud/internal/fscompat"
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -60,6 +61,8 @@ func (s *Store) putObject(ctx context.Context, ownerUserID, libraryID, kind, obj
 	if _, err := s.GetLibrary(ctx, ownerUserID, libraryID); err != nil {
 		return false, err
 	}
+	done := s.UseTransfer(ownerUserID, libraryID)
+	defer done()
 	destination := s.objectPath(ownerUserID, libraryID, kind, objectID)
 	release, err := s.lockObjectPublication(ctx, destination)
 	if err != nil {
@@ -83,6 +86,9 @@ func (s *Store) putObject(ctx context.Context, ownerUserID, libraryID, kind, obj
 		}
 		if !matches {
 			return false, ErrObjectConflict
+		}
+		if err := renewUploadGrace(destination); err != nil {
+			return false, err
 		}
 		if err := s.syncObjectDirectory(filepath.Dir(destination)); err != nil {
 			return false, fmt.Errorf("sync replayed object directory: %w", err)
@@ -177,6 +183,9 @@ func (s *Store) putObject(ctx context.Context, ownerUserID, libraryID, kind, obj
 		if !matches {
 			return false, ErrObjectConflict
 		}
+		if err := renewUploadGrace(destination); err != nil {
+			return false, err
+		}
 		if err := s.syncObjectDirectory(parent); err != nil {
 			return false, fmt.Errorf("sync replayed object directory: %w", err)
 		}
@@ -244,6 +253,17 @@ func (s *Store) HasObject(ctx context.Context, ownerUserID, libraryID, kind, obj
 	}
 	return true, file.Close()
 }
+
+// CheckForUpload is used inside a scoped transfer. An existing byte-identical
+// object may be years old; its grace period starts again when a client skips PUT.
+func (s *Store) CheckForUpload(ctx context.Context, owner, library, kind, id string) (bool, error) {
+	found, err := s.HasObject(ctx, owner, library, kind, id)
+	if err != nil || !found {
+		return found, err
+	}
+	return true, renewUploadGrace(s.objectPath(owner, library, kind, id))
+}
+func renewUploadGrace(path string) error { now := time.Now(); return os.Chtimes(path, now, now) }
 
 func (s *Store) objectPath(ownerUserID, libraryID, kind, objectID string) string {
 	return filepath.Join(s.objectsDir, ownerUserID, libraryID, kind, objectID[:2], objectID[2:])

@@ -43,13 +43,6 @@ func (l *dataLock) exclusive() error {
 	return l.check()
 }
 
-func (l *dataLock) shared() error {
-	if err := syscall.Flock(int(l.directory.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		return fmt.Errorf("downgrade data-directory lock: %w", err)
-	}
-	return l.check()
-}
-
 func (l *dataLock) check() error {
 	held, err := l.lockFile.Stat()
 	if err != nil {

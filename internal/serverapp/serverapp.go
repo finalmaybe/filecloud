@@ -95,6 +95,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
+	gcAt := flags.String("gc-at", "03:00", "Daily in-process garbage collection time (local HH:MM or off)")
 	trashDays := flags.Int("trash-days", 0, "Set saved default recycle bin retention (initially 30 days)")
 	historyDays := flags.Int("history-days", 0, "Set saved default snapshot retention (initially 60 days)")
 	confirmHistory := flags.String("confirm-history-preview", "", "Confirm the reported impact of shortening the global history window")
@@ -167,7 +168,11 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if *trashDays < 0 || *historyDays < 0 || *trashDays > 36500 || *historyDays > 36500 {
 		return errors.New("retention must be 1–36500 days")
 	}
-	return serve(ctx, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
+	schedule, err := parseGCSchedule(*gcAt)
+	if err != nil {
+		return err
+	}
+	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -372,7 +377,7 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, confirmHistory string, defaults storage.Retention, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defaults storage.Retention, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
@@ -448,6 +453,8 @@ func serve(ctx context.Context, confirmHistory string, defaults storage.Retentio
 		return errors.Join(fmt.Errorf("write listen address: %w", err), listener.Close())
 	}
 
+	stopGC := startOnlineGC(ctx, schedule, store, logger)
+	defer stopGC()
 	shutdownErr := make(chan error, 1)
 	stopShutdown := context.AfterFunc(ctx, func() {
 		defer func() {

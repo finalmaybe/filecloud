@@ -315,6 +315,8 @@ func (h *handler) checkObjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	done := h.store.UseTransfer(owner, libraryID)
+	defer done()
 	data, ok := h.readJSONBody(w, r, _maxObjectCheckBody)
 	if !ok {
 		return
@@ -335,7 +337,7 @@ func (h *handler) checkObjects(w http.ResponseWriter, r *http.Request) {
 			h.invalid(w)
 			return
 		}
-		exists, err := h.store.HasObject(r.Context(), owner, libraryID, kind, reference.ObjectID)
+		exists, err := h.store.CheckForUpload(r.Context(), owner, libraryID, kind, reference.ObjectID)
 		if err != nil {
 			h.internal(w, "check object", err)
 			return
@@ -442,6 +444,8 @@ func (h *handler) putMetadataObject(w http.ResponseWriter, r *http.Request) {
 		h.invalid(w)
 		return
 	}
+	done := h.store.UseLibrary(owner, libraryID)
+	defer done()
 	r, release, ok := h.admitObjectPut(w, r, owner, libraryID, kind, objectID, 0)
 	if !ok {
 		return
@@ -516,6 +520,8 @@ func (h *handler) putBlock(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusRequestEntityTooLarge, 3005, "block too large")
 		return
 	}
+	done := h.store.UseLibrary(owner, libraryID)
+	defer done()
 	r, release, ok := h.admitObjectPut(w, r, owner, libraryID, "blocks", objectID, r.ContentLength)
 	if !ok {
 		return
@@ -601,6 +607,8 @@ func (h *handler) readJSONBody(w http.ResponseWriter, r *http.Request, maximum i
 }
 
 func (h *handler) getObject(w http.ResponseWriter, r *http.Request, owner, libraryID, kind, objectID, contentType string) {
+	done := h.store.UseTransfer(owner, libraryID)
+	defer done()
 	file, size, err := h.store.GetObject(r.Context(), owner, libraryID, kind, objectID)
 	if errors.Is(err, storage.ErrObjectNotFound) {
 		h.writeError(w, http.StatusNotFound, 2000, "object not found")

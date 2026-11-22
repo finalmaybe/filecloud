@@ -67,6 +67,8 @@ func (c *Catalog) removedPaths(ctx context.Context, owner, lib string, old *stri
 }
 
 func (c *Catalog) MoveToTrash(ctx context.Context, owner string, v VersionTarget) error {
+	done := c.core.store.UseLibrary(owner, v.LibraryID)
+	defer done()
 	if !object.ValidID(v.CommitID) || v.Path == "." || !object.ValidPath(v.Path) {
 		return ErrInvalidPath
 	}
@@ -110,6 +112,8 @@ func (c *Catalog) ListTrash(ctx context.Context, owner, lib string, before int64
 }
 
 func (c *Catalog) RestoreTrash(ctx context.Context, owner, lib string, id int64, destination string) error {
+	done := c.core.store.UseLibrary(owner, lib)
+	defer done()
 	h := c.core
 	release, ok := h.headLimiter.tryAcquire(owner, lib)
 	if !ok {

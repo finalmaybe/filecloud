@@ -99,7 +99,7 @@ func (c *IntegrityChecker) Check(ctx context.Context) (IntegrityReport, error) {
 	if err != nil {
 		return IntegrityReport{}, err
 	}
-	pins, err := trashRoots(ctx, c.db, time.Now())
+	pins, err := trashRoots(ctx, c.db, time.Now(), nil)
 	if err != nil {
 		return IntegrityReport{}, err
 	}

@@ -14,6 +14,8 @@ import (
 var ErrCurrentVersion = errors.New("selected version is current")
 
 func (c *Catalog) DeleteFileVersion(ctx context.Context, owner string, v VersionTarget, anchor string) error {
+	done := c.core.store.UseLibrary(owner, v.LibraryID)
+	defer done()
 	ctx, done, err := c.admit(ctx, owner)
 	if err != nil {
 		return err
@@ -28,6 +30,8 @@ func (c *Catalog) DeleteFileVersion(ctx context.Context, owner string, v Version
 
 // RestoreFileVersion replaces a single existing file in the displayed Head and publishes forward.
 func (c *Catalog) RestoreFileVersion(ctx context.Context, owner string, v VersionTarget, anchor string) (string, error) {
+	done := c.core.store.UseLibrary(owner, v.LibraryID)
+	defer done()
 	h := c.core
 	release, ok := h.headLimiter.tryAcquire(owner, v.LibraryID)
 	if !ok {

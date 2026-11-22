@@ -63,6 +63,8 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	done := h.store.UseLibrary(owner, libraryID)
+	defer done()
 	ifMatch := r.Header.Values("If-Match")
 	if len(ifMatch) == 0 {
 		h.writeError(w, http.StatusPreconditionRequired, 3006, "head precondition required")

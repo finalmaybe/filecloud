@@ -142,7 +142,7 @@ LibraryId 只在所有者作用域内唯一；不同用户可以独立使用相�
 
 逻辑类型固定为：UUID 使用规范小写文本，账号、会话和资料库时间使用 UTC RFC3339 文本（上传计费的 `accepted_at` 使用 Unix 纳秒整数），布尔使用 0/1，ObjectId/token hash 使用定长字节或固定小写十六进制且比较必须是 binary，不依赖数据库 locale/collation。用户名和资料库名先由应用生成规范键，再对规范键建唯一约束。Head CAS 的成功条件统一为条件 UPDATE 影响恰好一行；成功后在同一事务把候选及本次引入的 Commit 写入 `published_commits`。该表只记录发布可达性，不存储或替代 content objects。
 
-`serve` 整个生命周期持有数据目录共享锁。Head 发布先在该锁下验证新 Commit 的完整可达图，再用短事务读取当前 `head_commit_id/head_version`、比较 Expected Head并带当前版本条件更新。服务运行期间对象不可删除；GC 必须取得数据目录独占锁并要求服务停止，因此验证与 CAS 之间对象不会消失。
+`serve` 整个生命周期独占数据目录，保证只有一个进程协调同步和在线 GC。Head 发布先在该锁下验证新 Commit 的完整可达图，再用短事务读取当前 `head_commit_id/head_version`、比较 Expected Head并带当前版本条件更新。从验证开始到 CAS 结束，发布操作登记为该资料库的前台活动。在线 GC 在这段时间让路，因此已验证的对象不会在发布前消失。
 
 SQLite 每个连接必须启用 foreign keys；写事务配置有限 busy timeout，不无界等待；迁移取得数据目录独占锁并在单事务中执行，失败保持旧 schema version。迁移前必须拒绝未来版本、未知版本和有缺口的 migration history，且不得先执行 schema DDL。WAL/同步级别由崩溃故障注入测试冻结。未来 PostgreSQL/MySQL 在同一查询包中提供方言 migration 和相同的唯一性、级联、affected-row CAS、回滚和并发事务契约测试。第一阶段不定义只有一个实现的 Go interface。
 
@@ -293,7 +293,7 @@ JCS 本身不做 Unicode 规范化，因此进入目录对象的名称必须已�
 
 ## GC 与完整性
 
-全部已发布 Commit 及祖先仍是同步基线元数据（Commit、Directory、File）的 GC roots。内容块单独按当前快照、未过期快照和回收站记录及其随附版本取并集标记。离线 GC 在删除前持久化已清理的快照边界，延长保留期不会复活已清理的内容。未发布上传残留也要经过安全宽限期才可删除。参见[保留设置与回收站](../operations/deployment-and-client.md#12-服务端维护)。第一阶段 GC 是管理员手工离线命令，必须取得与 `serve` 互斥的数据目录独占锁。管理员使用 `filecloud-server gc --data-dir <path> --dry-run` 预览，再去掉 `--dry-run` 执行；默认宽限期为 24 小时，可用 `--grace-period` 显式延长。
+全部已发布 Commit 及祖先仍是同步基线元数据（Commit、Directory、File）的 GC roots。内容块单独按当前快照、未过期快照和回收站记录及其随附版本取并集标记。GC 在删除前持久化已清理的快照边界，延长保留期不会复活已清理的内容。未发布上传残留也要经过安全宽限期才可删除。参见[保留设置与回收站](../operations/deployment-and-client.md#12-服务端维护)。`serve` 每日在线 GC 与离线命令共用标记、候选筛选和过期边界。在线任务一次只扫描一个 `(OwnerUserId, LibraryId)`；前台操作会取消同库扫描，删除时在每次 unlink 前核对取消状态。同库请求最多等正在进行的 unlink，不必等整批目录 fsync 或整库遍历。跨请求对象传输还留有空闲窗口，批量查重命中和重复 PUT 都刷新对象宽限期；这只改变服务端对象文件的时间，不改变快照中的文件修改时间。手动离线命令仍需取得与 `serve` 互斥的数据目录独占锁。管理员使用 `filecloud-server gc --data-dir <path> --dry-run` 预览，再去掉 `--dry-run` 执行；默认宽限期为 24 小时，可用 `--grace-period` 显式延长。
 
 Head 发布验证当前 Root；合并提交还验证第二 parent 首次引入发布历史的子图，但不重复验证已经发布的祖先。完整性检查独立于 GC，但同样是离线管理员命令并取得与 `serve` 互斥的数据目录独占锁；它遍历每个 Head 历史，重算元数据和 block 摘要并报告缺失/损坏，第一阶段不自动修复或改写 Head。
 

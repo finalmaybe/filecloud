@@ -116,6 +116,7 @@ type Store struct {
 	db                     *sql.DB
 	objectsDir             string
 	lock                   *dataLock
+	gcActivity             gcActivities
 	objectLocksMu          sync.Mutex
 	objectLocks            map[string]*objectPublication
 	objectLockQueued       func(string)
@@ -208,9 +209,8 @@ func openForServe(ctx context.Context, dataDir string, migrations []migration) (
 	if err := migrateWithEnvironment(ctx, db, migrations, migrationEnvironment{objectsDir: filepath.Join(dataDir, _objectsName)}); err != nil {
 		return nil, errors.Join(err, db.Close(), lock.Close())
 	}
-	if err := lock.shared(); err != nil {
-		return nil, errors.Join(err, db.Close(), lock.Close())
-	}
+	// Online GC coordinates with requests in this process. Keep exclusive ownership
+	// of the directory until Close, including while the scheduler is disabled.
 
 	return &Store{
 		db:                  db,

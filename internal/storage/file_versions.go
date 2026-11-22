@@ -34,6 +34,8 @@ func (s *Store) DeletedFileVersions(ctx context.Context, owner, lib, path string
 
 // DeleteFileVersion removes a timeline entry without changing immutable snapshots.
 func (s *Store) DeleteFileVersion(ctx context.Context, owner, lib string, t TrashEntry, head string, now time.Time) error {
+	done := s.UseLibrary(owner, lib)
+	defer done()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

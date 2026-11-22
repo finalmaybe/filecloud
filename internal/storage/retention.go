@@ -53,6 +53,7 @@ func (s *Store) Defaults(ctx context.Context) (Retention, error) {
 	return p, err
 }
 
+// SetDefaults is called during startup, before requests and the GC scheduler are admitted.
 func (s *Store) SetDefaults(ctx context.Context, p Retention, now time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -103,8 +104,9 @@ func expiredRoots(ctx context.Context, db *sql.DB, query string, args ...any) (m
 	}
 	return m, rows.Err()
 }
-func trashRoots(ctx context.Context, db *sql.DB, now time.Time) ([]gcObjectKey, error) {
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT owner,library,kind,object_id FROM trash_content WHERE expires_at>?`, now.Unix())
+func trashRoots(ctx context.Context, db *sql.DB, now time.Time, scope *gcScope) ([]gcObjectKey, error) {
+	filter, args := scope.filter("owner", "library")
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT owner,library,kind,object_id FROM trash_content WHERE expires_at>?`+filter, append([]any{now.Unix()}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,6 +225,8 @@ func consumeTrash(ctx context.Context, tx *sql.Tx, owner, lib string, change Hea
 }
 
 func (s *Store) RestoreVersionRecord(ctx context.Context, owner, lib string, t TrashEntry, now time.Time) error {
+	done := s.UseLibrary(owner, lib)
+	defer done()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

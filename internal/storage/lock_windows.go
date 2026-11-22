@@ -12,8 +12,8 @@ import (
 )
 
 // dataLock uses byte-range locks because Windows does not provide flock.
-// The first byte is the long-lived reader/writer lock. The second byte serializes
-// the exclusive-to-shared transition performed after migrations.
+// Take both bytes to interoperate with older binaries that downgrade the first
+// byte under the second-byte transition guard after migrations.
 type dataLock struct {
 	file      *os.File
 	lockPath  string
@@ -54,31 +54,6 @@ func (l *dataLock) exclusive() error {
 	}
 	l.lockHeld = true
 	return l.check()
-}
-
-func (l *dataLock) shared() error {
-	// Hold the guard while changing modes so another process cannot observe an
-	// unlocked migration boundary. A shared LockFileEx lock permits other
-	// serving processes but excludes administrators requesting exclusive access.
-	if !l.guardHeld {
-		return errors.New("data-directory lock was not exclusively held")
-	}
-	if err := unlockByte(l.file, 0); err != nil {
-		return fmt.Errorf("unlock exclusive data-directory lock: %w", err)
-	}
-	l.lockHeld = false
-	if err := lockByte(l.file, 0, windows.LOCKFILE_FAIL_IMMEDIATELY); err != nil {
-		return fmt.Errorf("downgrade data-directory lock: %w", err)
-	}
-	l.lockHeld = true
-	if err := l.check(); err != nil {
-		return err
-	}
-	if err := unlockByte(l.file, 1); err != nil {
-		return fmt.Errorf("unlock data-directory transition guard: %w", err)
-	}
-	l.guardHeld = false
-	return nil
 }
 
 func (l *dataLock) check() error {

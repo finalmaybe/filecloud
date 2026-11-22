@@ -157,6 +157,8 @@ func (s *Store) UpdateLibraryHeadWithRoles(ctx context.Context, ownerUserID, lib
 
 // PublishHead commits the new Head and its recycle-bin changes in the same transaction.
 func (s *Store) PublishHead(ctx context.Context, ownerUserID, libraryID string, expectedHead *string, expectedVersion int64, commitID string, roles []PublishedCommitRole, now time.Time, change HeadChange) (ret Library, retErr error) {
+	done := s.UseLibrary(ownerUserID, libraryID)
+	defer done()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Library{}, fmt.Errorf("begin update library head: %w", err)

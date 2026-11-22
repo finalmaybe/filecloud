@@ -22,12 +22,13 @@ const (
 )
 
 type record struct {
-	Time          string `json:"time"`
-	Level         string `json:"level"`
-	Command       string `json:"command"`
-	Library       string `json:"library"`
-	Phase         string `json:"phase"`
-	ErrorCategory string `json:"error_category"`
+	Time          string     `json:"time"`
+	Level         string     `json:"level"`
+	Command       string     `json:"command"`
+	Library       string     `json:"library"`
+	Phase         string     `json:"phase"`
+	ErrorCategory string     `json:"error_category"`
+	GC            *gcSummary `json:"gc,omitempty"`
 }
 
 // Info writes a successful operational event.
@@ -44,6 +45,19 @@ func Error(logger *log.Logger, command, library, phase string, err error) {
 		Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "error", Command: command,
 		Library: library, Phase: phase, ErrorCategory: category(err),
 	})
+}
+
+type gcSummary struct {
+	Completed int   `json:"completed_libraries"`
+	Deferred  int   `json:"deferred_libraries"`
+	Failed    int   `json:"failed_libraries"`
+	Objects   int   `json:"removed_objects"`
+	Bytes     int64 `json:"removed_bytes"`
+}
+
+// GCSummary logs counts, never object paths or owner identifiers.
+func GCSummary(logger *log.Logger, completed, deferred, failed, objects int, size int64) {
+	write(logger, record{Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "info", Command: "online_gc", Phase: "summary", ErrorCategory: "none", GC: &gcSummary{completed, deferred, failed, objects, size}})
 }
 
 // RedactedWriter converts free-form component output into redacted error events.

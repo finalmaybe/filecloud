@@ -38,6 +38,10 @@ func (c *console) private(next privatePage) http.HandlerFunc {
 			http.Error(w, "会话暂不可用", 503)
 			return
 		}
+		if lib := r.PathValue("library"); lib != "" {
+			done := c.Store.UseLibrary(who.user, lib)
+			defer done()
+		}
 		next(w, r, who)
 	}
 }

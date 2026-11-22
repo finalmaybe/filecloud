@@ -26,6 +26,7 @@ const (
 
 // GarbageCollector holds the exclusive data-directory lock for one offline collection.
 type GarbageCollector struct {
+	scope      *gcScope // nil for whole-store offline maintenance
 	db         *sql.DB
 	objectsDir string
 	lock       *dataLock
@@ -95,27 +96,12 @@ func (g *GarbageCollector) Collect(ctx context.Context, options GarbageCollectio
 	if options.Now.IsZero() {
 		options.Now = time.Now()
 	}
-	marked, err := g.markPublished(ctx, options.Now)
-	if err != nil {
-		return GarbageCollectionReport{}, err
-	}
-	candidates, report, err := g.plan(ctx, marked, options.Now.Add(-options.GracePeriod))
+	candidates, report, err := g.collectionPlan(ctx, options.Now, options.GracePeriod)
 	if err != nil || options.DryRun {
 		return report, err
 	}
 	// Persist the boundary before unlinking: later policy extensions cannot revive swept snapshots.
-	tx, err := g.db.BeginTx(ctx, nil)
-	if err != nil {
-		return report, err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `UPDATE published_commits SET pruned=1 WHERE pruned=0 AND (owner_user_id,library_id,commit_id) IN (SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE `+expiredPredicate+`)`, options.Now.Unix()); err != nil {
-		return report, err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM trash_entries WHERE id IN (SELECT id FROM trash_lifetimes WHERE keep_until<=?)`, options.Now.Unix()); err != nil {
-		return report, err
-	}
-	if err = tx.Commit(); err != nil {
+	if err = g.seal(ctx, options.Now); err != nil {
 		return report, err
 	}
 	for _, candidate := range candidates {
@@ -136,6 +122,60 @@ func (g *GarbageCollector) Collect(ctx context.Context, options GarbageCollectio
 		}
 	}
 	return report, nil
+}
+
+func (g *GarbageCollector) collectionPlan(ctx context.Context, now time.Time, grace time.Duration) ([]gcCandidate, GarbageCollectionReport, error) {
+	marked, err := g.markPublished(ctx, now)
+	if err != nil {
+		return nil, GarbageCollectionReport{}, err
+	}
+	return g.plan(ctx, marked, now.Add(-grace))
+}
+
+// Seal expiry before any unlink, so changing a policy or restarting after a partial sweep is safe.
+func (g *GarbageCollector) seal(ctx context.Context, now time.Time) error {
+	commits, args := g.scope.filter("p.owner_user_id", "p.library_id")
+	trash, _ := g.scope.filter("owner", "library")
+	const batch = 128
+	args = append(append([]any{now.Unix()}, args...), batch)
+	for {
+		tx, err := g.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		pruned, err := tx.ExecContext(ctx, `UPDATE published_commits SET pruned=1 WHERE (owner_user_id,library_id,commit_id) IN (
+		SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE p.pruned=0 AND `+expiredPredicate+commits+` LIMIT ?)`, args...)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		expired, err := tx.ExecContext(ctx, `DELETE FROM trash_entries WHERE id IN (SELECT id FROM trash_lifetimes WHERE keep_until<=?`+trash+` LIMIT ?)`, args...)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		n, err := pruned.RowsAffected()
+		if err != nil {
+			return err
+		}
+		m, err := expired.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n < batch && m < batch {
+			return nil
+		}
+	}
+}
+
+func (scope *gcScope) filter(ownerColumn, libraryColumn string) (string, []any) {
+	if scope == nil {
+		return "", nil
+	}
+	return " AND " + ownerColumn + "=? AND " + libraryColumn + "=?", []any{scope.owner, scope.library}
 }
 
 func openReadOnlyDB(ctx context.Context, path string) (*sql.DB, error) {
@@ -175,7 +215,8 @@ func (g *GarbageCollector) markPublished(ctx context.Context, now time.Time) (ma
 	if err != nil {
 		return nil, err
 	}
-	expired, err := expiredRoots(ctx, g.db, `SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE `+expiredPredicate, now.Unix())
+	filter, args := g.scope.filter("p.owner_user_id", "p.library_id")
+	expired, err := expiredRoots(ctx, g.db, `SELECT p.owner_user_id,p.library_id,p.commit_id `+expiryFrom+` WHERE `+expiredPredicate+filter, append([]any{now.Unix()}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +230,7 @@ func (g *GarbageCollector) markPublished(ctx context.Context, now time.Time) (ma
 			return nil, err
 		}
 	}
-	pins, err := trashRoots(ctx, g.db, now)
+	pins, err := trashRoots(ctx, g.db, now, g.scope)
 	if err != nil {
 		return nil, err
 	}
@@ -211,13 +252,15 @@ func (g *GarbageCollector) markPublished(ctx context.Context, now time.Time) (ma
 }
 
 func (g *GarbageCollector) publishedRoots(ctx context.Context) (roots []gcRoot, retErr error) {
+	heads, args := g.scope.filter("owner_user_id", "id")
+	commits, more := g.scope.filter("owner_user_id", "library_id")
 	rows, err := g.db.QueryContext(ctx, `
 		SELECT owner_user_id, id, head_commit_id
-		FROM libraries WHERE head_commit_id IS NOT NULL
+		FROM libraries WHERE head_commit_id IS NOT NULL`+heads+`
 		UNION
 		SELECT owner_user_id, library_id, commit_id
-		FROM published_commits
-		ORDER BY 1, 2, 3`)
+		FROM published_commits WHERE 1=1`+commits+`
+		ORDER BY 1, 2, 3`, append(args, more...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read published commit roots: %w", err)
 	}
@@ -360,7 +403,23 @@ func (g *GarbageCollector) plan(ctx context.Context, marked map[gcObjectKey]stru
 		stats[kind] = &report.Objects[i]
 	}
 	var candidates []gcCandidate
-	err := filepath.WalkDir(g.objectsDir, func(path string, entry fs.DirEntry, walkErr error) error {
+	start := g.objectsDir
+	if g.scope != nil {
+		for _, part := range []string{g.scope.owner, g.scope.library} {
+			start = filepath.Join(start, part)
+			info, err := os.Lstat(start)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, report, nil
+			}
+			if err != nil {
+				return nil, report, err
+			}
+			if !info.IsDir() {
+				return nil, report, errors.New("invalid library object directory")
+			}
+		}
+	}
+	err := filepath.WalkDir(start, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
