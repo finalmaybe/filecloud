@@ -1,17 +1,50 @@
-{{define "move-trash"}}<section class="panel"><h1>移入回收站？</h1><p><strong>{{.Path}}</strong></p><p>{{if eq .Kind "Directory"}}整个目录将作为一条记录移入回收站。{{else}}文件将移入回收站。{{end}}其他设备在下次同步时收到删除，到期前可从回收站恢复。</p><form method="post" action="/web/libraries/{{.LibraryID}}/trash/move"><input type="hidden" name="commit" value="{{.CommitID}}"><input type="hidden" name="path" value="{{.Path}}"><a href="/web/libraries/{{.LibraryID}}?path={{.Parent}}">取消</a> <button>确认移入回收站</button></form></section>{{end}}
 {{define "trash"}}
-<header class="list-toolbar"><h1>回收站</h1><a href="/web/libraries/{{.Data.LibraryID}}">返回文件列表</a></header>
-{{if .Message}}<p role="status">{{.Message}}</p>{{end}}
-{{range .Data.Entries}}
-<section class="panel"><h2>{{.Path}}</h2><p>{{if eq .Kind "Version"}}历史版本 · {{printf "%.12s" .Source}}{{else if eq .Kind "Directory"}}目录（整体恢复）{{else}}文件{{end}}</p>
-<p>删除于 <time datetime="{{.DeletedAt.Format "2006-01-02T15:04:05Z"}}">{{.DeletedAt.Format "2006-01-02 15:04 UTC"}}</time> · 到期于 <time datetime="{{.ExpiresAt.Format "2006-01-02T15:04:05Z"}}">{{.ExpiresAt.Format "2006-01-02 15:04 UTC"}}</time></p>
-<form method="post" class="fields" action="/web/libraries/{{$.Data.LibraryID}}/trash/restore"><input type="hidden" name="id" value="{{.ID}}">
-{{if eq .Kind "Version"}}<button>放回版本列表</button>{{else}}<label>恢复路径<input name="destination" placeholder="{{.Path}}"></label><p>留空恢复到原位置。如有同名条目，请填写新路径。</p><button>恢复{{if eq .Kind "Directory"}}整个目录{{else}}文件{{end}}</button>{{end}}</form></section>
-{{else}}<p class="empty">回收站为空。</p>{{end}}
-{{if .Data.Next}}<a class="tool-link" href="?before={{.Data.Next}}">下一页</a>{{end}}
+<header class="list-toolbar"><div class="location">
+  <a href="/web/libraries">我的资料库</a><span aria-hidden="true">/</span>
+  <a href="/web/libraries/{{.Data.LibraryID}}">{{.Data.LibraryName}}</a><span aria-hidden="true">/</span><h1>回收站</h1>
+</div></header>
+{{if .Message}}<p class="list-footer" role="status">{{.Message}}</p>{{end}}
+{{if .Data.Entries}}
+<table class="entry-table trash-list">
+  <caption class="sr">回收站条目，按删除时间从新到旧排列</caption>
+  <thead><tr><th scope="col">名称 / 原位置</th><th scope="col">删除时间</th><th scope="col">到期时间</th></tr></thead>
+  <tbody>{{range .Data.Entries}}
+    {{$icon := "file"}}{{$kind := "文件"}}{{$action := "恢复文件"}}
+    {{if eq .Kind "Directory"}}{{$icon = "folder"}}{{$kind = "目录"}}{{$action = "恢复整个目录"}}{{else if eq .Kind "Version"}}{{$icon = "history"}}{{$kind = "历史版本"}}{{$action = "放回版本列表"}}{{end}}
+    <tr data-path="{{.Path}}">
+      <td><div class="entry-cell">
+        <button type="button" class="entry-link {{if eq .Kind "Directory"}}folder{{end}}" commandfor="restore-{{.ID}}" command="show-modal" aria-haspopup="dialog">
+          {{template "icon" $icon}}<span><span class="entry-name">{{pathBase .Path}}</span>
+          <small class="trash-origin">{{$kind}}{{if eq .Kind "Version"}} · <code>{{printf "%.12s" .Source}}</code>{{end}} · {{if eq (pathDir .Path) "."}}资料库根目录{{else}}{{pathDir .Path}}{{end}}</small></span>
+        </button>
+        <details class="row-actions" name="row-actions">{{template "row-actions-toggle" .Path}}
+          <div class="action-list"><button type="button" commandfor="restore-{{.ID}}" command="show-modal" aria-haspopup="dialog">{{template "icon" "history"}}{{$action}}</button></div>
+        </details>
+      </div>
+      <dialog class="panel library-dialog" id="restore-{{.ID}}" aria-labelledby="restore-title-{{.ID}}" aria-describedby="restore-path-{{.ID}}">
+        <h2 id="restore-title-{{.ID}}">{{$action}}</h2>
+        <form method="post" class="fields" action="/web/libraries/{{$.Data.LibraryID}}/trash/restore">
+          <input type="hidden" name="id" value="{{.ID}}"><strong id="restore-path-{{.ID}}">{{.Path}}</strong>
+          {{if eq .Kind "Version"}}<p>版本 <code>{{printf "%.12s" .Source}}</code> 将放回版本列表，当前文件不变。</p>
+          {{else}}<label>恢复路径<input name="destination" placeholder="{{.Path}}" aria-describedby="restore-hint-{{.ID}}"></label>
+          <p id="restore-hint-{{.ID}}">{{if eq .Kind "Directory"}}目录及其内容将整体恢复。{{end}}留空恢复到原位置。如有同名条目，请填写新路径。</p>{{end}}
+          <div class="dialog-actions"><button type="button" commandfor="restore-{{.ID}}" command="close" autofocus>取消</button><button type="submit" class="action">确认</button></div>
+        </form>
+      </dialog></td>
+      <td class="date"><span class="mobile-label">删除于 </span>{{template "trash-time" .DeletedAt}}</td>
+      <td class="date"><span class="mobile-label">到期于 </span>{{template "trash-time" .ExpiresAt}}</td>
+    </tr>
+  {{end}}</tbody>
+</table>
+{{template "filter-empty"}}
+<footer class="list-footer"><span role="status">本页显示 <b id="visible-count">{{len .Data.Entries}}</b> 个条目</span>{{if .Data.Next}}<a class="inline" href="?before={{.Data.Next}}">下一页</a>{{end}}</footer>
+{{else}}<div class="empty">{{template "icon" "trash"}}<h2>回收站为空。</h2></div>{{end}}
+{{end}}
+
+{{define "trash-time"}}<time datetime="{{.Format "2006-01-02T15:04:05Z"}}">{{.Format "2006-01-02 15:04 UTC"}}</time>
 {{end}}
 {{define "retention"}}<section class="panel"><h1>保留设置</h1>{{if .Message}}<p role="status">{{.Message}}</p>{{end}}
-<form class="fields" method="post"><label>回收站保留天数<input name="trash" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.TrashDays}} 天）" {{if gt .Data.Policy.TrashDays 0}}value="{{.Data.Policy.TrashDays}}"{{end}}></label>
-<label>历史快照保留天数<input name="history" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.HistoryDays}} 天）" {{if gt .Data.Policy.HistoryDays 0}}value="{{.Data.Policy.HistoryDays}}"{{end}}></label>
-<label><input type="checkbox" name="permanent" {{if eq .Data.Policy.HistoryDays -1}}checked{{end}}>永久保留历史（优先于天数）</label><p>天数留空跟随全局设置。当前快照始终保留，已在回收站中的条目维持原到期日。</p>
+<form id="retention-form" class="fields" method="post"><label>回收站保留天数<input name="trash" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.TrashDays}} 天）" {{if gt .Data.Policy.TrashDays 0}}value="{{.Data.Policy.TrashDays}}"{{end}}></label>
+<label>历史快照保留天数<input name="history" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.HistoryDays}} 天）" {{if eq .Data.Policy.HistoryDays -1}}disabled{{else if gt .Data.Policy.HistoryDays 0}}value="{{.Data.Policy.HistoryDays}}"{{end}}></label>
+<label><span><input type="checkbox" name="permanent" {{if eq .Data.Policy.HistoryDays -1}}checked{{end}}> 永久保留历史（优先于天数）</span></label><p>天数留空跟随全局设置。当前快照始终保留，已在回收站中的条目维持原到期日。</p>
 {{with .Data.Preview}}{{if .Token}}<p>将过期 {{.Count}} 份快照{{if .Count}}，发布时间 {{.First}} 至 {{.Last}}（UTC）{{end}}。{{if .RestoredRecords}}已放回的版本记录中有 {{.RestoredRecords}} 条将结束保留。{{end}}预计可回收 {{.Bytes}} 字节的独占内容块，在后续 GC 中释放。</p><input type="hidden" name="confirm" value="{{.Token}}"><button>确认修改保留期</button>{{else}}<button>保存设置</button>{{end}}{{end}}</form></section>{{end}}

@@ -16,6 +16,7 @@
   {{template "symbols"}}
   <main class="viewer" aria-label="文件预览">{{template "viewer-toolbar" .Data}}<div class="viewer-body">{{template "viewer-stage" .Data}}</div></main>
   {{else}}
+  {{$listView := or (eq .View "libraries") (eq .View "library") (eq .View "trash")}}
   {{if .SignedIn}}
   <a class="skip" href="#content">跳到主要内容</a>
   {{template "symbols"}}
@@ -25,8 +26,8 @@
       <a class="brand" href="/web/libraries">{{template "icon" "brand"}}Filecloud</a>
       <span class="app-label">工作空间</span>
     </div>
-    {{if or (eq .View "libraries") (eq .View "library")}}
-    {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{end}}
+    {{if $listView}}
+    {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{end}}
     <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"></label>
     {{end}}
     <form class="logout" action="/web/logout" method="post"><button>{{template "icon" "logout"}}退出登录</button></form>
@@ -50,14 +51,13 @@
     <span class="rail-foot">{{template "icon" "server"}}Filecloud Server</span>
   </aside>
   {{end}}
-  <main id="content" tabindex="-1" {{if or (eq .View "libraries") (eq .View "library")}}class="explorer"{{end}}>
+  <main id="content" tabindex="-1" {{if $listView}}class="explorer"{{end}}>
     {{if eq .View "login"}}
     <section class="panel notice"><p class="kicker" lang="en">FILECLOUD</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/web/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
     {{else if eq .View "libraries"}}{{template "libraries" .}}
     {{else if eq .View "library"}}{{template "library" .Data}}
     {{else if eq .View "file-history"}}{{if .Message}}<p role="status">{{.Message}}</p>{{end}}{{template "file-history" .Data}}
     {{else if eq .View "trash"}}{{template "trash" .}}
-    {{else if eq .View "move-trash"}}{{template "move-trash" .Data}}
     {{else if eq .View "retention"}}{{template "retention" .}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/web/libraries">重新打开资料库列表</a></section>
     {{else if eq .View "accounts"}}{{template "accounts" .}}

@@ -6,6 +6,8 @@ const status = document.querySelector('#directory-status');
 const retry = document.querySelector('#directory-retry');
 const footer = workspace.querySelector('.list-footer');
 const filter = document.querySelector('#list-filter');
+const deleteDialog = document.querySelector('#delete-dialog');
+deleteDialog.querySelector('button[type="button"]').addEventListener('click', () => deleteDialog.close());
 let nextPage;
 const observer = new IntersectionObserver(entries => {
   if (entries.some(entry => entry.isIntersecting) && nextPage && !filter.value.trim()) loadDirectory(nextPage);
@@ -87,7 +89,17 @@ function renderDirectory({CommitId, Path, Parent, Entries}) {
     const query = link(path);
     row.querySelector('.entry-link').href = folder ? query : `${directoryPath}/file-preview${query}`;
     row.querySelector('summary').setAttribute('aria-label', entry.Name + ' 的更多操作');
-    row.querySelector('.move-trash').href = `${directoryPath}/trash/move${query}`;
+    row.querySelector('.move-trash').addEventListener('click', event => {
+      const form = deleteDialog.querySelector('form');
+      form.elements.namedItem('path').value = path;
+      form.elements.namedItem('commit').value = CommitId;
+      deleteDialog.querySelector('#delete-target').textContent = path;
+      deleteDialog.querySelector('#delete-effect span').textContent = folder ? '整个目录将作为一条记录移入回收站。' : '文件将移入回收站。';
+      const menu = event.currentTarget.closest('details');
+      menu.open = false;
+      menu.querySelector('summary').focus({preventScroll: true});
+      deleteDialog.showModal();
+    });
     if (!folder) {
       const versions = row.querySelector('.open-versions');
       versions.href = `${directoryPath}/file-history${query}`;

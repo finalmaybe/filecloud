@@ -2,38 +2,30 @@ package webconsole
 
 import (
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 
-	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
 func (c *console) moveTrash(w http.ResponseWriter, r *http.Request, who identity) {
-	v := library.VersionTarget{LibraryID: r.PathValue("library"), CommitID: r.FormValue("commit"), Path: r.FormValue("path")}
-	if r.Method == "POST" {
-		if err := c.Catalog.MoveToTrash(r.Context(), who.user, v); err != nil {
-			c.problem(w, r, who, err)
-			return
-		}
-		http.Redirect(w, r, "/web/libraries/"+v.LibraryID+"/trash", 303)
-		return
-	}
-	if v.Path == "." || v.CommitID == "" {
-		c.problem(w, r, who, library.ErrInvalidPath)
-		return
-	}
-	snapshot, err := c.Catalog.Snapshot(r.Context(), who.user, v.LibraryID, v.CommitID, v.Path, 0)
-	if err != nil {
+	v := versionTarget(r, r.PostForm)
+	if err := c.Catalog.MoveToTrash(r.Context(), who.user, v); err != nil {
 		c.problem(w, r, who, err)
 		return
 	}
-	c.show(w, r, who, 200, "移入回收站", "move-trash", snapshot, "")
+	directory := "/web/libraries/" + v.LibraryID
+	if parent := path.Dir(v.Path); parent != "." {
+		directory += "?path=" + url.QueryEscape(parent)
+	}
+	http.Redirect(w, r, directory, http.StatusSeeOther)
 }
 
 type trashPage struct {
-	LibraryID string
-	Entries   []storage.TrashEntry
-	Next      int64
+	LibraryID, LibraryName string
+	Entries                []storage.TrashEntry
+	Next                   int64
 }
 
 func (c *console) trash(w http.ResponseWriter, r *http.Request, who identity) {
@@ -55,7 +47,7 @@ func (c *console) trash(w http.ResponseWriter, r *http.Request, who identity) {
 		c.problem(w, r, who, err)
 		return
 	}
-	data := trashPage{LibraryID: lib.ID, Entries: items}
+	data := trashPage{LibraryID: lib.ID, LibraryName: lib.Name, Entries: items}
 	if len(items) > 100 {
 		data.Next = items[99].ID
 		data.Entries = items[:100]

@@ -52,6 +52,9 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 		t.Fatal("library list missing published library metadata")
 	}
 	page := f.req("GET", base, nil)
+	if !strings.Contains(page.Body.String(), `id="delete-dialog"`) {
+		t.Fatal("missing delete dialog on file list")
+	}
 	if strings.Contains(page.Body.String(), `id="device-guide"`) || strings.Contains(page.Body.String(), `id="library-id"`) {
 		t.Fatal("file list still contains library information or binding guide")
 	}
@@ -132,6 +135,27 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 			}
 		}
 	}
+	t.Run("confirm deletion from the file list", func(t *testing.T) {
+		move := base + "/trash/move"
+		if res := f.req("GET", move+"?"+link.Encode(), nil); res.Code == 200 {
+			t.Fatal("standalone confirmation still reachable")
+		}
+		if res := f.req("POST", move, link); res.Code != 409 {
+			t.Fatalf("stale list: %d", res.Code)
+		}
+		link.Set("commit", anchor)
+		if res := f.req("POST", move, link); res.Code != 303 || res.Header().Get("Location") != base+"?path=docs" {
+			t.Fatalf("delete redirect: %d %q", res.Code, res.Header().Get("Location"))
+		}
+		res := f.req("GET", base+"/trash", nil)
+		trash := html.UnescapeString(res.Body.String())
+		if res.Code != 200 || !strings.Contains(trash, `data-path="`+h.Path+`"`) || !strings.Contains(trash, `<span class="entry-name">A+B & C.txt</span>`) {
+			t.Fatal("trash list did not keep the original path and filename")
+		}
+		if !strings.Contains(trash, `action="`+base+`/trash/restore"`) || !strings.Contains(trash, `name="destination"`) {
+			t.Fatal("missing restore form with an alternate destination")
+		}
+	})
 	for _, legacy := range []string{base + "/history", base + "/snapshot/" + commit} {
 		if strings.Contains(body, legacy) || f.req("GET", legacy, nil).Code != 404 {
 			t.Fatal("removed history or snapshot view still reachable")

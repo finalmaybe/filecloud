@@ -16,6 +16,15 @@ if (navToggle) {
   });
 }
 
+const retentionForm = document.querySelector('#retention-form');
+if (retentionForm) {
+  const permanent = retentionForm.elements.namedItem('permanent');
+  const historyDays = retentionForm.elements.namedItem('history');
+  const syncHistoryDays = () => { historyDays.disabled = permanent.checked; };
+  syncHistoryDays();
+  permanent.addEventListener('change', syncHistoryDays);
+}
+
 const entries = document.querySelector('.entry-table tbody');
 if (entries) {
   const filter = document.querySelector('#list-filter');
@@ -24,7 +33,8 @@ if (entries) {
     const query = filter.value.trim().toLowerCase();
     let visible = 0;
     for (const row of entries.rows) {
-      row.hidden = !row.querySelector('.entry-name').textContent.toLowerCase().includes(query);
+      const searchable = row.dataset.path ?? row.querySelector('.entry-name').textContent;
+      row.hidden = !searchable.toLowerCase().includes(query);
       if (!row.hidden) visible++;
     }
     document.querySelector('#visible-count').textContent = visible;
@@ -43,6 +53,27 @@ if (entries) {
       open.open = false;
       open.querySelector('summary').focus();
     }
+  });
+}
+
+const trashList = document.querySelector('.trash-list');
+if (trashList) {
+  trashList.addEventListener('click', event => {
+    const button = event.target.closest('button[commandfor]');
+    if (!button) return;
+    event.preventDefault();
+    const dialog = document.getElementById(button.getAttribute('commandfor'));
+    if (button.getAttribute('command') === 'close') {
+      dialog.close();
+      return;
+    }
+    const menu = button.closest('.row-actions');
+    if (menu) {
+      menu.open = false;
+      menu.querySelector('summary').focus({preventScroll: true});
+    }
+    dialog.querySelector('form').reset();
+    dialog.showModal();
   });
 }
 

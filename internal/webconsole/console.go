@@ -8,6 +8,7 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"path"
 
 	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/library"
@@ -40,7 +41,7 @@ type page struct {
 // NewHandler builds the Web routes for one configured public origin.
 // The server itself speaks HTTP; remote HTTPS terminates at a local reverse proxy.
 func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error) {
-	shell, err := template.New("shell.html").Funcs(template.FuncMap{"versionRow": versionRow}).ParseFS(files, "*.html")
+	shell, err := template.New("shell.html").Funcs(template.FuncMap{"versionRow": versionRow, "pathBase": path.Base, "pathDir": path.Dir}).ParseFS(files, "*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,6 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 	}))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
 	mux.HandleFunc("GET /web/libraries/{library}/trash", c.private(c.trash))
-	mux.HandleFunc("GET /web/libraries/{library}/trash/move", c.private(c.moveTrash))
 	mux.HandleFunc("POST /web/libraries/{library}/trash/move", c.private(c.moveTrash))
 	mux.HandleFunc("POST /web/libraries/{library}/trash/restore", c.private(c.restoreTrash))
 	mux.HandleFunc("GET /web/libraries/{library}/retention", c.private(c.retention))

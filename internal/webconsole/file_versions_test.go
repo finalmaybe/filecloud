@@ -159,6 +159,10 @@ func TestFileVersionActions(t *testing.T) {
 	if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Location") != "" {
 		t.Fatalf("delete API should succeed without a body or redirect: %d", w.Code)
 	}
+	trash := f.req("GET", "/web/libraries/"+lib+"/trash", nil)
+	if trash.Code != 200 || !strings.Contains(trash.Body.String(), "放回版本列表") || !strings.Contains(trash.Body.String(), first[:12]) || strings.Contains(trash.Body.String(), `name="destination"`) {
+		t.Fatal("deleted revision must identify its version and offer timeline restore only")
+	}
 	if w := f.libraryAPI("DELETE", apiVersion(), ""); w.Code != 404 {
 		t.Fatalf("already deleted: %d", w.Code)
 	}
