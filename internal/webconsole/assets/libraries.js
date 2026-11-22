@@ -70,8 +70,7 @@ async function loadLibraries() {
 
 function appendLibrary(library) {
   const row = document.querySelector('#library-row').content.firstElementChild.cloneNode(true);
-  const path = `/web/libraries/${library.LibraryId}`;
-  row.querySelector('.entry-link').href = path;
+  row.querySelector('.entry-link').href = `/web/libraries/${library.LibraryId}`;
   row.querySelector('.entry-name').textContent = library.Name;
   setLocalTime(row.querySelector('time'), library.CreatedAt);
   setLibraryState(row, library);
@@ -81,8 +80,7 @@ function appendLibrary(library) {
     info.querySelector('#info-name').textContent = library.Name;
     setLocalTime(info.querySelector('#info-created'), library.CreatedAt);
     info.querySelector('#library-id').textContent = library.LibraryId;
-    info.querySelector('.bind-library-id').textContent = library.LibraryId;
-    info.querySelector('#info-files').href = path;
+    info.querySelector('[data-copy-status]').textContent = '';
     const head = info.querySelector('#head-id');
     head.textContent = library.HeadCommitId || '';
     head.closest('dd').hidden = info.querySelector('#head-label').hidden = !library.HeadCommitId;

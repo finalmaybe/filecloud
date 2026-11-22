@@ -116,9 +116,9 @@ main.explorer { padding: 0 0 32px; }
 .credentials .action.destructive { background: var(--orange); }
 #issued-hint { margin-top: 8px; }
 #issued-credential { width: min(36rem, calc(100% - 32px)); }
-#issued-credential .metadata { align-items: center; }
-#issued-credential dd { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-#issued-credential [data-copy] { display: grid; place-items: center; width: 44px; padding: 0; }
+:is(#issued-credential, #info-dialog) .metadata { align-items: center; }
+:is(#issued-credential, #info-dialog) dd:has([data-copy]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+:is(#issued-credential, #info-dialog) [data-copy] { display: grid; place-items: center; width: 44px; padding: 0; }
 #issued-credential [data-copy-status] { margin-right: auto; }
 
 /* File version sidebar */
@@ -186,10 +186,6 @@ code { font-family: var(--mono); font-size: .9em; overflow-wrap: anywhere; }
 .aside { background: #fff9f3; }
 .notice { border-top: 3px solid var(--blue); }
 .panel > summary { cursor: pointer; font-weight: 650; }
-.binding { margin-top: 16px; padding: 0 16px; }
-.binding summary { padding-block: 12px; }
-.binding[open] { padding-bottom: 16px; }
-.binding p { margin-block: 8px; }
 .library-dialog { width: min(26rem, calc(100% - 32px)); color: var(--ink); }
 .library-dialog::backdrop { background: #142c3b70; }
 .dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }

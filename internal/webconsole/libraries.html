@@ -72,26 +72,16 @@
     <dl class="metadata">
       <dt>发布状态</dt><dd><span class="state"></span></dd>
       <dt>创建时间</dt><dd><time id="info-created"></time></dd>
-      <dt>资料库 ID</dt><dd><code id="library-id"></code> <button data-copy="library-id">复制资料库 ID</button></dd>
-      <dt id="head-label">当前 Head</dt><dd><code id="head-id"></code> <button data-copy="head-id">复制 Head</button></dd>
+      <dt>资料库 ID</dt><dd><code id="library-id"></code><button type="button" data-copy="library-id" aria-label="复制资料库 ID" title="复制资料库 ID">{{template "icon" "copy"}}</button></dd>
+      <dt id="head-label">当前 Head</dt><dd><code id="head-id"></code><button type="button" data-copy="head-id" aria-label="复制 Head" title="复制 Head">{{template "icon" "copy"}}</button></dd>
     </dl>
-    <a class="tool-link" id="info-files">打开文件列表</a>
 {{end}}
 
 {{define "info-dialog"}}
 <dialog class="panel library-dialog" id="info-dialog" aria-labelledby="info-title">
   <header class="info-heading"><h2 id="info-title">资料库信息</h2><button type="button" autofocus>关闭</button></header>
   {{template "library-record"}}
-  <details class="panel binding"><summary>设备绑定说明</summary>
-  <p>先用 CLI 登录。将该次 CLI 登录的令牌从标准输入提供给 bind（不是浏览器凭据），替换服务来源、设备 UUID 和两个本地目录。两种终端都可以使用以下参数：</p>
-  <pre id="device-guide">filecloud-client library bind --server 'SERVER_ORIGIN' --library-id <span class="bind-library-id"></span> --device-id 'DEVICE_UUID' --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --token-stdin
-filecloud-client library status --client-dir 'CLIENT_DIR' --worktree 'WORKTREE'
-filecloud-client library sync --client-dir 'CLIENT_DIR' --worktree 'WORKTREE'
-filecloud-client library watch --client-dir 'CLIENT_DIR' --worktree 'WORKTREE' --interval 30s</pre>
-  <button data-copy="device-guide">复制设备命令</button>
-  <p>仅在首次导入已有文件且远端为空时使用 --import-local。刷新凭据前先同步，再以相同参数和新令牌 bind。解绑用 library unbind 加同一对目录参数；普通文件保留。</p>
-  <p>以设备 status 的 Pending 和 NextCommand 为准。删除保护须核对本机统计与候选前缀；并发冲突会保留冲突副本，中断后用同一工作目录继续 sync。</p>
-  </details>
+  <small role="status" data-copy-status></small>
 </dialog>
 {{end}}
 

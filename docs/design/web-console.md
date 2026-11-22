@@ -38,7 +38,7 @@ Web 用 host-only、`Path=/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HT
 | `library create/list/inspect`；`PUT L`、`GET /v1/libraries`、`GET L`、`GET L/head` | 浏览器用共享的资料库接口列库、建库、查看详情；单独的 `GET L/head` 使用 CLI Bearer。Head 表示服务端已发布状态 | 重试创建复用 UUID；验证同名、空 Head、ETag/304、稳定分页和所有者隔离；不显示虚构设备在线状态。 |
 | `library history list [--include-merged]`；`GET L/history`、`GET L/history/{CommitId}` | CLI 锚定首次读取的 Head；合并来源在所属提交下展开。网页只列出选定文件的版本 | 不按客户端时间排序；翻页期间发布新 Head，旧游标仍在原锚点；游标失效可刷新。只展开经角色证明的来源，保留深度/数量上限。 |
 | `library history inspect [--path]`；`GET L/history/{CommitId}`、`GET L/objects/{ObjectType}/{ObjectId}` | 先固定已发布的完整 CommitId，再从 Root 逐级检查目录和文件元数据 | CLI 检查元数据时不读块；Web 预览按已发布快照中的路径读取文件内容。 |
-| `library bind [--import-local]`、凭据刷新、`unbind` | 在设备工作目录操作；网页提供库 ID 和本地说明 | 不读客户端数据库；分别验证空目录 checkout、非空目录导入限制、更新凭据；解绑不删普通文件。 |
+| `library bind [--import-local]`、凭据刷新、`unbind` | 在设备工作目录操作；资料库信息弹窗提供库 ID，绑定步骤见[部署与客户端使用](../operations/deployment-and-client.md) | 不读客户端数据库；分别验证空目录 checkout、非空目录导入限制、更新凭据；解绑不删普通文件。 |
 | `library status`、`sync [--confirm-delete]`、`watch` | CLI 的 Sync Base、Pending 及工作目录扫描；设备端执行 | 不把 Head 写成“设备已同步”。走通删除精确确认、两设备合并/冲突副本、进程中断与 journal 续跑。 |
 | `POST L/object-checks`、`GET/PUT L/blocks/{ObjectId}`、`GET/PUT L/objects/{ObjectType}/{ObjectId}`、`PUT L/head` | 绑定设备传输同步对象并更新 Head；这些原始对象和 Head 接口只接受 Bearer | 不提供对象编辑器。原 CLI 上传/下载、重复 PUT、摘要错误、缺对象、限流和强 If-Match CAS 均按原契约；Web 开关不影响。 |
 | `library restore --commit … --path …`、`restore --confirm …` | 在绑定设备选择文件、目录或根；先同步，预览后用候选的 12 位小写前缀确认 | 支持找回已删除的路径和目录叠加。预览后工作目录或 Head 变化须先同步并重新预览。 |
