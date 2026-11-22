@@ -16,7 +16,7 @@
   {{template "symbols"}}
   <main class="viewer" aria-label="文件预览">{{template "viewer-toolbar" .Data}}<div class="viewer-body">{{template "viewer-stage" .Data}}</div></main>
   {{else}}
-  {{$listView := or (eq .View "libraries") (eq .View "library") (eq .View "trash")}}
+  {{$listView := or (eq .View "libraries") (eq .View "library") (eq .View "trash") (eq .View "app-passwords")}}
   {{if .SignedIn}}
   <a class="skip" href="#content">跳到主要内容</a>
   {{template "symbols"}}
@@ -41,7 +41,7 @@
       <p class="rail-label">当前资料库</p>
       <a href="/web/libraries/{{$lib}}" {{if eq .View "library"}}aria-current="page"{{end}}>{{template "icon" "file"}}文件列表</a>
       <a href="/web/libraries/{{$lib}}/trash" {{if eq .View "trash"}}aria-current="page"{{end}}>{{template "icon" "trash"}}回收站</a>
-      <a href="/web/libraries/{{$lib}}/app-passwords" {{if eq .View "app-passwords"}}aria-current="page"{{end}}>{{template "icon" "server"}}应用密码</a>
+      <a href="/web/libraries/{{$lib}}/app-passwords" {{if eq .View "app-passwords"}}aria-current="page"{{end}}>{{template "icon" "key"}}应用密码</a>
       <a href="/web/libraries/{{$lib}}/retention" {{if eq .View "retention"}}aria-current="page"{{end}}>{{template "icon" "history"}}保留设置</a>
       {{end}}
       {{if .Admin}}

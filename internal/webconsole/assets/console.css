@@ -78,7 +78,7 @@ main.explorer { padding: 0 0 32px; }
 .libraries th:last-child { width: 11rem; }
 .files th:last-child { width: 13rem; }
 .trash-list th:not(:first-child) { width: clamp(9rem, 16vw, 13rem); }
-.trash-list .entry-link { border: 0; background: transparent; padding: 4px 0; text-align: left; }
+:is(.trash-list, .credential-list) .entry-link { border: 0; background: transparent; padding: 4px 0; text-align: left; }
 .trash-list .entry-link > span { min-width: 0; }
 .trash-origin { display: block; color: var(--quiet); font-size: 13px; font-weight: 400; }
 .trash-list .action-list { width: 10rem; }
@@ -101,6 +101,25 @@ main.explorer { padding: 0 0 32px; }
 .metadata dt { color: var(--quiet); }
 .metadata dd { margin: 0; }
 .metadata button { font-size: 14px; color: var(--blue); }
+
+/* Library credentials */
+.credential-toolbar, .credential-toolbar .location { flex-wrap: nowrap; }
+.credential-toolbar .location a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 44px; }
+.credential-toolbar h1, .credential-toolbar .action { flex: none; }
+.credential-toolbar .action:disabled { color: var(--quiet); background: var(--wash); cursor: not-allowed; }
+.credential-list th:nth-child(2) { width: 13rem; }
+.credential-list th:last-child { width: calc(var(--gutter) + 56px); }
+.credential-list .row-actions { width: fit-content; margin-left: auto; }
+.credential-list .action-list { left: auto; right: 0; transform: none; }
+.credential-list .action-list::before { left: auto; right: 17px; }
+.credential-list .destructive { color: var(--orange); }
+.credentials .action.destructive { background: var(--orange); }
+#issued-hint { margin-top: 8px; }
+#issued-credential { width: min(36rem, calc(100% - 32px)); }
+#issued-credential .metadata { align-items: center; }
+#issued-credential dd { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+#issued-credential [data-copy] { display: grid; place-items: center; width: 44px; padding: 0; }
+#issued-credential [data-copy-status] { margin-right: auto; }
 
 /* File version sidebar */
 .file-workspace:has(#version-sidebar:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) clamp(21rem, 29vw, 27rem); align-items: start; }
@@ -215,6 +234,7 @@ html { scroll-padding-top: calc(var(--bar) + 8px); }
   .metadata { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .metadata dd:not(:last-child) { margin-bottom: 8px; }
   .libraries td:nth-child(2) { grid-column: 2; grid-row: 1 / 3; padding-left: 10px; }
+  .credential-list td:last-child { grid-column: 2; grid-row: 1 / 3; }
   .trash-list tbody tr { grid-template-columns: minmax(0, 1fr); }
   .trash-list td.date:last-child { grid-row: 3; }
   :is(.files, .trash-list) .action-list { left: auto; right: 0; transform: none; }

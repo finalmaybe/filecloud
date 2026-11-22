@@ -56,9 +56,19 @@ if (entries) {
   });
 }
 
-const trashList = document.querySelector('.trash-list');
-if (trashList) {
-  trashList.addEventListener('click', event => {
+const issuedCredential = document.getElementById('issued-credential');
+if (issuedCredential) {
+  // The server renders it open so the one-time password is also visible without JavaScript.
+  issuedCredential.removeAttribute('open');
+  const done = issuedCredential.querySelector('form');
+  done.method = 'dialog';
+  issuedCredential.addEventListener('close', () => location.replace(done.action));
+  issuedCredential.showModal();
+}
+
+const listDialogs = document.querySelector('.trash-list, [data-list-dialogs]');
+if (listDialogs) {
+  listDialogs.addEventListener('click', event => {
     const button = event.target.closest('button[commandfor]');
     if (!button) return;
     event.preventDefault();
@@ -72,7 +82,7 @@ if (trashList) {
       menu.open = false;
       menu.querySelector('summary').focus({preventScroll: true});
     }
-    dialog.querySelector('form').reset();
+    dialog.querySelector('form')?.reset();
     dialog.showModal();
   });
 }
@@ -324,17 +334,23 @@ document.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-copy]');
   if (!button) return;
   const text = document.getElementById(button.dataset.copy);
+  let message;
   try {
     await navigator.clipboard.writeText(text.textContent);
-    button.textContent = '已复制';
-    document.querySelector('#feedback').textContent = '已复制到剪贴板';
+    message = '已复制';
   } catch {
     const range = document.createRange();
     range.selectNodeContents(text);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-    button.textContent = '已选中，请手动复制';
-    document.querySelector('#feedback').textContent = button.textContent;
+    message = '已选中，请手动复制';
+  }
+  const status = button.closest('dialog')?.querySelector('[data-copy-status]');
+  if (status) {
+    status.textContent = `${text.closest('dd').previousElementSibling.textContent}：${message}`;
+  } else {
+    button.textContent = message;
+    document.querySelector('#feedback').textContent = message;
   }
 });

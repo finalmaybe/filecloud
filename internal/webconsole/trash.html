@@ -31,8 +31,8 @@
           <div class="dialog-actions"><button type="button" commandfor="restore-{{.ID}}" command="close" autofocus>取消</button><button type="submit" class="action">确认</button></div>
         </form>
       </dialog></td>
-      <td class="date"><span class="mobile-label">删除于 </span>{{template "trash-time" .DeletedAt}}</td>
-      <td class="date"><span class="mobile-label">到期于 </span>{{template "trash-time" .ExpiresAt}}</td>
+      <td class="date"><span class="mobile-label">删除于 </span>{{template "local-timestamp" .DeletedAt}}</td>
+      <td class="date"><span class="mobile-label">到期于 </span>{{template "local-timestamp" .ExpiresAt}}</td>
     </tr>
   {{end}}</tbody>
 </table>
@@ -41,7 +41,7 @@
 {{else}}<div class="empty">{{template "icon" "trash"}}<h2>回收站为空。</h2></div>{{end}}
 {{end}}
 
-{{define "trash-time"}}<time datetime="{{.Format "2006-01-02T15:04:05Z"}}">{{.Format "2006-01-02 15:04 UTC"}}</time>
+{{define "local-timestamp"}}<time datetime="{{.Format "2006-01-02T15:04:05Z"}}">{{.Format "2006-01-02 15:04 UTC"}}</time>
 {{end}}
 {{define "retention"}}<section class="panel"><h1>保留设置</h1>{{if .Message}}<p role="status">{{.Message}}</p>{{end}}
 <form id="retention-form" class="fields" method="post"><label>回收站保留天数<input name="trash" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.TrashDays}} 天）" {{if gt .Data.Policy.TrashDays 0}}value="{{.Data.Policy.TrashDays}}"{{end}}></label>

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -25,20 +26,45 @@ var ErrDAVCondition = errors.New("DAV condition changed")
 type DAVCredential struct {
 	ID, Owner, Library, Name string
 	Created, Expires         time.Time
-	Revoked                  bool
 }
 
 func (s *Store) CreateDAVCredential(ctx context.Context, owner, lib, id, name string, now time.Time) (string, error) {
-	secret := rand.Text() + rand.Text()
+	secret, err := newDAVPassword()
+	if err != nil {
+		return "", err
+	}
 	hash := sha256.Sum256([]byte(secret))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO dav_credentials(id,owner,library,name,secret,created,expires) VALUES(?,?,?,?,?,?,?)`, id, owner, lib, name, hash[:], now.Unix(), now.AddDate(1, 0, 0).Unix())
+	_, err = s.db.ExecContext(ctx, `INSERT INTO dav_credentials(id,owner,library,name,secret,created,expires) VALUES(?,?,?,?,?,?,?)`, id, owner, lib, name, hash[:], now.Unix(), now.AddDate(1, 0, 0).Unix())
 	if err != nil {
 		return "", err
 	}
 	return secret, nil
 }
+
+func newDAVPassword() (string, error) {
+	const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const lower = "abcdefghijklmnopqrstuvwxyz"
+	const digits = "0123456789"
+	const alphabet = upper + lower + digits
+	limit := big.NewInt(int64(len(alphabet)))
+	var chars [26]byte
+	for {
+		for i := range chars {
+			n, err := rand.Int(rand.Reader, limit)
+			if err != nil {
+				return "", err
+			}
+			chars[i] = alphabet[n.Int64()]
+		}
+		password := string(chars[:])
+		if strings.ContainsAny(password, upper) && strings.ContainsAny(password, lower) && strings.ContainsAny(password, digits) {
+			return password, nil
+		}
+	}
+}
+
 func (s *Store) DAVCredentials(ctx context.Context, owner, lib string) ([]DAVCredential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,created,expires,revoked FROM dav_credentials WHERE owner=? AND library=? ORDER BY created DESC,id`, owner, lib)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,created,expires FROM dav_credentials WHERE owner=? AND library=? AND revoked=0 ORDER BY created DESC,id`, owner, lib)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +73,7 @@ func (s *Store) DAVCredentials(ctx context.Context, owner, lib string) ([]DAVCre
 	for rows.Next() {
 		var c DAVCredential
 		var a, b int64
-		if err := rows.Scan(&c.ID, &c.Name, &a, &b, &c.Revoked); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &a, &b); err != nil {
 			return nil, err
 		}
 		c.Created, c.Expires = time.Unix(a, 0).UTC(), time.Unix(b, 0).UTC()

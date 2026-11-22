@@ -52,11 +52,18 @@ func (d *drive) issue() (string, string) {
 	if w.Code != 201 || w.Header().Get("Cache-Control") != "no-store" {
 		d.t.Fatalf("issue: %d", w.Code)
 	}
-	m := regexp.MustCompile(`挂载用户名：<code>([^<]+)</code></p><p>应用密码：<code>([^<]+)</code>`).FindStringSubmatch(w.Body.String())
+	m := regexp.MustCompile(`(?s)<code id="issued-username">([^<]+)</code>.*?<code id="issued-password">([^<]+)</code>`).FindStringSubmatch(w.Body.String())
 	if m == nil {
 		d.t.Fatal("missing setup instructions")
 	}
-	return m[1], m[2]
+	password := m[2]
+	if !regexp.MustCompile(`^[A-Za-z0-9]{26}$`).MatchString(password) ||
+		!strings.ContainsAny(password, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") ||
+		!strings.ContainsAny(password, "abcdefghijklmnopqrstuvwxyz") ||
+		!strings.ContainsAny(password, "0123456789") {
+		d.t.Fatal("issued password must contain 26 alphanumeric characters with all three character classes")
+	}
+	return m[1], password
 }
 func (d *drive) call(code int, method, file, body string, headers ...string) *httptest.ResponseRecorder {
 	d.t.Helper()
@@ -129,8 +136,14 @@ func TestDAVCredentialsAndLockLifecycle(t *testing.T) {
 	d := newDrive(t)
 	first, secret := d.id, d.secret
 	second, other := d.issue()
-	if w := d.req("GET", d.page(), nil); strings.Contains(w.Body.String(), secret) || !strings.Contains(w.Body.String(), first) {
-		t.Fatal("credential list not redacted")
+	list := d.req("GET", d.page(), nil).Body.String()
+	if strings.Contains(list, secret) || strings.Contains(list, other) {
+		t.Fatal("credential list contains a secret")
+	}
+	for _, control := range []string{`class="entry-table credential-list"`, `commandfor="create-credential"`, `commandfor="view-` + first + `"`, `commandfor="delete-` + first + `"`, `<time datetime=`} {
+		if !strings.Contains(list, control) {
+			t.Fatal("missing credential list control:", control)
+		}
 	}
 	d.call(201, "LOCK", "new", lockInfo)
 	d.call(200, "GET", "new", "")
@@ -142,6 +155,10 @@ func TestDAVCredentialsAndLockLifecycle(t *testing.T) {
 	}
 	if d.req("POST", d.page()+"/"+first+"/revoke", url.Values{}).Code != 303 {
 		t.Fatal("revoke failed")
+	}
+	list = d.req("GET", d.page(), nil).Body.String()
+	if strings.Contains(list, first) || !strings.Contains(list, second) {
+		t.Fatal("deleted credential must disappear without removing its sibling")
 	}
 	d.call(200, "LOCK", "new", lockInfo)
 	d.id, d.secret = first, secret
