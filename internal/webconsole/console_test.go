@@ -1,8 +1,10 @@
 package webconsole_test
 
 import (
+	"mime"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,38 +85,47 @@ func TestEmbeddedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	javascript := []string{"text/javascript", "application/javascript"}
 	for _, tc := range []struct {
 		method, path string
 		status       int
 		location     string
-		media, text  string
+		media        []string
+		text         string
 	}{
-		{"GET", "/web", 301, "/web/", "", ""},
-		{"GET", "/web/", 303, "/web/login", "", ""},
-		{"HEAD", "/web/", 303, "/web/login", "", ""},
-		{"GET", "/web/login", 200, "", "text/html", `autocomplete="current-password"`},
-		{"GET", "/web/libraries", 303, "/web/login", "", ""},
-		{"GET", "/web/libraries/example/history", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/libraries/example/snapshot/commit", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/libraries/example/info", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/libraries/example/file-history", 303, "/web/login", "", ""},
-		{"GET", "/web/overview", 303, "/web/login", "", ""},
-		{"GET", "/web/accounts", 303, "/web/login", "", ""},
-		{"GET", "/web/not-a-page", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/assets/", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/shell.html", 404, "", "text/html", "页面不存在"},
-		{"GET", "/web/assets/console.css", 200, "", "text/css", ".skip"},
-		{"GET", "/web/assets/atlas.svg", 200, "", "image/svg+xml", "<svg"},
-		{"GET", "/web/assets/libraries.js", 200, "", "text/javascript", "loadLibraries"},
-		{"GET", "/web/assets/local-time.js", 200, "", "text/javascript", "setLocalTime"},
-		{"POST", "/web/login", 403, "", "", ""},
+		{"GET", "/web", 301, "/web/", nil, ""},
+		{"GET", "/web/", 303, "/web/login", nil, ""},
+		{"HEAD", "/web/", 303, "/web/login", nil, ""},
+		{"GET", "/web/login", 200, "", []string{"text/html"}, `autocomplete="current-password"`},
+		{"GET", "/web/libraries", 303, "/web/login", nil, ""},
+		{"GET", "/web/libraries/example/history", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/libraries/example/snapshot/commit", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/libraries/example/info", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/libraries/example/file-history", 303, "/web/login", nil, ""},
+		{"GET", "/web/overview", 303, "/web/login", nil, ""},
+		{"GET", "/web/accounts", 303, "/web/login", nil, ""},
+		{"GET", "/web/not-a-page", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/assets/", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/shell.html", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web/assets/console.css", 200, "", []string{"text/css"}, ".skip"},
+		{"GET", "/web/assets/atlas.svg", 200, "", []string{"image/svg+xml"}, "<svg"},
+		{"GET", "/web/assets/libraries.js", 200, "", javascript, "loadLibraries"},
+		{"GET", "/web/assets/local-time.js", 200, "", javascript, "setLocalTime"},
+		{"POST", "/web/login", 403, "", nil, ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, "https://console.example"+tc.path, nil)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			if w.Code != tc.status || w.Header().Get("Location") != tc.location || !strings.HasPrefix(w.Header().Get("Content-Type"), tc.media) || !strings.Contains(w.Body.String(), tc.text) {
-				t.Fatalf("status=%d, location=%q, type=%q, expected marker present=%t", w.Code, w.Header().Get("Location"), w.Header().Get("Content-Type"), strings.Contains(w.Body.String(), tc.text))
+			if len(tc.media) > 0 {
+				contentType := w.Header().Get("Content-Type")
+				media, _, err := mime.ParseMediaType(contentType)
+				if err != nil || !slices.Contains(tc.media, media) {
+					t.Errorf("Content-Type = %q, want one of %v", contentType, tc.media)
+				}
+			}
+			if w.Code != tc.status || w.Header().Get("Location") != tc.location || !strings.Contains(w.Body.String(), tc.text) {
+				t.Fatalf("status=%d, location=%q, expected marker present=%t", w.Code, w.Header().Get("Location"), strings.Contains(w.Body.String(), tc.text))
 			}
 			if tc.method == "HEAD" && w.Body.Len() != 0 {
 				t.Error("HEAD returned a body")
