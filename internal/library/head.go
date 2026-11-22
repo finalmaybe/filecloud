@@ -102,8 +102,14 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 	if err == nil && len(missing.ids) == 0 {
 		removed, err = (&Catalog{core: h}).removedPaths(validationRequest.Context(), owner, libraryID, current.HeadCommitID, commitID)
 	}
-	releaseValidation()
+	var locks storage.DAVChange
+	if err == nil && len(missing.ids) == 0 {
+		locks, err = (&Catalog{core: h}).nativeLockCheck(validationRequest.Context(), owner, libraryID, current.HeadCommitID, commitID)
+	}
 	switch {
+	case errors.Is(err, storage.ErrDAVLocked):
+		h.writeDAVLocked(w)
+		return
 	case errors.Is(err, object.ErrPayloadTooLarge):
 		h.writeError(w, http.StatusRequestEntityTooLarge, 3005, "snapshot too large")
 		return
@@ -135,7 +141,11 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	updated, err := h.store.PublishHead(r.Context(), owner, libraryID, current.HeadCommitID, current.HeadVersion, commitID, roles, h.now().UTC().Truncate(0), storage.HeadChange{Removed: removed})
+	updated, err := h.store.PublishHead(r.Context(), owner, libraryID, current.HeadCommitID, current.HeadVersion, commitID, roles, h.now().UTC().Truncate(0), storage.HeadChange{Removed: removed, DAV: locks})
+	if errors.Is(err, storage.ErrDAVLocked) {
+		h.writeDAVLocked(w)
+		return
+	}
 	if errors.Is(err, storage.ErrHeadConflict) {
 		latest, getErr := h.store.GetLibrary(r.Context(), owner, libraryID)
 		if getErr != nil {
@@ -156,6 +166,11 @@ func (h *handler) updateHead(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.writeHead(w, http.StatusOK, updated)
+}
+
+func (h *handler) writeDAVLocked(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "2")
+	h.writeJSON(w, 503, map[string]any{"RetCode": 5001, "Message": "resource locked", "Reason": "DAVLocked"})
 }
 
 func (h *handler) headLibrary(w http.ResponseWriter, r *http.Request) (string, string, storage.Library, bool) {

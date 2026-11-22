@@ -32,7 +32,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 正式发布包提供两个命令入口：`filecloud-server` 用于服务端初始化、运行和本地维护，`filecloud-client` 用于登录、资料库管理和同步。从旧版升级时，把脚本里的 `filecloud` 改为 `filecloud-client`，已有资料库绑定可继续使用。新部署和服务端自动化使用 `filecloud-server`。以下能力暂不提供：
 
 - Docker 镜像和移动客户端。
-- WebDAV、虚拟盘、S3 或其他对象存储后端
+- 虚拟盘、S3 或其他对象存储后端
 - 多节点部署、PostgreSQL/MySQL 后端
 - 共享资料库、成员权限、协作锁和公开注册
 - 整个资料库删除、用户可配置容量配额
@@ -147,6 +147,8 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 ```
 
 非回环服务地址必须使用 HTTPS。生产部署应让服务端只监听回环地址，再通过可信反向代理提供 TLS；不要把 Bearer token 写入命令行、Git 仓库或普通日志。
+
+源码版还可[启用 WebDAV 网络盘](./docs/operations/deployment-and-client.md#启用-webdav-网络盘)。在 Web 资料库详情的「应用密码」页签发凭据，复制地址即可挂载该库。可写客户端需支持写锁或版本条件；已验证范围见[验收记录](./docs/acceptance/webdav-office.md)。
 
 ## 常用命令
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -60,26 +59,40 @@ func (c *Catalog) RestoreFileVersion(ctx context.Context, owner string, v Versio
 }
 
 func (c *Catalog) publishWebRoot(ctx context.Context, owner string, current storage.Library, root, message string, change storage.HeadChange) (string, error) {
-	h := c.core
-	anchor := *current.HeadCommitID
-	lib := current.ID
-	now := h.now().UTC()
-	// One stable logical device identifies publications made by the Web console.
 	const webDevice = "0db7e081-c11d-4afa-86ed-93cdba397d53"
-	commit := object.Commit{Root: root, Parents: []string{anchor}, AuthorUserID: owner, DeviceID: webDevice,
+	return c.publishRoot(ctx, current, root, message, webDevice, change)
+}
+
+func (c *Catalog) publishRoot(ctx context.Context, current storage.Library, root, message, device string, change storage.HeadChange) (string, error) {
+	h := c.core
+	owner, lib := current.OwnerUserID, current.ID
+	now := h.now().UTC()
+	var parents []string
+	if current.HeadCommitID != nil {
+		parents = []string{*current.HeadCommitID}
+	}
+	commit := object.Commit{Root: root, Parents: parents, AuthorUserID: owner, DeviceID: device,
 		CreatedAt: now.Format(time.RFC3339), Message: message}
 	id, err := c.putVersionObject(ctx, owner, lib, "commits", commit.Bytes())
 	if err != nil {
 		return "", err
 	}
-	missing, roles, err := h.validateCandidate(ctx, owner, lib, &anchor, id)
+	missing, roles, err := h.validateCandidate(ctx, owner, lib, current.HeadCommitID, id)
 	if errors.Is(err, errCorruptObject) || len(missing.ids) != 0 {
 		return "", errHistoryCorrupt
 	}
 	if err != nil {
 		return "", err
 	}
-	_, err = h.store.PublishHead(ctx, owner, lib, &anchor, current.HeadVersion, id, roles, now, change)
+	if change.DAV.Credential == "" {
+		change.DAV, err = c.nativeLockCheck(ctx, owner, lib, current.HeadCommitID, id)
+	} else {
+		change.Removed, err = c.removedPaths(ctx, owner, lib, current.HeadCommitID, id)
+	}
+	if err != nil {
+		return "", err
+	}
+	_, err = h.store.PublishHead(ctx, owner, lib, current.HeadCommitID, current.HeadVersion, id, roles, h.now().UTC(), change)
 	return id, err
 }
 
@@ -127,15 +140,8 @@ func (c *Catalog) requireHistoricalVersion(ctx context.Context, owner string, v 
 
 // An empty source removes the leaf; neither operation changes sibling entries.
 func (c *Catalog) replacePathEntry(ctx context.Context, owner string, v VersionTarget, root string, source object.DirectoryEntry) (string, error) {
-	// Keep only ancestor IDs and entry positions; a deep path may contain large directories.
-	type ancestor struct {
-		id    string
-		index int
-	}
-	var ancestors []ancestor
-	entry, err := c.walkPath(ctx, owner, v.LibraryID, root, v.Path, func(id string, index int) {
-		ancestors = append(ancestors, ancestor{id, index})
-	})
+	t := DAVTree{c: c, Library: storage.Library{ID: v.LibraryID, OwnerUserID: owner}, root: root}
+	entry, err := t.Entry(ctx, v.Path)
 	if err != nil {
 		return "", err
 	}
@@ -145,27 +151,7 @@ func (c *Catalog) replacePathEntry(ctx context.Context, owner string, v VersionT
 	if entry == source {
 		return root, nil
 	}
-	id := source.ID
-	for i := len(ancestors) - 1; i >= 0; i-- {
-		parent := ancestors[i]
-		dir, err := c.directory(ctx, owner, v.LibraryID, parent.id)
-		if err != nil {
-			return "", err
-		}
-		if i == len(ancestors)-1 && source.Type == "" {
-			dir.Entries = slices.Delete(dir.Entries, parent.index, parent.index+1)
-		} else {
-			dir.Entries[parent.index].ID = id
-			if i == len(ancestors)-1 {
-				dir.Entries[parent.index].ModifiedAt = source.ModifiedAt
-			}
-		}
-		id, err = c.putVersionObject(ctx, owner, v.LibraryID, "directories", dir.Bytes())
-		if err != nil {
-			return "", err
-		}
-	}
-	return id, nil
+	return t.patch(ctx, root, v.Path, source)
 }
 
 func (c *Catalog) putVersionObject(ctx context.Context, owner, lib, kind string, data []byte) (string, error) {

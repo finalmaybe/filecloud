@@ -188,6 +188,9 @@ func (s *Store) PublishHead(ctx context.Context, ownerUserID, libraryID string, 
 	if changed != 1 {
 		return Library{}, ErrHeadConflict
 	}
+	if err := change.DAV.apply(ctx, tx, ownerUserID, libraryID, now); err != nil {
+		return Library{}, err
+	}
 	seenRoles := make(map[string]struct{}, len(roles))
 	candidateRoleFound := false
 	for _, role := range roles {

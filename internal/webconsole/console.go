@@ -20,6 +20,7 @@ var files embed.FS
 
 type Build struct{ Version, Commit, BuildDate string }
 type Config struct {
+	DAVOrigin  string
 	Build      Build
 	AdminUsers []string
 	Catalog    *library.Catalog
@@ -75,6 +76,9 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 		c.show(w, r, who, 200, "我的资料库", "libraries", defaults, "")
 	}))
 	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
+	mux.HandleFunc("GET /web/libraries/{library}/app-passwords", c.private(c.appPasswords))
+	mux.HandleFunc("POST /web/libraries/{library}/app-passwords", c.private(c.appPasswords))
+	mux.HandleFunc("POST /web/libraries/{library}/app-passwords/{credential}/revoke", c.private(c.revokePassword))
 	mux.HandleFunc("GET /web/libraries/{library}/trash", c.private(c.trash))
 	mux.HandleFunc("POST /web/libraries/{library}/trash/move", c.private(c.moveTrash))
 	mux.HandleFunc("POST /web/libraries/{library}/trash/restore", c.private(c.restoreTrash))

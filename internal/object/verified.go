@@ -3,6 +3,7 @@ package object
 import (
 	"bytes"
 	"errors"
+	"strconv"
 )
 
 // ErrInvalidPersistedObject reports bytes that do not match their immutable identity.
@@ -12,6 +13,10 @@ var ErrInvalidPersistedObject = errors.New("invalid persisted object")
 type File struct {
 	Blocks []string
 	Size   int64
+}
+
+func (f File) Bytes() []byte {
+	return appendFile(nil, fileObject{Blocks: f.Blocks, Size: strconv.FormatInt(f.Size, 10)})
 }
 
 // DirectoryEntry describes one typed child reference.
@@ -50,7 +55,7 @@ func VerifyFile(data []byte, id string) (File, error) {
 	if err != nil {
 		return File{}, ErrInvalidPersistedObject
 	}
-	size, err := parseDecimal(value.Size, _maxFileSize)
+	size, err := parseDecimal(value.Size, MaxFileSize)
 	if err != nil {
 		return File{}, ErrInvalidPersistedObject
 	}

@@ -49,6 +49,10 @@ Web 用 host-only、`Path=/`、`HttpOnly`、`SameSite=Lax` 的会话 cookie；HT
 
 预览和版本链接使用完整提交 ID；绑定设备下次同步时接收 Web 恢复发布的新版本。安全恢复继续遵循 [ADR-0004](../adr/0004-restore-history-with-a-forward-commit.md)，合并继续遵循 [ADR-0003](../adr/0003-merge-on-the-client.md)。
 
+## 资料库应用密码
+
+资料库详情侧栏的「应用密码」打开当前库的独立管理页。所有者可在此创建、列出或撤销凭据，复制挂载地址。仅启用 Web 时仍可查看和撤销已有凭据；创建需同时启用 `--dav-origin`。入口、表单权限及验收见[可写 WebDAV 技术方案](./webdav-office.md#2-应用密码按资料库管理)。
+
 ## 验收与原设计归档
 
 文件列表、预览、单文件版本恢复和删除见[文件版本界面验收记录](../acceptance/web-console/file-versions.md)。构建归档仍按[发布门禁](../distribution.md)执行。

@@ -108,6 +108,7 @@ func metadataMigrations() []migration {
 			)`,
 		}},
 		{version: 8, statements: retentionMigration},
+		{version: 9, statements: davMigration},
 	}
 }
 

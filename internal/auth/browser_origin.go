@@ -56,14 +56,21 @@ func loopback(host string) bool {
 
 func (o *BrowserOrigin) Secure() bool { return o.scheme == "https" }
 
+func (o *BrowserOrigin) MatchesHost(host string) bool {
+	return strings.EqualFold(host, o.host) || strings.EqualFold(host, o.alternate)
+}
+func (o *BrowserOrigin) MatchesOrigin(origin string) bool {
+	return strings.EqualFold(origin, o.scheme+"://"+o.host) || strings.EqualFold(origin, o.scheme+"://"+o.alternate)
+}
+
 // RequestStatus returns zero for an allowed request, or the HTTP rejection status.
 func (o *BrowserOrigin) RequestStatus(r *http.Request) int {
-	if !strings.EqualFold(r.Host, o.host) && !strings.EqualFold(r.Host, o.alternate) {
+	if !o.MatchesHost(r.Host) {
 		return http.StatusMisdirectedRequest
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		v := r.Header.Values("Origin")
-		if len(v) != 1 || !(strings.EqualFold(v[0], o.scheme+"://"+o.host) || strings.EqualFold(v[0], o.scheme+"://"+o.alternate)) {
+		if len(v) != 1 || !o.MatchesOrigin(v[0]) {
 			return http.StatusForbidden
 		}
 	}

@@ -12,10 +12,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/auth"
+	"github.com/mingming-cn/filecloud/internal/dav"
 	"github.com/mingming-cn/filecloud/internal/health"
 	libraryapi "github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/opslog"
@@ -94,6 +96,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	flags.SetOutput(stderr)
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
+	davOrigin := flags.String("dav-origin", "", "Enable /dav/ for this public origin (default: disabled)")
 	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
 	gcAt := flags.String("gc-at", "03:00", "Daily in-process garbage collection time (local HH:MM or off)")
 	trashDays := flags.Int("trash-days", 0, "Set saved default recycle bin retention (initially 30 days)")
@@ -126,7 +129,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		return err
 	}
 	if *dataDir == "" || flags.NArg() != 0 {
-		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--web-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
+		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--web-origin origin] [--dav-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
 	}
 	if *globalKDFCapacity < 1 || *sourceIPKDFCapacity < 1 || *usernameKDFCapacity < 1 {
 		return errors.New("kdf concurrency limits must be positive")
@@ -172,7 +175,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if err != nil {
 		return err
 	}
-	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
+	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build), DAVOrigin: *davOrigin}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -443,7 +446,22 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 		mux.Handle("/web", web)
 		mux.Handle("/web/", web)
 	}
-	requests := newRequestTracker(mux)
+	var root http.Handler = mux
+	if webConfig.DAVOrigin != "" {
+		origin, err := auth.NewBrowserOrigin(webConfig.DAVOrigin, address)
+		if err != nil {
+			return errors.Join(err, listener.Close())
+		}
+		handler := &dav.Handler{Origin: origin, Store: store, Catalog: libraries}
+		root = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/dav" || strings.HasPrefix(r.URL.Path, "/dav/") {
+				handler.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	requests := newRequestTracker(root)
 	server := &http.Server{
 		Handler: requests, ErrorLog: log.New(opslog.RedactedWriter(logger, "serve", "", "http_server"), "", 0),
 		ReadHeaderTimeout: 5 * time.Second,

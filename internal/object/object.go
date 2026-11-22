@@ -28,13 +28,13 @@ const (
 	// MaxDirectoryObjectSize is the largest encoded Directory accepted by the protocol.
 	MaxDirectoryObjectSize = 32 << 20
 
-	_maxFileSize    = 1 << 40
-	_maxBlocks      = 262144
-	_maxEntries     = 100000
-	_maxParents     = 2
-	_maxJSONNesting = 256
-	_maxPathDepth   = 256
-	_maxPathBytes   = 1024
+	MaxFileSize         = 1 << 40
+	MaxFileBlocks       = MaxFileSize / MaxBlockSize
+	MaxDirectoryEntries = 100000
+	_maxParents         = 2
+	_maxJSONNesting     = 256
+	_maxPathDepth       = 256
+	_maxPathBytes       = 1024
 )
 
 var (
@@ -136,7 +136,7 @@ func decodeFile(data []byte) (fileObject, error) {
 			}
 			value.Blocks = make([]string, 0)
 			for decoder.More() {
-				if len(value.Blocks) == _maxBlocks {
+				if len(value.Blocks) == MaxFileBlocks {
 					return fileObject{}, ErrPayloadTooLarge
 				}
 				block, err := decodeJSONString(decoder, "block id", 3)
@@ -203,7 +203,7 @@ func checkFileBudgets(data []byte) error {
 			}
 			count := 0
 			for decoder.More() {
-				if count == _maxBlocks {
+				if count == MaxFileBlocks {
 					return ErrPayloadTooLarge
 				}
 				if _, err := decodeJSONString(decoder, "block id", 3); err != nil {
@@ -219,7 +219,7 @@ func checkFileBudgets(data []byte) error {
 			if err != nil {
 				return err
 			}
-			if _, err := parseDecimal(size, _maxFileSize); err != nil {
+			if _, err := parseDecimal(size, MaxFileSize); err != nil {
 				return err
 			}
 		case "Type", "Version":
@@ -247,7 +247,7 @@ func canonicalFile(data []byte) ([]byte, error) {
 	if value.Type != "File" || value.Version != 1 || value.Blocks == nil {
 		return nil, errors.New("invalid file object")
 	}
-	size, err := parseDecimal(value.Size, _maxFileSize)
+	size, err := parseDecimal(value.Size, MaxFileSize)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func decodeDirectory(data []byte) (directoryObject, error) {
 			}
 			value.Entries = make([]directoryEntry, 0)
 			for decoder.More() {
-				if len(value.Entries) == _maxEntries {
+				if len(value.Entries) == MaxDirectoryEntries {
 					return directoryObject{}, ErrPayloadTooLarge
 				}
 				entry, err := decodeDirectoryEntry(decoder)

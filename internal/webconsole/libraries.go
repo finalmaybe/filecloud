@@ -22,6 +22,8 @@ func (c *console) problem(w http.ResponseWriter, r *http.Request, who identity, 
 		w.Header().Set("Retry-After", "1")
 	case errors.Is(err, library.ErrSnapshotExpired):
 		code, msg = 410, "此历史快照的保留期已结束。"
+	case errors.Is(err, storage.ErrDAVLocked):
+		code, msg = 423, "文档正在网络盘中编辑，请在解锁后重试。"
 	case errors.Is(err, library.ErrRestoreOccupied):
 		code, msg = 409, "恢复位置已有文件或目录。请返回回收站，填写其他恢复路径；原有内容未被覆盖。"
 	case errors.Is(err, storage.ErrHeadConflict):

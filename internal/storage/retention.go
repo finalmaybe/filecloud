@@ -130,6 +130,7 @@ type TrashEntry struct {
 	Versions             []ArchivedVersion
 }
 type HeadChange struct {
+	DAV         DAVChange
 	Removed     []TrashEntry
 	RestoreID   int64
 	Destination string

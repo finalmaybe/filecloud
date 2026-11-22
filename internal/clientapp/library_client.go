@@ -2989,6 +2989,10 @@ func updateRemoteHeadWithAttempts(ctx context.Context, base *url.URL, libraryID 
 			return remoteHead{}, false, fmt.Errorf("publish library Head: %w", err)
 		}
 		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+			var failure struct{ Reason string }
+			if status == http.StatusServiceUnavailable && json.Unmarshal(data, &failure) == nil && failure.Reason == "DAVLocked" {
+				return remoteHead{}, false, errors.New("文档正在网络盘中编辑，本地修改已保留")
+			}
 			if attempt+1 == attempts {
 				return remoteHead{}, false, fmt.Errorf("publish library Head failed after %d attempts: server returned %s",
 					attempts, http.StatusText(status))

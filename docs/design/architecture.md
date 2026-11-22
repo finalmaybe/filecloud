@@ -8,7 +8,7 @@
 
 第一阶段是单节点 Go 服务端和跨平台 Go CLI。一个用户拥有多个资料库，一个资料库可在多个设备上绑定一个工作目录。服务端保存完整不可变历史；客户端通过扫描、对象传输和 Head CAS 收敛。
 
-不兼容 Seafile。WebDAV、GUI、移动端和虚拟盘未来都只能作为同一资料库领域层之上的独立适配层。
+不兼容 Seafile。WebDAV 是资料库上的可选 HTTP 入口；GUI、移动端和虚拟盘同样应复用资料库能力。
 
 ## 系统结构
 
@@ -21,7 +21,7 @@ flowchart LR
     H --> D[资料库领域层]
     D --> Q[(SQLite 元数据)]
     D --> O[(本地内容对象)]
-    V[未来 WebDAV] -.-> D
+    V[WebDAV 网络盘] --> D
     G[未来 GUI] -.-> S
 ```
 
@@ -303,4 +303,4 @@ Head 发布验证当前 Root；合并提交还验证第二 parent 首次引入�
 - Android：文件浏览、显式传输、按需离线和单向备份优先，不承诺完整镜像。
 - iOS：使用 File Provider 的 item、materialize、evict 和 pin 模型，不常驻桌面同步循环。
 - 虚拟盘：树元数据同步与内容缓存是独立状态机，后续单独实现。
-- WebDAV：把 `PUT/DELETE/MOVE/MKCOL` 转为 Commit，并用 ETag/Head CAS 防覆盖；不能替代 block 同步 API。
+- WebDAV（源码版可选）：[可写网络盘办公方案](./webdav-office.md)将路径操作转为提交，通过资源 ETag、跨协议写锁和 Head CAS 防止覆盖；原生客户端继续使用分块同步 API。
