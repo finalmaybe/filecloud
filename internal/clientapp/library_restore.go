@@ -21,7 +21,7 @@ func runLibraryRestore(ctx context.Context, args []string, stdout, stderr io.Wri
 		return err
 	}
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library restore --client-dir path --worktree path --commit 64-hex --path relative-path-or-dot | --confirm 12-hex-prefix")
+		return errors.New("usage: filecloud-client library restore --client-dir path --worktree path --commit 64-hex --path relative-path-or-dot | --confirm 12-hex-prefix")
 	}
 	var commitSet, pathSet, confirmSet bool
 	flags.Visit(func(value *flag.Flag) {
@@ -110,7 +110,7 @@ func writeRestorePreview(output io.Writer, clientDir, worktree string, preview r
 			return fmt.Errorf("write restore preview path: %w", err)
 		}
 	}
-	if _, err := fmt.Fprintf(output, "truncated: %t\nconfirm: filecloud library restore --client-dir %s --worktree %s --confirm %s\n", preview.truncated, clientDir, worktree, preview.confirmationPrefix()); err != nil {
+	if _, err := fmt.Fprintf(output, "truncated: %t\nconfirm: filecloud-client library restore --client-dir %s --worktree %s --confirm %s\n", preview.truncated, clientDir, worktree, preview.confirmationPrefix()); err != nil {
 		return fmt.Errorf("write restore confirmation: %w", err)
 	}
 	return nil

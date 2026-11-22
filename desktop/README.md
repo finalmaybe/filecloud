@@ -1,6 +1,6 @@
 # Filecloud Desktop（开发预览）
 
-三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud` 子程序；无需开启服务端 Web 控制台。设计与范围：[PRD](../docs/design/desktop-client-prd.md)、[技术方案](../docs/design/desktop-client-architecture.md)、[预览图](../docs/design/desktop-mockups/README.md)。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
+三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud-client` 子程序；无需开启服务端 Web 控制台。设计与范围：[PRD](../docs/design/desktop-client-prd.md)、[技术方案](../docs/design/desktop-client-architecture.md)、[预览图](../docs/design/desktop-mockups/README.md)。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
 
 ## 试用
 
@@ -13,7 +13,7 @@
 
 ### Linux：运行 AppImage
 
-将 `desktop/out/filecloud-desktop-linux-amd64.AppImage` 放在固定位置，然后运行：
+将 AppImage 放在固定位置。以下是本地 `dev` 构建的文件名；从 Release 下载时，请使用含版本号的实际文件名，例如 `filecloud-desktop-v1.2.3-linux-amd64.AppImage`：
 
 ```bash
 chmod +x filecloud-desktop-linux-amd64.AppImage
@@ -41,4 +41,4 @@ AppImage 从构建机安装的 Ubuntu 软件包收集运行库。发行方应在
 
 - 根目录 `go test ./...`；前端完成构建后，在 `desktop/` 运行 `go test ./...`。Linux/macOS 桌面 module 需 `CGO_ENABLED=1` 及原生依赖。
 - 将 `FILECLOUD_DESKTOP_CLI` 和 `FILECLOUD_DESKTOP_SERVER` 设为本次构建的两个**绝对路径**，在目标系统受支持的本地卷上从 `desktop/` 运行 `go test -run '^TestDesktopTwoDevices$' -count=1 -v`。测试在该卷创建临时服务和两个设备，通过真实 CLI 验证文件收敛、暂停待确认、拒绝错误候选、重启恢复、确认后删除传播、历史和解绑；测试不会使用实际系统凭据库。此项验证 Go 主进程与 CLI，不替代真实窗口验收。
-- [桌面 CI](../.github/workflows/desktop.yml) 产生预览安装包，不上传正式 Release。真实安装、关窗、系统入口唤起、读屏/键盘及签名按 [A1–A6](../docs/design/desktop-client-prd.md) 单独验收。
+- 推送 `vMAJOR.MINOR.PATCH` tag 后，[发布流程](../.github/workflows/release.yml)调用[桌面构建](../.github/workflows/desktop.yml)。桌面安装包命名为 `filecloud-desktop-<tag>-<os>-<arch>.<格式>`，与 CLI 归档一起发布到该 tag 的 GitHub Release，共用 `SHA256SUMS`。直接推送分支或创建 PR 不触发发布。真实安装、关窗、系统入口唤起、读屏/键盘及签名按 [A1–A6](../docs/design/desktop-client-prd.md) 单独验收。

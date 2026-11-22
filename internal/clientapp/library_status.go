@@ -33,7 +33,7 @@ func runLibraryStatus(ctx context.Context, args []string, stdout, stderr io.Writ
 		return err
 	}
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library status --client-dir path --worktree path")
+		return errors.New("usage: filecloud-client library status --client-dir path --worktree path")
 	}
 	dir, err := canonicalStateDir(*clientDir)
 	if err != nil {
@@ -80,7 +80,7 @@ func readLibraryStatus(ctx context.Context, dir, path string) (_ libraryStatus, 
 		return libraryStatus{}, fmt.Errorf("read client binding: %w", err)
 	}
 	status := libraryStatus{LibraryID: binding.LibraryID, Worktree: path, SyncBase: binding.SyncBase}
-	next := []string{"filecloud", "library", "sync", "--client-dir", dir, "--worktree", path}
+	next := []string{"filecloud-client", "library", "sync", "--client-dir", dir, "--worktree", path}
 	if checkout {
 		status.Pending, status.NextCommand = "checkout", next
 		return status, nil

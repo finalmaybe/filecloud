@@ -200,7 +200,7 @@ CLI 恢复在绑定设备构造候选，不调用 Web 的单文件恢复处理�
 ### 列出历史
 
 ```text
-filecloud library history list \
+filecloud-client library history list \
   --client-dir PATH --worktree PATH \
   [--page-size 1..500] [--page-token TOKEN] [--include-merged]
 ```
@@ -212,7 +212,7 @@ filecloud library history list \
 ### 检查历史快照
 
 ```text
-filecloud library history inspect \
+filecloud-client library history inspect \
   --client-dir PATH --worktree PATH --commit 64-HEX \
   [--path RELATIVE-PATH-OR-DOT] [--page-size 1..500] [--page-token TOKEN]
 ```
@@ -224,7 +224,7 @@ filecloud library history inspect \
 ### 预览恢复
 
 ```text
-filecloud library restore \
+filecloud-client library restore \
   --client-dir PATH --worktree PATH \
   --commit 64-HEX --path RELATIVE-PATH-OR-DOT
 ```
@@ -271,7 +271,7 @@ removed descendants by type replacement: <count>
 preserved current-only paths: <count>
 changed paths: <up to 100 canonical paths>
 truncated: <true|false>
-confirm: filecloud library restore ... --confirm <12-hex>
+confirm: filecloud-client library restore ... --confirm <12-hex>
 ```
 
 路径列表允许出现在发起命令的本地标准输出，但不得进入服务端日志。不得输出文件内容。超过 100 条时按规范路径字节序输出前 100 条，并用总数和 `truncated: true` 明确截断。
@@ -279,7 +279,7 @@ confirm: filecloud library restore ... --confirm <12-hex>
 ### 确认恢复
 
 ```text
-filecloud library restore \
+filecloud-client library restore \
   --client-dir PATH --worktree PATH --confirm 12-HEX
 ```
 

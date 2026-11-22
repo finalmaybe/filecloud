@@ -31,11 +31,11 @@ func TestRunInitAndArguments(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "no command", want: "usage: filecloud"},
+		{name: "no command", want: "usage: filecloud-client"},
 		{name: "unknown command", args: []string{"unknown"}, want: `unknown command "unknown"`},
-		{name: "init missing data directory", args: []string{"init"}, want: "usage: filecloud init"},
-		{name: "serve missing data directory", args: []string{"serve"}, want: "usage: filecloud serve"},
-		{name: "unexpected positional argument", args: []string{"init", "--data-dir", dataDir, "extra"}, want: "usage: filecloud init"},
+		{name: "init missing data directory", args: []string{"init"}, want: "usage: filecloud-client init"},
+		{name: "serve missing data directory", args: []string{"serve"}, want: "usage: filecloud-client serve"},
+		{name: "unexpected positional argument", args: []string{"init", "--data-dir", dataDir, "extra"}, want: "usage: filecloud-client init"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := run(t.Context(), test.args, strings.NewReader(""), io.Discard, io.Discard)
@@ -56,7 +56,7 @@ func TestRunVersion(t *testing.T) {
 	if stdout.String() != want {
 		t.Fatalf("version output = %q, want %q", stdout.String(), want)
 	}
-	if err := Run(t.Context(), []string{"version", "extra"}, strings.NewReader(""), io.Discard, io.Discard, build); err == nil || !strings.Contains(err.Error(), "usage: filecloud version") {
+	if err := Run(t.Context(), []string{"version", "extra"}, strings.NewReader(""), io.Discard, io.Discard, build); err == nil || !strings.Contains(err.Error(), "usage: filecloud-client version") {
 		t.Fatalf("version with extra argument error = %v, want usage", err)
 	}
 }

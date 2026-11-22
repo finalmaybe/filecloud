@@ -75,7 +75,7 @@ func runLibraryHistoryInspect(ctx context.Context, args []string, stdout, stderr
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: filecloud library history inspect --client-dir path --worktree path --commit 64-hex [--path relative-path-or-dot] [--page-size n] [--page-token token]"
+	const usage = "usage: filecloud-client library history inspect --client-dir path --worktree path --commit 64-hex [--path relative-path-or-dot] [--page-size n] [--page-token token]"
 	if *clientDir == "" || *worktree == "" || *commitID == "" || flags.NArg() != 0 {
 		return errors.New(usage)
 	}

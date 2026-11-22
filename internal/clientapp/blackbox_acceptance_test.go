@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	_clientCommandPackage = "../../cmd/filecloud"
+	_clientCommandPackage = "../../cmd/filecloud-client"
 	_blackBoxLibraryID    = testClientLibraryID
 	_blackBoxDeviceAID    = "22345678-9abc-4def-8123-456789abcdef"
 	_blackBoxDeviceBID    = "32345678-9abc-4def-8123-456789abcdef"
@@ -50,7 +50,7 @@ func TestBuiltBinaryEndToEndAcceptance(t *testing.T) {
 		}
 	})
 
-	binaryName := "filecloud"
+	binaryName := "filecloud-client"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
@@ -170,7 +170,7 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 		}
 	})
 
-	binaryName := "filecloud"
+	binaryName := "filecloud-client"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}
@@ -438,7 +438,7 @@ func TestBuiltBinaryDirectoryRestoreAcceptance(t *testing.T) {
 	wrongStdout, wrongStderr, wrongErr := runBlackBoxCLIResult(t, binary, nil, "library", "restore",
 		"--client-dir", clientB, "--worktree", worktreeB, "--confirm", wrongPrefix)
 	if exit, ok := errors.AsType[*exec.ExitError](wrongErr); !ok || exit.ExitCode() != 1 || len(wrongStdout) != 0 ||
-		!bytes.HasSuffix(wrongStderr, []byte("filecloud: restore --confirm must exactly match this worktree's pending restore candidate\n")) {
+		!bytes.HasSuffix(wrongStderr, []byte("filecloud-client: restore --confirm must exactly match this worktree's pending restore candidate\n")) {
 		t.Fatalf("built wrong restore confirmation error=%v stdout=%q stderr=%q", wrongErr, wrongStdout, wrongStderr)
 	}
 	assertBlackBoxRestoreState(t, "wrong type replacement confirmation", beforeWrongConfirmation,
@@ -557,7 +557,7 @@ func TestBuiltBinaryHistoryInspectReadOnlyAcceptance(t *testing.T) {
 		}
 	})
 
-	binaryName := "filecloud"
+	binaryName := "filecloud-client"
 	if runtime.GOOS == "windows" {
 		binaryName += ".exe"
 	}

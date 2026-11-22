@@ -1,12 +1,12 @@
 name: desktop
 on:
-  workflow_dispatch:
-  pull_request:
-    paths: ['desktop/**', 'assets/brand/**', 'cmd/filecloud/**', 'internal/**', 'go.*', 'tools/notices/**', '.github/workflows/desktop.yml']
+  workflow_call:
 permissions:
   contents: read
 jobs:
   native:
+    env:
+      VERSION: ${{ github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,20 +38,21 @@ jobs:
           $nsis = "${env:ProgramFiles(x86)}\NSIS"
           if (!(Test-Path "$nsis\makensis.exe")) { choco install nsis -y }
           $nsis | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Build native preview installer
+      - name: Build tagged desktop installer
         run: bash desktop/build/package.sh
       - name: Check AppImage contents without FUSE
         if: runner.os == 'Linux'
         run: |
           cd "$RUNNER_TEMP"
-          image="$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-linux-amd64.AppImage"
+          image="$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-$VERSION-linux-amd64.AppImage"
           "$image" --appimage-extract >/dev/null
-          dpkg-deb -x "$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-linux-amd64.deb" deb-payload
+          dpkg-deb -x "$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-$VERSION-linux-amd64.deb" deb-payload
           desktop-file-validate squashfs-root/org.filecloud.desktop.desktop
           test -s squashfs-root/.DirIcon && test -x squashfs-root/AppRun
           lib="$RUNNER_TEMP/squashfs-root/usr/lib"
           gui="$lib/filecloud-desktop/filecloud-desktop"
-          cmp "$lib/filecloud-desktop/filecloud" deb-payload/usr/lib/filecloud-desktop/filecloud
+          cmp "$lib/filecloud-desktop/filecloud-client" deb-payload/usr/lib/filecloud-desktop/filecloud-client
+          "$lib/filecloud-desktop/filecloud-client" version | jq -e --arg tag "$VERSION" --arg sha "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" '.Version == $tag and .Commit == $sha'
           # patchelf changes RPATH, not the Go build or the companion version.
           test "$(go tool buildid "$gui")" = "$(go tool buildid deb-payload/usr/lib/filecloud-desktop/filecloud-desktop)"
           for exe in "$gui" "$lib/webkitgtk-6.0/WebKitWebProcess" "$lib/webkitgtk-6.0/WebKitNetworkProcess"; do
@@ -70,15 +71,15 @@ jobs:
           export FILECLOUD_DESKTOP_SERVER="$RUNNER_TEMP/desktop-server$ext"
           CGO_ENABLED=0 go build -o "$FILECLOUD_DESKTOP_SERVER" ./cmd/filecloud-server
           if [[ $(go env GOOS) == linux ]]; then
-            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/squashfs-root/usr/lib/filecloud-desktop/filecloud"
+            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/squashfs-root/usr/lib/filecloud-desktop/filecloud-client"
           else
-            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/desktop-cli$ext"
-            CGO_ENABLED=0 go build -o "$FILECLOUD_DESKTOP_CLI" ./cmd/filecloud
+            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/filecloud-client$ext"
+            CGO_ENABLED=0 go build -o "$FILECLOUD_DESKTOP_CLI" ./cmd/filecloud-client
           fi
           cd desktop
           go test -count=1 -v ./...
       - uses: actions/upload-artifact@v4
         with:
-          name: filecloud-desktop-preview-${{ matrix.os }}
-          path: desktop/out/filecloud-desktop-*
+          name: filecloud-desktop-${{ matrix.os }}
+          path: desktop/out/filecloud-desktop-${{ github.ref_name }}-*
           if-no-files-found: error

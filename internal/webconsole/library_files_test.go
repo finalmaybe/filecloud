@@ -116,7 +116,7 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 	if standalone.Code != 200 || !strings.Contains(body, "<!doctype html>") || !strings.Contains(body, h.Current.FileId) || !strings.Contains(body, "修改时间变更") {
 		t.Fatal("even a legacy panel link should open the full page at the same version")
 	}
-	if !strings.Contains(body, commit) || strings.Contains(body, "设备端恢复预览") || strings.Contains(body, "filecloud library restore") {
+	if !strings.Contains(body, commit) || strings.Contains(body, "设备端恢复预览") || strings.Contains(body, "filecloud-client library restore") {
 		t.Fatal("expected older revision details without a device restore preview")
 	}
 	for _, version := range []string{head, commit} {

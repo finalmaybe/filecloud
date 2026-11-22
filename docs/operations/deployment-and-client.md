@@ -1,6 +1,6 @@
 # Filecloud 服务端部署与客户端使用
 
-本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud` 客户端命令。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。源码版还包含可选的同源 Web 控制台，与 CLI 共用账号。项目暂不提供 Docker 镜像、桌面 GUI、移动客户端或 WebDAV。
+本文对应当前实现。正式发布包提供 `filecloud-server` 服务端命令和 `filecloud-client` 客户端命令。本版本的 `filecloud-client` 仍接受旧的服务端子命令以便迁移，但新部署、systemd 配置和自动化必须使用 `filecloud-server`。源码版还包含可选的同源 Web 控制台，与 CLI 共用账号。同一 tag 的[桌面客户端安装包](../../desktop/README.md)与 CLI 归档并列发布。项目暂不提供 Docker 镜像、移动客户端或 WebDAV。
 
 ## 1. 支持范围
 
@@ -19,7 +19,7 @@
 - 服务端数据目录、客户端状态目录和工作目录不要相互嵌套。
 - 同步期间避免让其他程序持续写入工作目录。
 
-## 2. 获取 `filecloud`
+## 2. 获取 `filecloud-client`
 
 正式版本可从项目的 [GitHub Releases](https://github.com/mingming-cn/filecloud/releases) 下载。归档中包含二进制、项目许可证、第三方模块清单和许可证文本。
 
@@ -30,16 +30,16 @@ git clone https://github.com/mingming-cn/filecloud.git
 cd filecloud
 export GOTOOLCHAIN=go1.27.4
 go version
-CGO_ENABLED=0 go build -trimpath -o filecloud ./cmd/filecloud
+CGO_ENABLED=0 go build -trimpath -o filecloud-client ./cmd/filecloud-client
 CGO_ENABLED=0 go build -trimpath -o filecloud-server ./cmd/filecloud-server
-./filecloud version
+./filecloud-client version
 ./filecloud-server version
 ```
 
 安装到系统路径：
 
 ```bash
-sudo install -m 0755 ./filecloud /usr/local/bin/filecloud
+sudo install -m 0755 ./filecloud-client /usr/local/bin/filecloud-client
 sudo install -m 0755 ./filecloud-server /usr/local/bin/filecloud-server
 ```
 
@@ -153,7 +153,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 ```text
 服务端程序：/usr/local/bin/filecloud-server
-客户端程序：/usr/local/bin/filecloud
+客户端程序：/usr/local/bin/filecloud-client
 数据：/var/lib/filecloud
 监听：127.0.0.1:8080
 用户：filecloud
@@ -321,7 +321,7 @@ read -rs 'PASSWORD?Password: '
 printf '\n'
 LOGIN_JSON=$(
   printf '%s\n' "$PASSWORD" |
-    filecloud login \
+    filecloud-client login \
       --server "$SERVER" \
       --username alice \
       --device-name laptop \
@@ -364,7 +364,7 @@ Windows 用户可直接按 [PowerShell 客户端快速体验](#windows-客户端
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud library create \
+  filecloud-client library create \
     --server "$SERVER" \
     --library-id "$LIBRARY_ID" \
     --name "Documents" \
@@ -375,7 +375,7 @@ printf '%s\n' "$TOKEN" |
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud library list \
+  filecloud-client library list \
     --server "$SERVER" \
     --token-stdin
 ```
@@ -384,7 +384,7 @@ printf '%s\n' "$TOKEN" |
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud library inspect \
+  filecloud-client library inspect \
     --server "$SERVER" \
     --library-id "$LIBRARY_ID" \
     --token-stdin
@@ -409,7 +409,7 @@ mkdir -p "$CLIENT_DIR" "$WORKTREE"
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud library bind \
+  filecloud-client library bind \
     --client-dir "$CLIENT_DIR" \
     --server "$SERVER" \
     --library-id "$LIBRARY_ID" \
@@ -424,7 +424,7 @@ printf '%s\n' "$TOKEN" |
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud library bind \
+  filecloud-client library bind \
     --client-dir "$CLIENT_DIR" \
     --server "$SERVER" \
     --library-id "$LIBRARY_ID" \
@@ -446,7 +446,7 @@ printf '%s\n' "$TOKEN" |
 
 ### Windows 客户端快速体验
 
-前提：服务已启动、管理员已为你开户，`filecloud.exe` 已加入 `PATH`。在 PowerShell 7.4 或更高版本中运行下面的代码，将服务地址和用户名换成自己的。两个目录应位于本地固定 NTFS 卷；示例使用新的工作目录，避免覆盖现有文件。
+前提：服务已启动、管理员已为你开户，`filecloud-client.exe` 已加入 `PATH`。在 PowerShell 7.4 或更高版本中运行下面的代码，将服务地址和用户名换成自己的。两个目录应位于本地固定 NTFS 卷；示例使用新的工作目录，避免覆盖现有文件。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -461,16 +461,16 @@ New-Item -ItemType Directory -Force -Path $ClientDir | Out-Null
 New-Item -ItemType Directory -Path $Worktree | Out-Null
 
 try {
-    $Login = (Read-Host '密码' -MaskInput) | filecloud.exe login --server $Server --username $Username --device-name windows-pc --password-stdin | ConvertFrom-Json
+    $Login = (Read-Host '密码' -MaskInput) | filecloud-client.exe login --server $Server --username $Username --device-name windows-pc --password-stdin | ConvertFrom-Json
     $Token = $Login.Session.AccessToken
-    $Token | filecloud.exe library create --server $Server --library-id $LibraryId --name "Documents-$($LibraryId.Substring(0,8))" --token-stdin
-    $Token | filecloud.exe library bind --client-dir $ClientDir --server $Server --library-id $LibraryId --worktree $Worktree --device-id $DeviceId --token-stdin
+    $Token | filecloud-client.exe library create --server $Server --library-id $LibraryId --name "Documents-$($LibraryId.Substring(0,8))" --token-stdin
+    $Token | filecloud-client.exe library bind --client-dir $ClientDir --server $Server --library-id $LibraryId --worktree $Worktree --device-id $DeviceId --token-stdin
 } finally {
     Remove-Variable Login, Token -ErrorAction SilentlyContinue
 }
 
 Set-Content -LiteralPath (Join-Path $Worktree 'hello.txt') -Value 'hello, filecloud' -Encoding utf8
-filecloud.exe library sync --client-dir $ClientDir --worktree $Worktree
+filecloud-client.exe library sync --client-dir $ClientDir --worktree $Worktree
 ```
 
 ## 9. 同步
@@ -478,7 +478,7 @@ filecloud.exe library sync --client-dir $ClientDir --worktree $Worktree
 查看这个工作目录最近确认到哪个版本、是否有待处理操作（源码版）：
 
 ```bash
-filecloud library status --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"
+filecloud-client library status --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"
 ```
 
 命令离线读取本地绑定，输出 JSON。`LibraryId` 是资料库 ID，`SyncBase` 是上次确认的本地同步基线。它不扫描工作目录，也不查询服务端 Head。`Pending` 取值如下：
@@ -495,7 +495,7 @@ filecloud library status --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"
 执行一轮同步：
 
 ```bash
-filecloud library sync \
+filecloud-client library sync \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE"
 ```
@@ -509,7 +509,7 @@ library already synchronized
 持续轮询，例如每 30 秒同步一次：
 
 ```bash
-filecloud library watch \
+filecloud-client library watch \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --interval 30s
@@ -528,7 +528,7 @@ filecloud library watch \
 候选提交删除超过 100 个已跟踪路径，或者删除比例达到 10% 时，同步会停止并输出一个 12 位候选前缀。确认工作目录内容无误后，按错误消息给出的前缀重新执行：
 
 ```bash
-filecloud library sync \
+filecloud-client library sync \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --confirm-delete 0123456789ab
@@ -541,7 +541,7 @@ filecloud library sync \
 历史命令从绑定读取服务地址、资料库和凭据，只读取已发布历史，不扫描或修改工作目录，也不推进同步基线。列出主线历史：
 
 ```bash
-filecloud library history list \
+filecloud-client library history list \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --page-size 100
@@ -550,7 +550,7 @@ filecloud library history list \
 输出包含完整 Commit ID。存在下一页时，末行会给出 `next_page_token`；将该值原样传回：
 
 ```bash
-filecloud library history list \
+filecloud-client library history list \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --page-size 100 \
@@ -560,7 +560,7 @@ filecloud library history list \
 默认只列出曾经成为 Head 的主线提交。高级排查可以增加 `--include-merged`，在所属主线提交下展开已发布且由服务端证明角色的 `merge-source`：
 
 ```bash
-filecloud library history list \
+filecloud-client library history list \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --include-merged
@@ -569,7 +569,7 @@ filecloud library history list \
 检查提交元数据时必须使用完整的 64 位小写 Commit ID：
 
 ```bash
-filecloud library history inspect \
+filecloud-client library history inspect \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --commit "$COMMIT_ID"
@@ -578,7 +578,7 @@ filecloud library history inspect \
 增加 `--path` 可以检查历史文件或目录。文件只显示 File ID、大小、mtime 和 block 数，不下载内容；目录按规范名称排序并支持分页。`.` 表示历史根目录：
 
 ```bash
-filecloud library history inspect \
+filecloud-client library history inspect \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --commit "$COMMIT_ID" \
@@ -589,7 +589,7 @@ filecloud library history inspect \
 恢复前先运行一次 `sync`，确保工作目录、同步基线和服务端 Head 已收敛。恢复预览选择一个历史提交和其中存在的原路径，目标固定为相同路径：
 
 ```bash
-filecloud library restore \
+filecloud-client library restore \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --commit "$COMMIT_ID" \
@@ -601,7 +601,7 @@ filecloud library restore \
 核对预览后，使用输出中的 12 位小写候选前缀精确确认：
 
 ```bash
-filecloud library restore \
+filecloud-client library restore \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE" \
   --confirm 0123456789ab
@@ -609,22 +609,22 @@ filecloud library restore \
 
 恢复通过一个新的前向 Commit 发布，不会把 Head 指回旧版本。预览后若工作目录或 Head 已变化，确认会失效，必须先同步并重新预览；客户端不会自动把旧确认意图应用到新 Head。历史中不存在的源路径会返回 NotFound，不表示删除当前路径。
 
-中断后按待处理状态继续，不必重新生成候选：尚待确认时，使用预览中的 12 位前缀执行 `library restore --confirm`；已确认但上传、发布结果核对或 checkout 尚未完成时，运行普通 `filecloud library sync --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"`。已有待处理 checkout 时，再执行 `restore --confirm` 会提示先同步。源码版可用[离线状态命令](#9-同步)查看 `Pending` 和 `NextCommand`。
+中断后按待处理状态继续，不必重新生成候选：尚待确认时，使用预览中的 12 位前缀执行 `library restore --confirm`；已确认但上传、发布结果核对或 checkout 尚未完成时，运行普通 `filecloud-client library sync --client-dir "$CLIENT_DIR" --worktree "$WORKTREE"`。已有待处理 checkout 时，再执行 `restore --confirm` 会提示先同步。源码版可用[离线状态命令](#9-同步)查看 `Pending` 和 `NextCommand`。
 
 ### 桌面客户端使用的本机接口（源码版）
 
-- `filecloud library bindings --client-dir PATH --server URL --user-id UUID`：离线列出该服务、该账号在指定状态目录中的绑定；返回 `LibraryId`、`DeviceId`、`Worktree` 和 `Phase`（`bound` / `binding`）。未创建数据库时返回 `[]`。不会返回 token。
+- `filecloud-client library bindings --client-dir PATH --server URL --user-id UUID`：离线列出该服务、该账号在指定状态目录中的绑定；返回 `LibraryId`、`DeviceId`、`Worktree` 和 `Phase`（`bound` / `binding`）。未创建数据库时返回 `[]`。不会返回 token。
 - `library status` 在等待确认时额外给出 `Confirmation.Kind`、`Confirmation.CandidatePrefix`。核对时应保存当时所见候选及计数，不能用刚刷新的前缀代替用户确认。
 - `library sync --output=jsonl` 保留既有目录及确认参数，每行一条 JSON。实际完成初始扫描时发 `scan_completed`；终态 `result` 携带 `outcome`（`ok`、`no_change`、`needs_confirmation`、`failed`）和可选 `code`。进程中断且没有终态时，应重新读 `status`。
 - `library history list --output=json` 返回主线响应（含 `Commits`、`NextPageToken`），不与 `--include-merged` 同用。`library unbind --if-idle` 只在取得锁且没有待处理状态时解绑。
-- `filecloud --machine` 前缀用于桌面的一次性查询/操作（`login`、`logout`、`version`，以及 `library` 的 `list/create/bindings/bind/unbind/status/history list`）。成功时保持子命令原响应，失败时 stdout 返回脱敏 `result` 错误对象并以非零状态退出；不能套用到 `watch`。登录成功的响应仍含敏感凭据，不应写进诊断日志。
+- `filecloud-client --machine` 前缀用于桌面的一次性查询/操作（`login`、`logout`、`version`，以及 `library` 的 `list/create/bindings/bind/unbind/status/history list`）。成功时保持子命令原响应，失败时 stdout 返回脱敏 `result` 错误对象并以非零状态退出；不能套用到 `watch`。登录成功的响应仍含敏感凭据，不应写进诊断日志。
 
 ## 11. 解除绑定和注销
 
 解除绑定会删除客户端绑定状态，不会删除工作目录中的普通文件，也不会删除服务端资料库：
 
 ```bash
-filecloud library unbind \
+filecloud-client library unbind \
   --client-dir "$CLIENT_DIR" \
   --worktree "$WORKTREE"
 ```
@@ -635,7 +635,7 @@ filecloud library unbind \
 
 ```bash
 printf '%s\n' "$TOKEN" |
-  filecloud logout \
+  filecloud-client logout \
     --server "$SERVER" \
     --token-stdin
 unset TOKEN
@@ -762,20 +762,20 @@ filecloud-server init --data-dir PATH
 filecloud-server serve --data-dir PATH [--listen ADDRESS]
 filecloud-server user add --data-dir PATH --username NAME --password-stdin
 filecloud-server user reset-password --data-dir PATH --username NAME --password-stdin
-filecloud version
-filecloud login --server URL --username NAME --device-name NAME --password-stdin
-filecloud logout --server URL --token-stdin
-filecloud library create --server URL --library-id UUID --name NAME --token-stdin
-filecloud library list --server URL --token-stdin
-filecloud library inspect --server URL --library-id UUID --token-stdin
-filecloud library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
-filecloud library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
-filecloud library watch --client-dir PATH --worktree PATH --interval DURATION
-filecloud library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]
-filecloud library history inspect --client-dir PATH --worktree PATH --commit 64_HEX [--path PATH_OR_DOT] [--page-size N] [--page-token TOKEN]
-filecloud library restore --client-dir PATH --worktree PATH --commit 64_HEX --path PATH_OR_DOT
-filecloud library restore --client-dir PATH --worktree PATH --confirm 12_HEX
-filecloud library unbind --client-dir PATH --worktree PATH
+filecloud-client version
+filecloud-client login --server URL --username NAME --device-name NAME --password-stdin
+filecloud-client logout --server URL --token-stdin
+filecloud-client library create --server URL --library-id UUID --name NAME --token-stdin
+filecloud-client library list --server URL --token-stdin
+filecloud-client library inspect --server URL --library-id UUID --token-stdin
+filecloud-client library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
+filecloud-client library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
+filecloud-client library watch --client-dir PATH --worktree PATH --interval DURATION
+filecloud-client library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]
+filecloud-client library history inspect --client-dir PATH --worktree PATH --commit 64_HEX [--path PATH_OR_DOT] [--page-size N] [--page-token TOKEN]
+filecloud-client library restore --client-dir PATH --worktree PATH --commit 64_HEX --path PATH_OR_DOT
+filecloud-client library restore --client-dir PATH --worktree PATH --confirm 12_HEX
+filecloud-client library unbind --client-dir PATH --worktree PATH
 filecloud-server integrity check --data-dir PATH
 filecloud-server gc --data-dir PATH [--dry-run] [--grace-period DURATION]
 ```
@@ -784,7 +784,7 @@ filecloud-server gc --data-dir PATH [--dry-run] [--grace-period DURATION]
 
 ```text
 filecloud-server serve --data-dir PATH [--listen ADDRESS] --web-origin ORIGIN [--web-admin-user USERNAME ...]
-filecloud library status --client-dir PATH --worktree PATH
+filecloud-client library status --client-dir PATH --worktree PATH
 ```
 
 协议、冲突处理和崩溃恢复边界见 [同步架构](../design/architecture.md)，接口细节见 [HTTP API 契约](../design/http-api.md)。

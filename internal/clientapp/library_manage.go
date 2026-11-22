@@ -31,7 +31,7 @@ func runLibraryCreate(ctx context.Context, args []string, stdin io.Reader, stdou
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: filecloud library create --server url --library-id uuid --name name --token-stdin"
+	const usage = "usage: filecloud-client library create --server url --library-id uuid --name name --token-stdin"
 	if *server == "" || *libraryID == "" || *name == "" || !*tokenStdin || flags.NArg() != 0 {
 		return errors.New(usage)
 	}
@@ -72,7 +72,7 @@ func runLibraryList(ctx context.Context, args []string, stdin io.Reader, stdout,
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: filecloud library list --server url [--page-size n] [--page-token token] --token-stdin"
+	const usage = "usage: filecloud-client library list --server url [--page-size n] [--page-token token] --token-stdin"
 	if *server == "" || !*tokenStdin || flags.NArg() != 0 {
 		return errors.New(usage)
 	}
@@ -107,7 +107,7 @@ func runLibraryInspect(ctx context.Context, args []string, stdin io.Reader, stdo
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: filecloud library inspect --server url --library-id uuid --token-stdin"
+	const usage = "usage: filecloud-client library inspect --server url --library-id uuid --token-stdin"
 	if *server == "" || *libraryID == "" || !*tokenStdin || flags.NArg() != 0 {
 		return errors.New(usage)
 	}

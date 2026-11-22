@@ -97,7 +97,7 @@ func TestLibraryStatusReportsLocalOperations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wantNext = append([]string{"filecloud", "library", command, "--client-dir", canonicalDir, "--worktree", path}, confirm...)
+				wantNext = append([]string{"filecloud-client", "library", command, "--client-dir", canonicalDir, "--worktree", path}, confirm...)
 			}
 			if !slices.Equal(got.NextCommand, wantNext) {
 				t.Fatalf("next command = %q, want %q", got.NextCommand, wantNext)

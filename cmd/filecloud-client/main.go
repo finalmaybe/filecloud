@@ -1,4 +1,4 @@
-// Command filecloud runs the Filecloud client and transitional server-command compatibility entry.
+// Command filecloud-client runs the Filecloud client and transitional server-command compatibility entry.
 package main
 
 import (
@@ -27,7 +27,7 @@ func mainCode() int {
 	if err := clientapp.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, clientapp.BuildInfo{
 		Version: _version, Commit: _commit, BuildDate: _buildDate,
 	}); err != nil {
-		if _, writeErr := fmt.Fprintln(os.Stderr, "filecloud:", err); writeErr != nil {
+		if _, writeErr := fmt.Fprintln(os.Stderr, "filecloud-client:", err); writeErr != nil {
 			return 1
 		}
 		return 1

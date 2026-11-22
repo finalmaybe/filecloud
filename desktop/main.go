@@ -79,7 +79,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	cli := "filecloud"
+	cli := "filecloud-client"
 	if runtime.GOOS == "windows" {
 		cli += ".exe"
 	}

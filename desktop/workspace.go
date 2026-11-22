@@ -94,7 +94,7 @@ func newWorkspace(root, cli, version, commit string) (*Workspace, error) {
 	s := &Workspace{root: root, cli: cli}
 	var build struct{ Version, Commit string }
 	if err := s.query(&build, "", "version"); err != nil || build.Version != version || build.Commit != commit {
-		return nil, errors.New("随包 filecloud 缺失或版本不匹配，请重新安装。")
+		return nil, errors.New("随包 filecloud-client 缺失或版本不匹配，请重新安装。")
 	}
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err

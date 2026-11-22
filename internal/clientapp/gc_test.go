@@ -72,9 +72,9 @@ func TestRunGarbageCollectionArgumentsAndLockExclusion(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"gc"}, want: "usage: filecloud gc"},
+		{args: []string{"gc"}, want: "usage: filecloud-client gc"},
 		{args: []string{"gc", "--data-dir", dataDir, "--grace-period", "23h59m59s"}, want: "gc grace period must be at least 24h0m0s"},
-		{args: []string{"gc", "--data-dir", dataDir, "extra"}, want: "usage: filecloud gc"},
+		{args: []string{"gc", "--data-dir", dataDir, "extra"}, want: "usage: filecloud-client gc"},
 	} {
 		err := run(t.Context(), test.args, strings.NewReader(""), io.Discard, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), test.want) {

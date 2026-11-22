@@ -120,7 +120,7 @@ func TestRunIntegrityCheckArguments(t *testing.T) {
 		{"integrity", "check", "--data-dir", t.TempDir(), "extra"},
 	} {
 		err := run(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "usage: filecloud integrity check --data-dir path") {
+		if err == nil || !strings.Contains(err.Error(), "usage: filecloud-client integrity check --data-dir path") {
 			t.Errorf("run(%q) error = %v, want check usage", args, err)
 		}
 	}

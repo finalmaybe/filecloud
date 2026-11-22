@@ -1638,7 +1638,7 @@ preserved current-only paths: 0
 changed paths:
 local
 truncated: false
-confirm: filecloud library restore --client-dir %s --worktree %s --confirm %s
+confirm: filecloud-client library restore --client-dir %s --worktree %s --confirm %s
 `, sourceCommit, beforeBinding.SyncBase, prefix, state.clientDir, state.worktree, prefix)
 	if output.String() != wantOutput {
 		t.Fatalf("preview output:\n%s\nwant:\n%s", output.String(), wantOutput)

@@ -49,7 +49,7 @@ func runLibraryBindings(ctx context.Context, args []string, out, stderr io.Write
 		return err
 	}
 	if *location == "" || !validClientUUID(*owner) || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library bindings --client-dir path --server url --user-id uuid")
+		return errors.New("usage: filecloud-client library bindings --client-dir path --server url --user-id uuid")
 	}
 	base, err := validateServerURL(*server)
 	if err != nil {

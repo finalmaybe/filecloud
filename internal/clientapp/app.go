@@ -36,13 +36,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runMachine(ctx, args[1:], stdin, stdout, build)
 	}
 	if len(args) == 0 {
-		return errors.New("usage: filecloud <version|init|serve|gc|integrity|user|login|logout|library> [options]")
+		return errors.New("usage: filecloud-client <version|init|serve|gc|integrity|user|login|logout|library> [options]")
 	}
 	command := args[0]
 	switch command {
 	case "version", "login", "logout", "library":
 	default:
-		return serverapp.Run(ctx, "filecloud", args, stdin, stdout, stderr, serverBuildInfo(build))
+		return serverapp.Run(ctx, "filecloud-client", args, stdin, stdout, stderr, serverBuildInfo(build))
 	}
 	logger := log.New(stderr, "", 0)
 	opslog.Info(logger, command, "", "start")
@@ -57,7 +57,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch command {
 	case "version":
 		if len(args) != 1 {
-			return errors.New("usage: filecloud version")
+			return errors.New("usage: filecloud-client version")
 		}
 		return json.NewEncoder(stdout).Encode(struct {
 			Version   string
@@ -96,7 +96,7 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return err
 	}
 	if *server == "" || *username == "" || *deviceName == "" || !*passwordStdin || flags.NArg() != 0 {
-		return errors.New("usage: filecloud login --server url --username name --device-name name --password-stdin")
+		return errors.New("usage: filecloud-client login --server url --username name --device-name name --password-stdin")
 	}
 	base, err := validateServerURL(*server)
 	if err != nil {
@@ -150,7 +150,7 @@ func runLogout(ctx context.Context, args []string, stdin io.Reader, stderr io.Wr
 		return err
 	}
 	if *server == "" || !*tokenStdin || flags.NArg() != 0 {
-		return errors.New("usage: filecloud logout --server url --token-stdin")
+		return errors.New("usage: filecloud-client logout --server url --token-stdin")
 	}
 	base, err := validateServerURL(*server)
 	if err != nil {

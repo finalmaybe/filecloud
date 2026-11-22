@@ -69,7 +69,7 @@ func generateNotices(output, selectedTarget string, desktop bool) error {
 	}
 	modules := make(map[string]noticeModule)
 	for _, target := range targets {
-		packages := []string{"./cmd/filecloud"}
+		packages := []string{"./cmd/filecloud-client"}
 		if !desktop {
 			packages = append(packages, "./cmd/filecloud-server")
 		}

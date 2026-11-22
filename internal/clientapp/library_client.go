@@ -171,7 +171,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 	}
 	config = normalizeLibraryClientConfig(config)
 	if len(args) == 0 {
-		return errors.New("usage: filecloud library <create|list|inspect|history|bind|bindings|status|sync|watch|restore|unbind> [options]")
+		return errors.New("usage: filecloud-client library <create|list|inspect|history|bind|bindings|status|sync|watch|restore|unbind> [options]")
 	}
 	switch args[0] {
 	case "create":
@@ -182,7 +182,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		return runLibraryInspect(ctx, args[1:], stdin, stdout, stderr)
 	case "history":
 		if len(args) < 2 {
-			return errors.New("usage: filecloud library history <list|inspect> [options]")
+			return errors.New("usage: filecloud-client library history <list|inspect> [options]")
 		}
 		switch args[1] {
 		case "list":
@@ -190,7 +190,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		case "inspect":
 			return runLibraryHistoryInspect(ctx, args[2:], stdout, stderr)
 		default:
-			return errors.New("usage: filecloud library history <list|inspect> [options]")
+			return errors.New("usage: filecloud-client library history <list|inspect> [options]")
 		}
 	case "bind":
 		options, err := parseLibraryBind(ctx, args[1:], stdin, stderr, config)
@@ -228,7 +228,7 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 	if err := flags.Parse(args); err != nil {
 		return bindOptions{}, err
 	}
-	const usage = "usage: filecloud library bind --client-dir path --server url --library-id uuid --worktree path --device-id uuid --token-stdin"
+	const usage = "usage: filecloud-client library bind --client-dir path --server url --library-id uuid --worktree path --device-id uuid --token-stdin"
 	if *clientDir == "" || *server == "" || *libraryID == "" || *worktree == "" || *deviceID == "" || !*tokenStdin || flags.NArg() != 0 {
 		return bindOptions{}, errors.New(usage)
 	}
@@ -799,7 +799,7 @@ func runLibraryWatch(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 	if *clientDir == "" || *worktree == "" || *interval <= 0 || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library watch --client-dir path --worktree path --interval duration")
+		return errors.New("usage: filecloud-client library watch --client-dir path --worktree path --interval duration")
 	}
 	canonicalClientDir, err := canonicalStateDir(*clientDir)
 	if err != nil {
@@ -876,7 +876,7 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	confirmDeleteSet := false
 	flags.Visit(func(value *flag.Flag) { confirmDeleteSet = confirmDeleteSet || value.Name == "confirm-delete" })
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library sync --client-dir path --worktree path [--confirm-delete 12-hex-prefix]")
+		return errors.New("usage: filecloud-client library sync --client-dir path --worktree path [--confirm-delete 12-hex-prefix]")
 	}
 	session, err := openLockedBoundWorktreeSession(ctx, *clientDir, *worktree, config)
 	if err != nil {
@@ -936,7 +936,7 @@ func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writ
 		return err
 	}
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
-		return errors.New("usage: filecloud library unbind --client-dir path --worktree path")
+		return errors.New("usage: filecloud-client library unbind --client-dir path --worktree path")
 	}
 	canonicalClientDir, err := canonicalStateDir(*clientDir)
 	if err != nil {

@@ -58,19 +58,19 @@ jobs:
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
-            client_executable: filecloud
+            client_executable: filecloud-client
             server_executable: filecloud-server
             archive: tar.gz
           - os: macos-latest
             goos: darwin
             goarch: arm64
-            client_executable: filecloud
+            client_executable: filecloud-client
             server_executable: filecloud-server
             archive: tar.gz
           - os: windows-latest
             goos: windows
             goarch: amd64
-            client_executable: filecloud.exe
+            client_executable: filecloud-client.exe
             server_executable: filecloud-server.exe
             archive: zip
     runs-on: ${{ matrix.os }}
@@ -110,7 +110,7 @@ jobs:
           ldflags="-s -w -X main._version=$VERSION -X main._commit=$commit -X main._buildDate=$build_date"
           mkdir -p dist/bin
           CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" \
-            -o "dist/bin/$CLIENT_EXECUTABLE" ./cmd/filecloud
+            -o "dist/bin/$CLIENT_EXECUTABLE" ./cmd/filecloud-client
           CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" \
             -o "dist/bin/$SERVER_EXECUTABLE" ./cmd/filecloud-server
       - name: Smoke test released binaries
@@ -214,9 +214,13 @@ jobs:
           path: dist/filecloud-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
           if-no-files-found: error
 
+  desktop:
+    needs: [acceptance-1b, acceptance-1c]
+    uses: ./.github/workflows/desktop.yml
+
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -228,10 +232,14 @@ jobs:
           pattern: filecloud-*
           path: dist
           merge-multiple: true
-      - name: Create checksums
-        run: cd dist && sha256sum filecloud-* > SHA256SUMS
-      - name: Publish release
+      - name: Verify, checksum and publish the tagged release
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
-        run: gh release create "$VERSION" dist/* --verify-tag --title "Filecloud $VERSION" --notes-file docs/distribution.md
+          GH_TOKEN: ${{ github.token }}
+        working-directory: dist
+        run: |
+          files=(filecloud-"$VERSION"-{linux-amd64.tar.gz,darwin-arm64.tar.gz,windows-amd64.zip}
+                 filecloud-desktop-"$VERSION"-{linux-amd64.deb,linux-amd64.AppImage,darwin-arm64.dmg,windows-amd64.exe})
+          for file in "${files[@]}"; do test -s "$file"; done
+          sha256sum "${files[@]}" > SHA256SUMS
+          gh release create "$VERSION" "${files[@]}" SHA256SUMS --verify-tag --title "Filecloud $VERSION" --notes-file ../docs/distribution.md

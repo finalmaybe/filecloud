@@ -4,7 +4,7 @@
 
 ## 1. 决策：窗口不是同步引擎
 
-同一仓库新增 `desktop/`，独立 Go module，Wails v3 + Go 应用进程、TypeScript 前端（首版采用原生 HTML/CSS 与 TS，不引入第二套控件库）。桌面安装包带**同一构建的 `filecloud` 子程序**，而不是调用 PATH 中的 CLI。窗口只管理绑定和解释结果；扫描、三方合并、冲突副本、Head CAS、恢复及落盘继续归 CLI。不开启服务端 Web 控制台也应能完成全部 P0。
+同一仓库新增 `desktop/`，独立 Go module，Wails v3 + Go 应用进程、TypeScript 前端（首版采用原生 HTML/CSS 与 TS，不引入第二套控件库）。桌面安装包带**同一构建的 `filecloud-client` 子程序**，而不是调用 PATH 中的 CLI。窗口只管理绑定和解释结果；扫描、三方合并、冲突副本、Head CAS、恢复及落盘继续归 CLI。不开启服务端 Web 控制台也应能完成全部 P0。
 
 选择子进程而不是直接调用 [`clientapp.Run`](../../internal/clientapp/app.go)：今天这个入口处理命令行流，还保留服务端命令兼容分支；独立进程可以复用现有可执行文件及锁，GUI 不需要链接整个应用或理解客户端数据库。代价是要补少量稳定的机器输出。若未来逐文件进度成为需求，再评估抽取 Go 同步接口。首版也不引入独立常驻 daemon：**当前登录用户的 Go 主进程**在关窗后继续调度即可。系统注销后运行是另一种产品需求。
 
@@ -79,7 +79,7 @@ flowchart LR
 | Windows 11，amd64，固定 NTFS | 用户级安装包，检测 WebView2，缺失时给可执行提示；测试开始菜单、原生目录选择、125%/200% DPI、路径含空格、受限 ACL 和卸载保留数据。公开发行前验证安装包及随包程序签名。 |
 | macOS，arm64，APFS | `.app` 随 DMG；主包和内嵌 CLI 一起签名、做公证，在干净系统从 Finder 启动。测试 WKWebView、Keychain、Dock 重开、⌘Q 和目录访问被拒绝后的提示。最低系统版本以实际签名包验证后填写。 |
 
-依赖与上游支持范围以[固定版本安装文档](https://github.com/wailsapp/wails/blob/v3.1.0/docs/mpress/content/getting-started/installation.md)为准。GUI 包与 CLI/服务端归档分开发，同 tag/commit；单独收集桌面 Go、前端和随包依赖的许可证。升级先退出旧实例、替换 GUI 与 CLI 整包，保留用户状态与工作目录；升级失败不自行降级数据库。首版手工安装更新，不做静默自更新。
+依赖与上游支持范围以[固定版本安装文档](https://github.com/wailsapp/wails/blob/v3.1.0/docs/mpress/content/getting-started/installation.md)为准。GUI 安装包与 CLI/服务端归档分别打包，同 tag/commit、同一个 GitHub Release；单独收集桌面 Go、前端和随包依赖的许可证。升级先退出旧实例、替换 GUI 与 CLI 整包，保留用户状态与工作目录；升级失败不自行降级数据库。首版手工安装更新，不做静默自更新。
 
 ## 交付顺序与门禁
 

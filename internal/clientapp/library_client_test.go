@@ -1539,7 +1539,7 @@ func TestLibraryManagementCommandsRejectInvalidArguments(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "create missing token input", args: []string{"library", "create", "--server", "http://127.0.0.1:1", "--library-id", testClientLibraryID, "--name", "x"}, want: "usage: filecloud library create"},
+		{name: "create missing token input", args: []string{"library", "create", "--server", "http://127.0.0.1:1", "--library-id", testClientLibraryID, "--name", "x"}, want: "usage: filecloud-client library create"},
 		{name: "list invalid page size", args: []string{"library", "list", "--server", "http://127.0.0.1:1", "--page-size", "0", "--token-stdin"}, want: "page-size must be between 1 and 500"},
 		{name: "inspect invalid UUID", args: []string{"library", "inspect", "--server", "http://127.0.0.1:1", "--library-id", "invalid", "--token-stdin"}, want: "library-id must be a canonical UUID"},
 	} {

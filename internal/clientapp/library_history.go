@@ -58,7 +58,7 @@ func runLibraryHistoryList(ctx context.Context, args []string, stdout, stderr io
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: filecloud library history list --client-dir path --worktree path [--page-size n] [--page-token token] [--include-merged]"
+	const usage = "usage: filecloud-client library history list --client-dir path --worktree path [--page-size n] [--page-token token] [--include-merged]"
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
 		return errors.New(usage)
 	}

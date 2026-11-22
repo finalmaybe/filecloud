@@ -19,6 +19,9 @@ FunctionEnd
 Section "Install"
  SetShellVarContext current
  SetOutPath "$INSTDIR"
+ ; Remove the old companion only when upgrading an existing desktop installation.
+ IfFileExists "$INSTDIR\filecloud-desktop.exe" 0 +2
+ Delete "$INSTDIR\filecloud.exe"
  File /r "$%FILECLOUD_STAGE%\*"
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\Filecloud.lnk" "$INSTDIR\filecloud-desktop.exe" "" "$INSTDIR\filecloud.ico"
@@ -28,7 +31,7 @@ SectionEnd
 Section "Uninstall"
  SetShellVarContext current
  Delete "$SMPROGRAMS\Filecloud.lnk"
- Delete "$INSTDIR\filecloud.exe"
+ Delete "$INSTDIR\filecloud-client.exe"
  Delete "$INSTDIR\filecloud-desktop.exe"
  Delete "$INSTDIR\filecloud.ico"
  Delete "$INSTDIR\Uninstall.exe"
