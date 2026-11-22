@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Filecloud</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#2875F5"/><stop offset="1" stop-color="#2446D0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)"/>
+  <g transform="translate(9.12 9.12) scale(.715)">
+    <path d="m7 20 25-12.5L57 20 32 32.5ZM7 32.5 32 45l25-12.5M7 45l25 12.5L57 45" stroke="white" stroke-width="5.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+</svg>

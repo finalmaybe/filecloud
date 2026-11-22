@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 844 216" fill="none">
+  <title>Filecloud</title>
+  <defs>
+    <linearGradient id="blue" x1="28" y1="5" x2="39" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2875F5"/><stop offset="1" stop-color="#2446D0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-4 -2) scale(3.38)">
+    <path d="m7 20 25-12.5L57 20 32 32.5ZM7 32.5 32 45l25-12.5M7 45l25 12.5L57 45" stroke="url(#blue)" stroke-width="5.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(252 52)" fill="#111827" fill-rule="evenodd">
+    <path d="M0 5h66v18H22v26h37v18H22v42H0z"/>
+    <circle cx="91" cy="12" r="12"/><path d="M81 34h20v75H81z"/>
+    <path id="ell" d="M119 0h21v85q0 9 7 9h3v15q-5 1-11 1-20 0-20-24z"/>
+    <path d="M225 77h-49c1 11 8 17 20 17 8 0 14-2 20-6l7 13c-9 6-18 9-30 9-23 0-37-15-37-38 0-24 15-40 36-40 23 0 34 16 34 36 0 3 0 6-1 9zm-49-14h30c-1-10-6-16-14-16-9 0-15 6-16 16z"/>
+    <path d="M295 41l-8 14c-4-4-9-6-14-6-12 0-19 9-19 23 0 13 7 21 19 21 6 0 10-2 15-6l8 14c-7 6-16 9-26 9-23 0-37-15-37-38 0-24 16-40 39-40 10 0 17 3 23 9z"/>
+    <use href="#ell" transform="translate(186 0)" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#ell"/>
+    <path d="M379 32c22 0 37 16 37 39 0 24-15 39-37 39-23 0-37-15-37-39 0-23 14-39 37-39zm0 17c-10 0-16 8-16 22s6 22 16 22 16-8 16-22-6-22-16-22z"/>
+    <path d="M427 34h21v45c0 10 3 15 11 15 6 0 11-3 15-8V34h20v75h-17l-2-9c-7 7-15 10-24 10-16 0-24-11-24-29z"/>
+    <path d="M558 0h21v109h-17l-2-8c-6 6-13 9-21 9-21 0-33-15-33-38 0-24 14-40 34-40 7 0 13 2 18 6zm0 55c-4-4-9-6-14-6-11 0-17 9-17 23s6 21 16 21c6 0 11-2 15-7z"/>
+  </g>
+</svg>

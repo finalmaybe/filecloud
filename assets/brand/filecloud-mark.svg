@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Filecloud</title>
+  <defs>
+    <linearGradient id="blue" x1="28" y1="5" x2="39" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2875F5"/><stop offset="1" stop-color="#2446D0"/>
+    </linearGradient>
+  </defs>
+  <path d="m7 20 25-12.5L57 20 32 32.5ZM7 32.5 32 45l25-12.5M7 45l25 12.5L57 45" stroke="url(#blue)" stroke-width="5.4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
