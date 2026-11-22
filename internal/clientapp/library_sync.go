@@ -103,6 +103,11 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	if err != nil {
 		return fmt.Errorf("scan worktree: %w", err)
 	}
+	if config.syncEvent != nil {
+		if err := config.syncEvent("scan_completed"); err != nil {
+			return err
+		}
+	}
 	head, err := getRemoteHead(ctx, options.base, binding.LibraryID, options.token)
 	if err != nil {
 		return err
@@ -124,6 +129,9 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 		}
 		if err := replacePathIndex(ctx, db, binding.Worktree, snapshot.paths); err != nil {
 			return err
+		}
+		if config.syncEvent != nil {
+			return config.syncEvent("no_change")
 		}
 		_, err := fmt.Fprintln(stdout, "library already synchronized")
 		return err

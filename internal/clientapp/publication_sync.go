@@ -127,7 +127,7 @@ func (r _syncPublicationRound) resume(ctx context.Context, snapshot worktreeSnap
 		if pending.LegacyRevalidationRequired {
 			message = "worktree changed after legacy pending publication was created; stale candidate discarded, rerun sync"
 		}
-		return _publicationOutcome{kind: _publicationOutcomeRerunSync}, errors.New(message)
+		return _publicationOutcome{kind: _publicationOutcomeRerunSync}, staleSyncCandidate(message)
 	}
 	if pending.LegacyRevalidationRequired {
 		deleted, tracked := deletionStats(r.options.scanConfig.trackedPaths, snapshot.paths)

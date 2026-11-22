@@ -13,13 +13,16 @@ import (
 
 type statusDeletion struct{ Deleted, Tracked int64 }
 
+type statusConfirmation struct{ Kind, CandidatePrefix string }
+
 type libraryStatus struct {
-	LibraryID   string `json:"LibraryId"`
-	Worktree    string
-	SyncBase    string
-	Pending     string
-	Deletion    *statusDeletion `json:",omitempty"`
-	NextCommand []string        `json:",omitempty"`
+	Confirmation *statusConfirmation `json:",omitempty"`
+	LibraryID    string              `json:"LibraryId"`
+	Worktree     string
+	SyncBase     string
+	Pending      string
+	Deletion     *statusDeletion `json:",omitempty"`
+	NextCommand  []string        `json:",omitempty"`
 }
 
 func runLibraryStatus(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -93,6 +96,7 @@ func readLibraryStatus(ctx context.Context, dir, path string) (_ libraryStatus, 
 		status.Pending, status.NextCommand = "sync", next
 		if p.RequiresDeleteConfirmation && !p.DeleteConfirmed {
 			status.Pending = "delete-confirmation"
+			status.Confirmation = &statusConfirmation{"delete", p.CandidateCommit[:deleteCandidatePrefixLen]}
 			status.Deletion = &statusDeletion{Deleted: p.DeletionCount, Tracked: p.TrackedCount}
 			status.NextCommand = append(next, "--confirm-delete", p.CandidateCommit[:deleteCandidatePrefixLen])
 		}
@@ -100,6 +104,7 @@ func readLibraryStatus(ctx context.Context, dir, path string) (_ libraryStatus, 
 		status.Pending, status.NextCommand = "restore", next
 		if !p.RestoreConfirmed {
 			status.Pending = "restore-confirmation"
+			status.Confirmation = &statusConfirmation{"restore", p.CandidateCommit[:deleteCandidatePrefixLen]}
 			next[2] = "restore"
 			status.NextCommand = append(next, "--confirm", p.CandidateCommit[:deleteCandidatePrefixLen])
 		}

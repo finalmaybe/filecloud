@@ -1,6 +1,6 @@
 # Filecloud 桌面客户端 PRD · 首版
 
-**状态：待评审，未实现。** 基线：`eb3902c`（2026-11-22），[第二轮预览](desktop-mockups/README.md)。配套：[技术方案](desktop-client-architecture.md) · [三端设计资料与取舍](../research/desktop-platform-design.md)。本文描述拟交付产品，正式排期按仓库 GitHub Issues 流程推进。
+**状态：已进入开发预览，正式发布验收未完成。** [实现与试用](../../desktop/README.md)。 基线：`eb3902c`（2026-11-22），[第二轮预览](desktop-mockups/README.md)。配套：[技术方案](desktop-client-architecture.md) · [三端设计资料与取舍](../research/desktop-platform-design.md)。本文描述拟交付产品，正式排期按仓库 GitHub Issues 流程推进。
 
 ## 1. 给谁用，解决什么问题
 

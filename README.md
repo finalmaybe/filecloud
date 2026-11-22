@@ -31,7 +31,7 @@ Filecloud 是一个以资料库（Library）为同步单位的多设备文件同
 
 正式发布包提供两个命令入口：`filecloud-server` 用于服务端初始化、运行和本地维护，`filecloud` 用于登录、资料库管理和同步。本版本的 `filecloud` 仍接受旧的服务端子命令以便迁移，但新部署和自动化必须使用 `filecloud-server`。以下能力暂不提供：
 
-- Docker 镜像、桌面 GUI 和移动客户端
+- Docker 镜像、正式版桌面 GUI 和移动客户端。Linux、Windows、macOS 已有[桌面开发预览与原生构建说明](./desktop/README.md)，与这里的正式 CLI 归档分开发。
 - WebDAV、虚拟盘、S3 或其他对象存储后端
 - 多节点部署、在线 GC、PostgreSQL/MySQL 后端
 - 共享资料库、成员权限、协作锁和公开注册
@@ -208,7 +208,7 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 | [HTTP API 契约](./docs/design/http-api.md) | 认证、资料库、对象、Head 和历史接口 |
 | [历史浏览与安全恢复](./docs/design/history-and-safe-restore.md) | 主线历史、合并来源、恢复预览和确认语义 |
 | [Web 控制台契约](./docs/design/web-console.md) | 源码版的浏览器会话、文件预览与版本操作，以及和 CLI 的分工 |
-| [桌面客户端 PRD](./docs/design/desktop-client-prd.md) · [技术方案](./docs/design/desktop-client-architecture.md) | 待评审的 Linux、Windows、macOS 桌面设计、与 CLI 的分工及发布门槛；尚未实现 |
+| [桌面客户端 PRD](./docs/design/desktop-client-prd.md) · [技术方案](./docs/design/desktop-client-architecture.md) | Linux、Windows、macOS 桌面设计、与 CLI 的分工及发布门槛；[开发预览](./desktop/README.md) |
 | [第一阶段实施计划](./docs/design/phase-1-plan.md) | 1A、1B、1C 的原始交付范围和完成标准 |
 | [1C 部署性能基线](./docs/operations/performance-baseline.md) | 性能测量、资源上限和安全默认值 |
 | [分发说明](./docs/distribution.md) | 平台归档、发布门禁和许可材料 |

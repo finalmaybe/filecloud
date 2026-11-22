@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Filecloud
+Comment=Synchronize your Filecloud libraries
+Exec=/usr/lib/filecloud-desktop/filecloud-desktop
+Icon=org.filecloud.desktop
+Terminal=false
+Categories=Network;FileTransfer;

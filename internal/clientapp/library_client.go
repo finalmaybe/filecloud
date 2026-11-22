@@ -62,6 +62,7 @@ func isTransientHTTPStatus(status int) bool {
 }
 
 type libraryClientConfig struct {
+	syncEvent                       func(string) error
 	checkFilesystem                 func(*os.File) error
 	now                             func() time.Time
 	syncFile                        func(*os.File) error
@@ -170,7 +171,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 	}
 	config = normalizeLibraryClientConfig(config)
 	if len(args) == 0 {
-		return errors.New("usage: filecloud library <create|list|inspect|history|bind|status|sync|watch|restore|unbind> [options]")
+		return errors.New("usage: filecloud library <create|list|inspect|history|bind|bindings|status|sync|watch|restore|unbind> [options]")
 	}
 	switch args[0] {
 	case "create":
@@ -198,6 +199,8 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		}
 		defer clear(options.token)
 		return bindLibrary(ctx, options, stdout, config)
+	case "bindings":
+		return runLibraryBindings(ctx, args[1:], stdout, stderr)
 	case "status":
 		return runLibraryStatus(ctx, args[1:], stdout, stderr)
 	case "sync":
@@ -356,7 +359,7 @@ func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, con
 	}
 	if head.CommitID != nil && intent == nil {
 		if snapshot.root != emptyRoot {
-			return errors.New("local and remote libraries are both non-empty; bind requires an empty worktree or empty remote library")
+			return errCannotImport
 		}
 		pending = &pendingCheckout{ServerURL: options.serverURL, LibraryID: options.libraryID, Worktree: options.worktree,
 			UserID: owner, DeviceID: options.deviceID, TargetCommit: *head.CommitID, HeadETag: head.ETag}
@@ -855,9 +858,20 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	flags := newFlagSet("library sync", stderr)
 	clientDir := flags.String("client-dir", "", "Filecloud client state directory")
 	worktree := flags.String("worktree", "", "Worktree directory")
+	output := flags.String("output", "text", "text or jsonl")
 	confirmDelete := flags.String("confirm-delete", "", "Confirm a protected deletion candidate")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	switch *output {
+	case "jsonl":
+		stream := syncStream{writer: stdout}
+		config.syncEvent = stream.observe
+		defer func() { retErr = stream.finish(retErr) }()
+		stdout = io.Discard
+	case "text":
+	default:
+		return errors.New("unknown sync output format")
 	}
 	confirmDeleteSet := false
 	flags.Visit(func(value *flag.Flag) { confirmDeleteSet = confirmDeleteSet || value.Name == "confirm-delete" })
@@ -915,6 +929,7 @@ func loadTrackedPaths(ctx context.Context, db *sql.DB, worktree string) (map[str
 
 func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writer, config libraryClientConfig) (retErr error) {
 	flags := newFlagSet("library unbind", stderr)
+	idle := flags.Bool("if-idle", false, "Refuse to discard pending work")
 	clientDir := flags.String("client-dir", "", "Filecloud client state directory")
 	worktree := flags.String("worktree", "", "Worktree directory")
 	if err := flags.Parse(args); err != nil {
@@ -941,7 +956,7 @@ func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writ
 	} else if err != nil {
 		return fmt.Errorf("inspect client state: %w", err)
 	}
-	locks, err := lockUnbind(ctx, canonicalClientDir, databasePath, canonicalWorktree, config)
+	locks, err := lockUnbindMode(ctx, canonicalClientDir, databasePath, canonicalWorktree, config, !*idle)
 	if err != nil {
 		return err
 	}
@@ -959,6 +974,15 @@ func runLibraryUnbind(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if err := validatePendingPromotionTargets(ctx, db, canonicalWorktree); err != nil {
 		return fmt.Errorf("validate checkout promotion targets: %w", err)
+	}
+	if *idle {
+		st, err := readLibraryStatus(ctx, canonicalClientDir, canonicalWorktree)
+		if err != nil {
+			return err
+		}
+		if st.Pending != "none" {
+			return errors.New("cannot unbind while work is pending")
+		}
 	}
 	temps, err := checkoutTempNames(ctx, db, canonicalWorktree)
 	if err != nil {
@@ -1223,7 +1247,7 @@ func lockClientKeysMode(ctx context.Context, clientDir string, names []string, c
 		}
 		if err := fscompat.Flock(int(file.Fd()), fscompat.LOCK_EX|fscompat.LOCK_NB); err != nil {
 			if errors.Is(err, fscompat.EWOULDBLOCK) || errors.Is(err, fscompat.EAGAIN) {
-				return nil, errors.New("binding synchronization is already running")
+				return nil, errSyncBusy
 			}
 			return nil, fmt.Errorf("lock client state: %w", err)
 		}
@@ -2863,7 +2887,7 @@ func getLibraryOwner(ctx context.Context, base *url.URL, libraryID string, token
 		return "", fmt.Errorf("get library: %w", err)
 	}
 	if status != http.StatusOK {
-		return "", fmt.Errorf("get library failed: server returned %s", http.StatusText(status))
+		return "", remoteResponseError(fmt.Sprintf("get library failed: server returned %s", http.StatusText(status)), status)
 	}
 	var envelope struct {
 		Library struct {
@@ -2889,7 +2913,7 @@ func getRemoteHead(ctx context.Context, base *url.URL, libraryID string, token [
 		return remoteHead{}, fmt.Errorf("get library Head: %w", err)
 	}
 	if status != http.StatusOK {
-		return remoteHead{}, fmt.Errorf("get library Head failed: server returned %s", http.StatusText(status))
+		return remoteHead{}, remoteResponseError(fmt.Sprintf("get library Head failed: server returned %s", http.StatusText(status)), status)
 	}
 	var envelope struct{ Head remoteHead }
 	if err := json.Unmarshal(data, &envelope); err != nil {
@@ -3220,7 +3244,7 @@ func (root *openedWorktree) validateEmpty() error {
 	}
 	_, err := readDirectoryNames(root.directory, 1)
 	if err == nil {
-		return errors.New("local worktree is non-empty; local import requires --import-local (issue #8)")
+		return errNonemptyWorktree
 	}
 	if !errors.Is(err, io.EOF) {
 		return fmt.Errorf("read worktree: %w", err)

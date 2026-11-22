@@ -42,18 +42,23 @@ type releaseTarget struct {
 func main() {
 	output := flag.String("output", "dist/licenses", "output directory")
 	target := flag.String("target", "", "release target (linux/amd64, darwin/arm64, or windows/amd64; empty selects all)")
+	desktop := flag.Bool("desktop", false, "include the desktop application and companion CLI on this native target")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: go run ./tools/notices --output directory [--target goos/goarch]")
 		os.Exit(2)
 	}
-	if err := generate(*output, *target); err != nil {
+	if err := generateNotices(*output, *target, *desktop); err != nil {
 		fmt.Fprintln(os.Stderr, "notices:", err)
 		os.Exit(1)
 	}
 }
 
 func generate(output, selectedTarget string) error {
+	return generateNotices(output, selectedTarget, false)
+}
+
+func generateNotices(output, selectedTarget string, desktop bool) error {
 	targets, err := selectedTargets(selectedTarget)
 	if err != nil {
 		return err
@@ -64,8 +69,21 @@ func generate(output, selectedTarget string) error {
 	}
 	modules := make(map[string]noticeModule)
 	for _, target := range targets {
-		if err := collectTarget(target, root, modules); err != nil {
+		packages := []string{"./cmd/filecloud"}
+		if !desktop {
+			packages = append(packages, "./cmd/filecloud-server")
+		}
+		if err := collectTarget(target, root, modules, "0", packages...); err != nil {
 			return err
+		}
+		if desktop {
+			cgo := "1"
+			if target.goos == "windows" {
+				cgo = "0"
+			}
+			if err := collectTarget(target, filepath.Join(root, "desktop"), modules, cgo, "."); err != nil {
+				return err
+			}
 		}
 	}
 	cleanOutput := filepath.Clean(output)
@@ -146,11 +164,11 @@ func moduleRoot() (string, error) {
 	return filepath.Dir(module), nil
 }
 
-func collectTarget(target releaseTarget, root string, modules map[string]noticeModule) error {
+func collectTarget(target releaseTarget, root string, modules map[string]noticeModule, cgo string, packages ...string) error {
 	name := target.goos + "/" + target.goarch
-	command := exec.Command("go", "list", "-deps", "-json", "./cmd/filecloud", "./cmd/filecloud-server")
+	command := exec.Command("go", append([]string{"list", "-tags", "production", "-deps", "-json"}, packages...)...)
 	command.Dir = root
-	command.Env = append(os.Environ(), "GOOS="+target.goos, "GOARCH="+target.goarch, "CGO_ENABLED=0")
+	command.Env = append(os.Environ(), "GOOS="+target.goos, "GOARCH="+target.goarch, "CGO_ENABLED="+cgo)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("open go list output for %s: %w", name, err)

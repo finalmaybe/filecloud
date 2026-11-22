@@ -1,0 +1,84 @@
+name: desktop
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['desktop/**', 'assets/brand/**', 'cmd/filecloud/**', 'internal/**', 'go.*', 'tools/notices/**', '.github/workflows/desktop.yml']
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev squashfs-tools desktop-file-utils curl patchelf \
+            gsettings-desktop-schemas adwaita-icon-theme libgdk-pixbuf2.0-bin librsvg2-common glib-networking \
+            dconf-gsettings-backend gstreamer1.0-plugins-base
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nsis = "${env:ProgramFiles(x86)}\NSIS"
+          if (!(Test-Path "$nsis\makensis.exe")) { choco install nsis -y }
+          $nsis | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build native preview installer
+        run: bash desktop/build/package.sh
+      - name: Check AppImage contents without FUSE
+        if: runner.os == 'Linux'
+        run: |
+          cd "$RUNNER_TEMP"
+          image="$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-linux-amd64.AppImage"
+          "$image" --appimage-extract >/dev/null
+          dpkg-deb -x "$GITHUB_WORKSPACE/desktop/out/filecloud-desktop-linux-amd64.deb" deb-payload
+          desktop-file-validate squashfs-root/org.filecloud.desktop.desktop
+          test -s squashfs-root/.DirIcon && test -x squashfs-root/AppRun
+          lib="$RUNNER_TEMP/squashfs-root/usr/lib"
+          gui="$lib/filecloud-desktop/filecloud-desktop"
+          cmp "$lib/filecloud-desktop/filecloud" deb-payload/usr/lib/filecloud-desktop/filecloud
+          # patchelf changes RPATH, not the Go build or the companion version.
+          test "$(go tool buildid "$gui")" = "$(go tool buildid deb-payload/usr/lib/filecloud-desktop/filecloud-desktop)"
+          for exe in "$gui" "$lib/webkitgtk-6.0/WebKitWebProcess" "$lib/webkitgtk-6.0/WebKitNetworkProcess"; do
+            deps=$(env -u LD_LIBRARY_PATH ldd "$exe")
+            if grep -q 'not found' <<<"$deps"; then echo "$deps"; exit 1; fi
+            for so in libwebkitgtk-6.0.so.4 libjavascriptcoregtk-6.0.so.1 libgtk-4.so.1; do
+              loaded=$(awk -v name="$so" '$1 == name {print $3}' <<<"$deps")
+              test "$(realpath -e "$loaded")" = "$lib/$so"
+            done
+          done
+          test -s "$lib/webkitgtk-6.0/injected-bundle/libwebkitgtkinjectedbundle.so"
+          test -s "$lib/filecloud-desktop/licenses/linux-runtime/packages.tsv"
+      - name: Exercise two devices against a local server
+        run: |
+          ext=''; [[ $(go env GOOS) != windows ]] || ext=.exe
+          export FILECLOUD_DESKTOP_SERVER="$RUNNER_TEMP/desktop-server$ext"
+          CGO_ENABLED=0 go build -o "$FILECLOUD_DESKTOP_SERVER" ./cmd/filecloud-server
+          if [[ $(go env GOOS) == linux ]]; then
+            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/squashfs-root/usr/lib/filecloud-desktop/filecloud"
+          else
+            export FILECLOUD_DESKTOP_CLI="$RUNNER_TEMP/desktop-cli$ext"
+            CGO_ENABLED=0 go build -o "$FILECLOUD_DESKTOP_CLI" ./cmd/filecloud
+          fi
+          cd desktop
+          go test -count=1 -v ./...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filecloud-desktop-preview-${{ matrix.os }}
+          path: desktop/out/filecloud-desktop-*
+          if-no-files-found: error

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Filecloud</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <aside>
+      <img src="filecloud-logo.svg" class="brand" alt="Filecloud" />
+      <p class="eyebrow">工作空间</p>
+      <nav aria-label="工作空间">
+        <button data-page="libraries" aria-current="page">我的资料库</button
+        ><button data-page="activity">最近活动</button
+        ><button data-page="attention">
+          需要处理 <span id="count"></span>
+        </button>
+      </nav>
+      <footer>
+        <strong>此设备</strong>
+        <p>关闭窗口后继续同步。再次启动 Filecloud 即可重开。</p>
+        <button id="settings">设置与账号</button
+        ><button id="quit">退出应用</button>
+      </footer>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">FILECLOUD DESKTOP</p>
+          <h1 id="title">我的资料库</h1>
+          <p id="description"></p>
+        </div>
+        <button id="refresh">刷新</button>
+      </header>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <section id="content" aria-label="当前视图"></section>
+    </main>
+    <dialog id="modal" aria-labelledby="modal-title">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body"></div>
+      <div id="modal-actions" class="actions"></div>
+    </dialog>
+  </body>
+</html>

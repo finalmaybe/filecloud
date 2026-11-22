@@ -1,0 +1,44 @@
+# Filecloud Desktop（开发预览）
+
+三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud` 子程序；无需开启服务端 Web 控制台。设计与范围：[PRD](../docs/design/desktop-client-prd.md)、[技术方案](../docs/design/desktop-client-architecture.md)、[预览图](../docs/design/desktop-mockups/README.md)。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
+
+## 试用
+
+在「连接到 Filecloud」登录 → 选择或创建资料库 → 选本地工作目录并绑定。首次导入非空目录要另行勾选，远端已有版本时请选择空目录。只支持本机 ext4、APFS、固定 NTFS；不要让两套客户端状态管理同一个工作目录。
+
+- 已绑定资料库可立即同步、暂停后续轮次、打开工作目录和浏览分页主线历史。默认每轮结束后等待 30 秒；关窗保持调度，再次从系统入口启动会唤回已有窗口。「退出应用」才停止调度。
+- 打开「需要处理 → 查看影响」可核对删除的资料库、路径和计数。取消不会发布；确认仅应用于核对的候选。若有 CLI 历史恢复预览，回原 CLI 确认。
+- 「设置与账号」可切换登录系统后启动、授权通知、重新登录或退出账号。账号 token 使用系统凭据库，不可用时仅在进程内保存；CLI 绑定原有的受限凭据存储不变。重新登录后从「绑定操作 → 刷新绑定凭据」刷新已收敛的绑定；若旧凭据失效且不能刷新，按[保全流程](../docs/operations/deployment-and-client.md#刷新绑定凭据)操作。
+- 桌面状态位于 `os.UserConfigDir()/filecloud-desktop/`，按服务地址和所有者隔离；近期活动只保留 200 条。如需迁移，请先退出应用并保留工作目录和完整状态目录，不要手动编辑 `client.db`。
+
+### Linux：运行 AppImage
+
+将 `desktop/out/filecloud-desktop-linux-amd64.AppImage` 放在固定位置，然后运行：
+
+```bash
+chmod +x filecloud-desktop-linux-amd64.AppImage
+./filecloud-desktop-linux-amd64.AppImage
+```
+
+AppImage 自带 GTK 4、WebKitGTK 6、JavaScriptCore 以及匹配的 WebKit 子进程、加载器和资源；主机无需安装 WebKitGTK。构建基线是 Ubuntu 24.04 amd64（glibc 2.39），使用主机的图形驱动、字体、桌面会话和正常工作的 WebKit 沙箱工具（`bwrap`、`xdg-dbus-proxy`）。`.deb` 仍使用系统 GTK/WebKit，两种包共用本机状态。无法使用 FUSE 时，在固定的空目录中用 `--appimage-extract` 解包，从 `./squashfs-root/AppRun` 启动，并保留该目录。启用登录自启动后若移动 AppImage，请从新位置运行并重新开启自启动。
+
+## 在目标系统构建
+
+工具链沿用根目录的 Go 版本，另需 Node/npm。Ubuntu 24.04 安装 GCC、`pkg-config`、`libgtk-4-dev`、`libwebkitgtk-6.0-dev`、`dpkg-deb`、`squashfs-tools` 和 `curl`。AppImage 收集运行库还需要 `python3`、`patchelf`、`glib-networking`、`dconf-gsettings-backend`、`gsettings-desktop-schemas`、`adwaita-icon-theme`、`libgdk-pixbuf2.0-bin`、`librsvg2-common` 和 `gstreamer1.0-plugins-base`；macOS arm64 需要 Xcode 命令行工具；Windows amd64 需要 Git Bash、NSIS，以及运行应用所需的 WebView2。Windows 下让 `makensis` 位于 PATH。
+
+```bash
+# 在仓库根目录；必须在对应系统运行
+bash desktop/build/package.sh
+```
+
+产物位于 `desktop/out/`：Linux `.deb` 与 `.AppImage`、macOS `.dmg`、Windows 用户级安装 `.exe`。GUI 与随包 CLI 使用同一 `VERSION`、`COMMIT`（默认 `dev`、当前提交）；不会从 PATH 找 CLI。包包含项目许可证和随包 Go 依赖的第三方声明；前端运行时随固定版本 Wails 内嵌，不从 CDN 加载。可单独准备 `desktop/frontend/dist` 后设置 `FRONTEND_PREBUILT=1` 在原生构建机打包。默认 Windows 不签名、macOS 使用 ad-hoc 签名；正式分发须另过签名、公证及发行门禁。
+
+AppImage 从构建机安装的 Ubuntu 软件包收集运行库。发行方应在 WebKitGTK 等依赖有安全更新时更新构建机并重新打包；实际版本、来源包与版权文件在镜像内 `usr/lib/filecloud-desktop/licenses/linux-runtime/`。打包时按固定 SHA-256 校验[官方 Type 2 runtime](https://github.com/AppImage/type2-runtime/tree/fedfad51acc2860b2916a1eef32ba4a500ff31ef)；离线构建可将 `APPIMAGE_RUNTIME` 指向同一份 `runtime-x86_64` 文件。
+
+开发时先在 `desktop/frontend` 运行 `npm ci && npm run build`。修改绑定方法后，在 `desktop/` 使用同版本的 `wails3 generate bindings -ts -b -i -names -noevents -d frontend/bindings`，然后重新构建前端。首次生成前若无嵌入目录，可在 `desktop/frontend` 运行 `node assets.mjs`。不要手改生成的 bindings。
+
+## 验证
+
+- 根目录 `go test ./...`；前端完成构建后，在 `desktop/` 运行 `go test ./...`。Linux/macOS 桌面 module 需 `CGO_ENABLED=1` 及原生依赖。
+- 将 `FILECLOUD_DESKTOP_CLI` 和 `FILECLOUD_DESKTOP_SERVER` 设为本次构建的两个**绝对路径**，在目标系统受支持的本地卷上从 `desktop/` 运行 `go test -run '^TestDesktopTwoDevices$' -count=1 -v`。测试在该卷创建临时服务和两个设备，通过真实 CLI 验证文件收敛、暂停待确认、拒绝错误候选、重启恢复、确认后删除传播、历史和解绑；测试不会使用实际系统凭据库。此项验证 Go 主进程与 CLI，不替代真实窗口验收。
+- [桌面 CI](../.github/workflows/desktop.yml) 产生预览安装包，不上传正式 Release。真实安装、关窗、系统入口唤起、读屏/键盘及签名按 [A1–A6](../docs/design/desktop-client-prd.md) 单独验收。

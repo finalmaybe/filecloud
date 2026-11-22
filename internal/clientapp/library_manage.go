@@ -159,7 +159,7 @@ func writeLibraryCommandResponse(ctx context.Context, operation string, request 
 			continue
 		}
 		if !slices.Contains(allowedStatuses, status) {
-			return fmt.Errorf("%s failed: server returned %s", operation, http.StatusText(status))
+			return remoteResponseError(fmt.Sprintf("%s failed: server returned %s", operation, http.StatusText(status)), status)
 		}
 		if err := validate(data); err != nil {
 			return fmt.Errorf("invalid %s response: %w", operation, err)

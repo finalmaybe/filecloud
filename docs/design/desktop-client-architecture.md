@@ -1,6 +1,6 @@
 # Filecloud 桌面客户端技术方案 · 首版
 
-**状态：待评审，未实现。** 基线 `eb3902c`，2026-11-22。需求编号 D1–D7、验收 A1–A6 见 [PRD](desktop-client-prd.md)。[三端稿](desktop-mockups/README.md)描述界面，[三端官方资料](../research/desktop-platform-design.md)说明系统差异。
+**状态：已进入开发预览，正式发布验收未完成。** [构建与验证](../../desktop/README.md)。 基线 `eb3902c`，2026-11-22。需求编号 D1–D7、验收 A1–A6 见 [PRD](desktop-client-prd.md)。[三端稿](desktop-mockups/README.md)描述界面，[三端官方资料](../research/desktop-platform-design.md)说明系统差异。
 
 ## 1. 决策：窗口不是同步引擎
 
@@ -22,7 +22,7 @@ flowchart LR
 
 ## 2. 对照现状：哪些接口要做
 
-下表「新增」均是拟议的**本机 CLI 契约**，不新增远程端点，不改变现有调用的默认文本、JSON 或退出码。
+下表以基线版本为起点；新增均为**本机 CLI 契约**，不新增远程端点。开发预览提供 `--machine` 的成功响应/脱敏错误封套和 `sync --output=jsonl` 的流式结果，`status` 只追加可选确认字段，原命令继续可用。
 
 | 用户操作 | 当前实现 | 首版差额 |
 |---|---|---|
@@ -75,7 +75,7 @@ flowchart LR
 
 | 桌面首发目标（拟） | 安装/验收重点 |
 |---|---|
-| Ubuntu 24.04 / GNOME，amd64，ext4 | 单独 `.deb`，声明 GTK 4、WebKitGTK 6.0 运行依赖，带 `.desktop` 入口和应用图标；在目标桌面从菜单启动、禁用托盘扩展后重开，验证状态目录与工作目录都在本地 ext4。 |
+| Ubuntu 24.04 / GNOME，amd64，ext4 | 提供 `.deb` 与复用同一 GUI/CLI 的免安装 `.AppImage`，`.deb` 使用系统 GTK 4/WebKitGTK 6，AppImage 随包携带两者、对应的 WebKit 辅助进程及资源，使用主机的 glibc、图形驱动和沙箱工具，带 `.desktop` 入口和应用图标；在目标桌面从菜单启动、禁用托盘扩展后重开，验证状态目录与工作目录都在本地 ext4。 |
 | Windows 11，amd64，固定 NTFS | 用户级安装包，检测 WebView2，缺失时给可执行提示；测试开始菜单、原生目录选择、125%/200% DPI、路径含空格、受限 ACL 和卸载保留数据。公开发行前验证安装包及随包程序签名。 |
 | macOS，arm64，APFS | `.app` 随 DMG；主包和内嵌 CLI 一起签名、做公证，在干净系统从 Finder 启动。测试 WKWebView、Keychain、Dock 重开、⌘Q 和目录访问被拒绝后的提示。最低系统版本以实际签名包验证后填写。 |
 

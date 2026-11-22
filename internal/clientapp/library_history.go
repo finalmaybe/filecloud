@@ -53,6 +53,7 @@ func runLibraryHistoryList(ctx context.Context, args []string, stdout, stderr io
 	worktree := flags.String("worktree", "", "Bound worktree directory")
 	pageSize := flags.Int("page-size", 100, "Commits per page")
 	pageToken := flags.String("page-token", "", "Opaque next-page token")
+	format := flags.String("output", "text", "text or json (mainline)")
 	includeMerged := flags.Bool("include-merged", false, "Expand published merge-source lineage")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -60,6 +61,9 @@ func runLibraryHistoryList(ctx context.Context, args []string, stdout, stderr io
 	const usage = "usage: filecloud library history list --client-dir path --worktree path [--page-size n] [--page-token token] [--include-merged]"
 	if *clientDir == "" || *worktree == "" || flags.NArg() != 0 {
 		return errors.New(usage)
+	}
+	if *format != "text" && (*format != "json" || *includeMerged) {
+		return errors.New("unsupported history output format or combination")
 	}
 	if *pageSize < 1 || *pageSize > _maximumLibraryPageSize {
 		return fmt.Errorf("page-size must be between 1 and %d", _maximumLibraryPageSize)
@@ -112,11 +116,14 @@ func runLibraryHistoryList(ctx context.Context, args []string, stdout, stderr io
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("list library history failed: server returned %s", http.StatusText(status))
+		return remoteResponseError(fmt.Sprintf("list library history failed: server returned %s", http.StatusText(status)), status)
 	}
 	response, err := decodeHistoryCommandResponse(data)
 	if err != nil {
 		return fmt.Errorf("invalid list library history response: %w", err)
+	}
+	if *format == "json" {
+		return json.NewEncoder(stdout).Encode(response)
 	}
 	client := historyInspectClient{binding: binding, base: base, token: token}
 	entries, err := buildHistoryListEntries(ctx, &client, response.Commits, *includeMerged)

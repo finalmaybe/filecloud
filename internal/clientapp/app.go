@@ -32,6 +32,9 @@ type BuildInfo struct {
 
 // Run executes one client command or a transitional server compatibility command.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, build BuildInfo) (retErr error) {
+	if len(args) > 0 && args[0] == "--machine" {
+		return runMachine(ctx, args[1:], stdin, stdout, build)
+	}
 	if len(args) == 0 {
 		return errors.New("usage: filecloud <version|init|serve|gc|integrity|user|login|logout|library> [options]")
 	}
@@ -130,7 +133,7 @@ func runLogin(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return closeResponseError("login", closeErr)
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("login failed: server returned %s", response.Status)
+		return remoteResponseError(fmt.Sprintf("login failed: server returned %s", response.Status), response.StatusCode)
 	}
 	if _, err := stdout.Write(responseBody); err != nil {
 		return fmt.Errorf("write login response: %w", err)
@@ -176,7 +179,7 @@ func runLogout(ctx context.Context, args []string, stdin io.Reader, stderr io.Wr
 		return closeResponseError("logout", closeErr)
 	}
 	if response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("logout failed: server returned %s", response.Status)
+		return remoteResponseError(fmt.Sprintf("logout failed: server returned %s", response.Status), response.StatusCode)
 	}
 	return nil
 }
