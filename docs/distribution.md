@@ -1,6 +1,8 @@
 # Filecloud 分发说明
 
-Filecloud 采用 [MIT License](../LICENSE) 发布。每个 CLI 正式归档均包含客户端 `filecloud-client`、服务端 `filecloud-server`、`README.md`、`DEPLOYMENT.md`、`CONTEXT.md`、完整 `docs/`、项目 `LICENSE`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建两个二进制实际使用的第三方 Go 模块原始许可文件。Windows 下两个命令分别带 `.exe` 后缀。
+Filecloud 整体采用 [GPL-3.0-only](../LICENSE) 发布。CLI 归档和桌面安装包都附有项目 `LICENSE`，其中包含 GPLv3 全文及 `v0.4.0` 和更早版本的原始 MIT 声明。
+
+每个 CLI 正式归档均包含客户端 `filecloud-client`、服务端 `filecloud-server`、`README.md`、`DEPLOYMENT.md`、`CONTEXT.md`、完整 `docs/`、`THIRD_PARTY_NOTICES.md`，以及该目标平台构建两个二进制实际使用的第三方 Go 模块原始许可文件。Windows 下两个命令分别带 `.exe` 后缀。
 
 从采用此命名的版本起，原来脚本中的 `filecloud`（Windows 为 `filecloud.exe`）请改为 `filecloud-client`（`filecloud-client.exe`）。命令参数、已有绑定和状态目录不变，归档内不再附带旧文件名。
 
@@ -13,6 +15,12 @@ Filecloud 采用 [MIT License](../LICENSE) 发布。每个 CLI 正式归档均�
 | Windows amd64 | `filecloud-<tag>-windows-amd64.zip` | `filecloud-desktop-<tag>-windows-amd64.exe` |
 
 同一份 `SHA256SUMS` 包含全部七个下载文件的校验值。桌面安装包的签名与试用说明见[桌面客户端](../desktop/README.md)。
+
+## 获取对应源码
+
+在[发布页](https://github.com/mingming-cn/filecloud/releases)选择与二进制相同的 tag，下载 **Source code (tar.gz)** 或 **Source code (zip)**，即可取得该版 Filecloud 的源码及构建脚本。CLI 与服务端的构建步骤见根目录 `README.md`，桌面客户端见 `desktop/README.md`。
+
+发布者还须在同一下载页提供仓库归档未包含、按许可证须随二进制提供的对应源码，或指明可免费下载这些确切版本源码的位置。Linux AppImage 捆绑的 Ubuntu 组件及其源码包版本记录在镜像的 `usr/lib/filecloud-desktop/licenses/linux-runtime/packages.tsv` 中。
 
 ## 支持范围
 

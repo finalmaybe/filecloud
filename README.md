@@ -222,4 +222,4 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 
 正式 `vMAJOR.MINOR.PATCH` tag 通过 1B/1C 门禁后，会构建三端 CLI 归档和桌面安装包。CLI 冒烟、桌面构建与测试全部通过后，一次发布到该 tag 的 GitHub Release，并附上覆盖全部安装包和归档的 `SHA256SUMS`。
 
-项目采用 [MIT License](./LICENSE)。正式归档同时提供由目标平台实际编译依赖生成的第三方模块清单和原始许可文本。
+Filecloud 整体采用 [GNU 通用公共许可证第 3 版](./LICENSE)（仅第 3 版，`GPL-3.0-only`）。`v0.4.0` 及更早版本仍按 MIT 许可使用，原声明保留在 `LICENSE` 末尾。第三方组件保留各自的许可证。下载与二进制匹配的项目源码及构建脚本，见[分发说明](./docs/distribution.md)。

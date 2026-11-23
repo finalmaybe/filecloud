@@ -64,6 +64,7 @@ jobs:
             done
           done
           test -s "$lib/webkitgtk-6.0/injected-bundle/libwebkitgtkinjectedbundle.so"
+          cmp "$GITHUB_WORKSPACE/LICENSE" "$lib/filecloud-desktop/licenses/LICENSE"
           test -s "$lib/filecloud-desktop/licenses/linux-runtime/packages.tsv"
       - name: Exercise two devices against a local server
         run: |

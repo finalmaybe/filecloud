@@ -160,7 +160,7 @@ jobs:
           tar -C dist/archive-check -xzf "dist/$PACKAGE.tar.gz"
           test -x "dist/archive-check/$PACKAGE/$CLIENT_EXECUTABLE"
           test -x "dist/archive-check/$PACKAGE/$SERVER_EXECUTABLE"
-          test -s "dist/archive-check/$PACKAGE/LICENSE"
+          cmp LICENSE "dist/archive-check/$PACKAGE/LICENSE"
           test -s "dist/archive-check/$PACKAGE/README.md"
           test -s "dist/archive-check/$PACKAGE/DEPLOYMENT.md"
           test -s "dist/archive-check/$PACKAGE/CONTEXT.md"

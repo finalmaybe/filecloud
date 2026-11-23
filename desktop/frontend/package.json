@@ -1,6 +1,7 @@
 {
   "name": "filecloud-desktop-ui",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": { "build": "tsc -p tsconfig.json && node assets.mjs" },
   "devDependencies": { "typescript": "6.0.2", "@wailsio/runtime": "3.1.0" }

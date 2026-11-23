@@ -23,7 +23,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main._version=$version -X ma
 (cd desktop && CGO_ENABLED=$([[ $os == windows ]] && echo 0 || echo 1) go build -trimpath -tags production -ldflags "-s -w $gui -X main.version=$version -X main.commit=$commit" -o "$bin/filecloud-desktop$ext" .)
 legal="$bin/licenses"; [[ $os != darwin ]] || legal="$app/Contents/Resources/licenses"
 go run ./tools/notices --desktop --target "$os/$arch" --output "$legal"
-cp LICENSE "$legal/Filecloud.txt"
+cp LICENSE "$legal/"
 case "$os" in
  linux)
   pkg="$stage/pkg"; data="$pkg/usr/share"; mkdir -p "$pkg/DEBIAN" "$data/applications" "$data/icons/hicolor/1024x1024/apps"; cp desktop/build/org.filecloud.desktop.desktop "$data/applications/"; cp assets/brand/app-icon-1024.png "$data/icons/hicolor/1024x1024/apps/org.filecloud.desktop.png"
