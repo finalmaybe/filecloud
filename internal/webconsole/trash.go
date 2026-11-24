@@ -15,7 +15,7 @@ func (c *console) moveTrash(w http.ResponseWriter, r *http.Request, who identity
 		c.problem(w, r, who, err)
 		return
 	}
-	directory := "/web/libraries/" + v.LibraryID
+	directory := "/libraries/" + v.LibraryID
 	if parent := path.Dir(v.Path); parent != "." {
 		directory += "?path=" + url.QueryEscape(parent)
 	}
@@ -69,7 +69,7 @@ func (c *console) restoreTrash(w http.ResponseWriter, r *http.Request, who ident
 		c.problem(w, r, who, err)
 		return
 	}
-	http.Redirect(w, r, "/web/libraries/"+lib+"/trash?restored=1", 303)
+	http.Redirect(w, r, "/libraries/"+lib+"/trash?restored=1", 303)
 }
 
 type retentionPage struct {

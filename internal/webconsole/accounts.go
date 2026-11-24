@@ -26,7 +26,7 @@ func (c *console) reviewReset(w http.ResponseWriter, r *http.Request, who identi
 	c.show(w, r, who, 200, "核对重置影响", "confirm", name, "")
 }
 func (c *console) saveAccount(w http.ResponseWriter, r *http.Request, who identity) {
-	create := r.URL.Path == "/web/accounts/create"
+	create := r.URL.Path == "/accounts/create"
 	if !create && r.PostForm.Get("confirm") != "yes" {
 		c.show(w, r, who, 400, "核对重置影响", "confirm", r.PostForm.Get("username"), "请先确认会话撤销的影响。")
 		return
@@ -52,5 +52,5 @@ func (c *console) saveAccount(w http.ResponseWriter, r *http.Request, who identi
 	if create {
 		done = "create"
 	}
-	http.Redirect(w, r, "/web/accounts?done="+done, 303)
+	http.Redirect(w, r, "/accounts?done="+done, 303)
 }

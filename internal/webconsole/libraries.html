@@ -5,7 +5,7 @@
 </header>
 <noscript>请启用 JavaScript 以查看和创建资料库。</noscript>
 <p id="list-status" role="status" hidden>正在读取资料库…</p>
-<a href="/web/libraries" id="list-retry" hidden>重新打开资料库列表</a>
+<a href="/libraries" id="list-retry" hidden>重新打开资料库列表</a>
 <table class="entry-table libraries" hidden>
   <caption class="sr">资料库索引</caption>
   <thead><tr><th scope="col">名称</th><th scope="col">发布状态</th><th scope="col">创建日期</th></tr></thead>
@@ -44,7 +44,7 @@
 {{define "library"}}
 <header class="list-toolbar">
   <div class="location">
-    <a href="/web/libraries">我的资料库</a><span aria-hidden="true">/</span>
+    <a href="/libraries">我的资料库</a><span aria-hidden="true">/</span>
     <a id="directory-root" hidden>{{.Name}}</a><span id="path-separator" aria-hidden="true" hidden>/</span><h1 id="directory-title">{{.Name}}</h1>
   </div>
   <a class="tool-link" id="directory-parent" hidden>上一级目录</a>
@@ -55,7 +55,7 @@
 {{template "library-files" .}}
 <dialog id="delete-dialog" class="panel library-dialog" aria-labelledby="delete-title" aria-describedby="delete-target delete-effect">
   <h2 id="delete-title">确认删除</h2>
-  <form class="fields" method="post" action="/web/libraries/{{.ID}}/trash/move">
+  <form class="fields" method="post" action="/libraries/{{.ID}}/trash/move">
     <input type="hidden" name="path"><input type="hidden" name="commit">
     <strong id="delete-target"></strong>
     <p id="delete-effect"><span></span>其他设备在下次同步时收到删除，到期前可从回收站恢复。</p>

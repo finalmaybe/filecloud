@@ -32,7 +32,7 @@ form.addEventListener('submit', async event => {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(request),
     });
-    location.assign(`/web/libraries/${Library.LibraryId}`);
+    location.assign(`/libraries/${Library.LibraryId}`);
   } catch (err) {
     error.textContent = err.message;
     error.hidden = false;
@@ -70,7 +70,7 @@ async function loadLibraries() {
 
 function appendLibrary(library) {
   const row = document.querySelector('#library-row').content.firstElementChild.cloneNode(true);
-  row.querySelector('.entry-link').href = `/web/libraries/${library.LibraryId}`;
+  row.querySelector('.entry-link').href = `/libraries/${library.LibraryId}`;
   row.querySelector('.entry-name').textContent = library.Name;
   setLocalTime(row.querySelector('time'), library.CreatedAt);
   setLibraryState(row, library);
@@ -105,7 +105,7 @@ async function libraryRequest(path, options) {
   } catch {
     throw new Error('未能连接服务，请重试。');
   }
-  if (response.status === 401) location.replace('/web/login');
+  if (response.status === 401) location.replace('/login');
   if (!response.headers.get('content-type')?.includes('application/json')) {
     throw new Error('未能读取资料库服务响应，请稍后重试。');
   }

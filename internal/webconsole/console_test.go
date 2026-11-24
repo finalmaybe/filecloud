@@ -31,7 +31,7 @@ func TestOriginConfiguration(t *testing.T) {
 		{"ftp://console.example", "localhost:8080", false},
 		{"https://user@console.example", "localhost:8080", false},
 		{"https://console.example/", "localhost:8080", false},
-		{"https://console.example/web", "localhost:8080", false},
+		{"https://console.example/console", "localhost:8080", false},
 		{"https://console.example?", "localhost:8080", false},
 		{"https://console.example/#part", "localhost:8080", false},
 		{"https://console.example:65536", "localhost:8080", false},
@@ -60,7 +60,7 @@ func TestWebHostBinding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest(http.MethodGet, "/web/login", nil)
+		r := httptest.NewRequest(http.MethodGet, "/login", nil)
 		r.Host = tc.host
 		r.Header.Set("X-Forwarded-Host", "console.example")
 		w := httptest.NewRecorder()
@@ -93,25 +93,25 @@ func TestEmbeddedRoutes(t *testing.T) {
 		media        []string
 		text         string
 	}{
-		{"GET", "/web", 301, "/web/", nil, ""},
-		{"GET", "/web/", 303, "/web/login", nil, ""},
-		{"HEAD", "/web/", 303, "/web/login", nil, ""},
-		{"GET", "/web/login", 200, "", []string{"text/html"}, `autocomplete="current-password"`},
-		{"GET", "/web/libraries", 303, "/web/login", nil, ""},
-		{"GET", "/web/libraries/example/history", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/libraries/example/snapshot/commit", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/libraries/example/info", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/libraries/example/file-history", 303, "/web/login", nil, ""},
-		{"GET", "/web/overview", 303, "/web/login", nil, ""},
-		{"GET", "/web/accounts", 303, "/web/login", nil, ""},
-		{"GET", "/web/not-a-page", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/assets/", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/shell.html", 404, "", []string{"text/html"}, "页面不存在"},
-		{"GET", "/web/assets/console.css", 200, "", []string{"text/css"}, ".skip"},
-		{"GET", "/web/assets/atlas.svg", 200, "", []string{"image/svg+xml"}, "<svg"},
-		{"GET", "/web/assets/libraries.js", 200, "", javascript, "loadLibraries"},
-		{"GET", "/web/assets/local-time.js", 200, "", javascript, "setLocalTime"},
-		{"POST", "/web/login", 403, "", nil, ""},
+		{"GET", "/", 303, "/login", nil, ""},
+		{"HEAD", "/", 303, "/login", nil, ""},
+		{"GET", "/login", 200, "", []string{"text/html"}, `autocomplete="current-password"`},
+		{"GET", "/libraries", 303, "/login", nil, ""},
+		{"GET", "/libraries/example/history", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/libraries/example/snapshot/commit", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/libraries/example/info", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/libraries/example/file-history", 303, "/login", nil, ""},
+		{"GET", "/overview", 303, "/login", nil, ""},
+		{"GET", "/accounts", 303, "/login", nil, ""},
+		{"GET", "/not-a-page", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/web", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/assets/", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/shell.html", 404, "", []string{"text/html"}, "页面不存在"},
+		{"GET", "/assets/console.css", 200, "", []string{"text/css"}, ".skip"},
+		{"GET", "/assets/atlas.svg", 200, "", []string{"image/svg+xml"}, "<svg"},
+		{"GET", "/assets/libraries.js", 200, "", javascript, "loadLibraries"},
+		{"GET", "/assets/local-time.js", 200, "", javascript, "setLocalTime"},
+		{"POST", "/login", 403, "", nil, ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, "https://console.example"+tc.path, nil)

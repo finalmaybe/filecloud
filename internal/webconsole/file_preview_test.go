@@ -71,7 +71,7 @@ func TestPublishedFilePreviews(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := func(commit, path, mode string) string {
-		return "/web/libraries/" + lib + "/file-preview?" + url.Values{"commit": {commit}, "path": {path}, "mode": {mode}}.Encode()
+		return "/libraries/" + lib + "/file-preview?" + url.Values{"commit": {commit}, "path": {path}, "mode": {mode}}.Encode()
 	}
 	get := func(name, mode string) *httptest.ResponseRecorder {
 		return f.req("GET", link(head, "docs/"+name, mode), nil)
@@ -93,11 +93,11 @@ func TestPublishedFilePreviews(t *testing.T) {
 		if stage.Code != 200 || markup == "" || !strings.Contains(page.Body.String(), markup) || strings.Contains(markup, "<!doctype") || strings.Contains(markup, "<em>") {
 			t.Errorf("%s: expected the same escaped stage in the dialog and standalone page", name)
 		}
-		if (name == "image.png" || name == "doc.pdf") && !strings.Contains(markup, `/web/libraries/`+lib+`/file-preview?commit=`+head) {
+		if (name == "image.png" || name == "doc.pdf") && !strings.Contains(markup, `/libraries/`+lib+`/file-preview?commit=`+head) {
 			t.Errorf("%s: fragment media link must resolve at the pinned preview, not at the listing URL", name)
 		}
 	}
-	listing := f.req("GET", "/web/libraries/"+lib, nil)
+	listing := f.req("GET", "/libraries/"+lib, nil)
 	if !strings.Contains(listing.Body.String(), `<dialog class="viewer"`) || !strings.Contains(listing.Header().Get("Content-Security-Policy"), "frame-src 'self'") || listing.Header().Get("X-Frame-Options") != "DENY" {
 		t.Error("listing must host the modal and allow embedding a same-origin PDF without becoming frameable")
 	}
@@ -181,7 +181,7 @@ func TestPublishedFilePreviews(t *testing.T) {
 	if err := f.sessions.SetAccountPassword(ctx, "second", f.pass, "test", true); err != nil {
 		t.Fatal(err)
 	}
-	f.cookie = f.req("POST", "/web/login", url.Values{"username": {"second"}, "password": {f.pass}}).Result().Cookies()[0]
+	f.cookie = f.req("POST", "/login", url.Values{"username": {"second"}, "password": {f.pass}}).Result().Cookies()[0]
 	if w := f.libraryAPI("PUT", "/"+lib, `{"Name":"Other"}`); w.Code != 201 {
 		t.Fatal(w.Code)
 	}

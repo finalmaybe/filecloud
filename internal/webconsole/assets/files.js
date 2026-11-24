@@ -35,7 +35,7 @@ async function loadDirectory(url) {
   status.textContent = '正在读取目录项…';
   try {
     const response = await fetch(url, {redirect: 'error'});
-    if (response.status === 401) { location.replace('/web/login'); return; }
+    if (response.status === 401) { location.replace('/login'); return; }
     if (!response.ok) {
       const messages = {400: '目录或分页参数无效。', 404: '找不到该资料库、版本或目录。', 429: '目录读取繁忙，请稍后重试。'};
       status.textContent = messages[response.status] || '暂时无法读取文件列表。';

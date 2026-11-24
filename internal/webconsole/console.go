@@ -47,7 +47,6 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /web", http.RedirectHandler("/web/", http.StatusMovedPermanently))
 	c := &console{Config: config, shell: shell, origin: origin, admins: map[string]bool{}}
 	for _, name := range config.AdminUsers {
 		if _, err := auth.ValidateUsername(name); err != nil {
@@ -59,15 +58,15 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 		}
 		c.admins[u.ID] = true
 	}
-	mux.HandleFunc("GET /web/{$}", c.private(func(w http.ResponseWriter, r *http.Request, _ identity) {
-		http.Redirect(w, r, "/web/libraries", http.StatusSeeOther)
+	mux.HandleFunc("GET /{$}", c.private(func(w http.ResponseWriter, r *http.Request, _ identity) {
+		http.Redirect(w, r, "/libraries", http.StatusSeeOther)
 	}))
-	mux.HandleFunc("GET /web/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 		c.render(w, r, 200, page{Title: "账号登录", View: "login"})
 	})
-	mux.HandleFunc("POST /web/login", c.login)
-	mux.HandleFunc("POST /web/logout", c.private(c.logout))
-	mux.HandleFunc("GET /web/libraries", c.private(func(w http.ResponseWriter, r *http.Request, who identity) {
+	mux.HandleFunc("POST /login", c.login)
+	mux.HandleFunc("POST /logout", c.private(c.logout))
+	mux.HandleFunc("GET /libraries", c.private(func(w http.ResponseWriter, r *http.Request, who identity) {
 		defaults, err := c.Store.Defaults(r.Context())
 		if err != nil {
 			c.problem(w, r, who, err)
@@ -75,31 +74,31 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 		}
 		c.show(w, r, who, 200, "我的资料库", "libraries", defaults, "")
 	}))
-	mux.HandleFunc("GET /web/libraries/{library}", c.private(c.libraryDetail))
-	mux.HandleFunc("GET /web/libraries/{library}/app-passwords", c.private(c.appPasswords))
-	mux.HandleFunc("POST /web/libraries/{library}/app-passwords", c.private(c.appPasswords))
-	mux.HandleFunc("POST /web/libraries/{library}/app-passwords/{credential}/revoke", c.private(c.revokePassword))
-	mux.HandleFunc("GET /web/libraries/{library}/trash", c.private(c.trash))
-	mux.HandleFunc("POST /web/libraries/{library}/trash/move", c.private(c.moveTrash))
-	mux.HandleFunc("POST /web/libraries/{library}/trash/restore", c.private(c.restoreTrash))
-	mux.HandleFunc("GET /web/libraries/{library}/retention", c.private(c.retention))
-	mux.HandleFunc("POST /web/libraries/{library}/retention", c.private(c.retention))
-	mux.HandleFunc("GET /web/libraries/{library}/file-preview", c.private(c.previewFile))
-	mux.HandleFunc("GET /web/libraries/{library}/file-history", c.private(c.fileHistory))
-	mux.HandleFunc("GET /web/libraries/{library}/file-history/download", c.private(c.downloadVersion))
-	mux.HandleFunc("POST /web/libraries/{library}/file-history/restore", c.private(c.restoreVersion))
-	mux.HandleFunc("POST /web/libraries/{library}/file-history/delete", c.private(c.deleteVersion))
-	mux.HandleFunc("GET /web/overview", c.admin(c.overview))
-	mux.HandleFunc("GET /web/accounts", c.admin(c.accounts))
-	mux.HandleFunc("POST /web/accounts/review", c.admin(c.reviewReset))
-	mux.HandleFunc("POST /web/accounts/create", c.admin(c.saveAccount))
-	mux.HandleFunc("POST /web/accounts/reset", c.admin(c.saveAccount))
+	mux.HandleFunc("GET /libraries/{library}", c.private(c.libraryDetail))
+	mux.HandleFunc("GET /libraries/{library}/app-passwords", c.private(c.appPasswords))
+	mux.HandleFunc("POST /libraries/{library}/app-passwords", c.private(c.appPasswords))
+	mux.HandleFunc("POST /libraries/{library}/app-passwords/{credential}/revoke", c.private(c.revokePassword))
+	mux.HandleFunc("GET /libraries/{library}/trash", c.private(c.trash))
+	mux.HandleFunc("POST /libraries/{library}/trash/move", c.private(c.moveTrash))
+	mux.HandleFunc("POST /libraries/{library}/trash/restore", c.private(c.restoreTrash))
+	mux.HandleFunc("GET /libraries/{library}/retention", c.private(c.retention))
+	mux.HandleFunc("POST /libraries/{library}/retention", c.private(c.retention))
+	mux.HandleFunc("GET /libraries/{library}/file-preview", c.private(c.previewFile))
+	mux.HandleFunc("GET /libraries/{library}/file-history", c.private(c.fileHistory))
+	mux.HandleFunc("GET /libraries/{library}/file-history/download", c.private(c.downloadVersion))
+	mux.HandleFunc("POST /libraries/{library}/file-history/restore", c.private(c.restoreVersion))
+	mux.HandleFunc("POST /libraries/{library}/file-history/delete", c.private(c.deleteVersion))
+	mux.HandleFunc("GET /overview", c.admin(c.overview))
+	mux.HandleFunc("GET /accounts", c.admin(c.accounts))
+	mux.HandleFunc("POST /accounts/review", c.admin(c.reviewReset))
+	mux.HandleFunc("POST /accounts/create", c.admin(c.saveAccount))
+	mux.HandleFunc("POST /accounts/reset", c.admin(c.saveAccount))
 	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css"} {
-		mux.HandleFunc("GET /web/"+name, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})
 	}
-	mux.HandleFunc("GET /web/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		c.render(w, r, 404, page{Title: "页面不存在", View: "missing"})
 	})
 

@@ -17,7 +17,7 @@ func TestLibraryRetentionCreationPreviewAndDefaults(t *testing.T) {
 	if err := f.db.SetDefaults(ctx, storage.Retention{TrashDays: 45, HistoryDays: 90}, f.now); err != nil {
 		t.Fatal(err)
 	}
-	page := f.req("GET", "/web/libraries", nil)
+	page := f.req("GET", "/libraries", nil)
 	for _, s := range []string{"跟随全局默认（45 天）", "跟随全局默认（90 天）"} {
 		if !strings.Contains(page.Body.String(), s) {
 			t.Fatal("creation form missing", s)
@@ -46,7 +46,7 @@ func TestLibraryRetentionCreationPreviewAndDefaults(t *testing.T) {
 	if got := get().Retention; got != (storage.Retention{HistoryDays: 10}) {
 		t.Fatal(got)
 	}
-	base := "/web/libraries/" + lib
+	base := "/libraries/" + lib
 	if w := f.req("GET", base+"/trash", nil); w.Code != 200 || !strings.Contains(w.Body.String(), "回收站为空") {
 		t.Fatal("empty trash", w.Code)
 	}

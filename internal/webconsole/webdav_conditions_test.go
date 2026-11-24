@@ -19,7 +19,7 @@ func TestDAVCredentialBoundaries(t *testing.T) {
 	if d.libraryAPI("PUT", "/"+otherLib, `{"Name":"Other"}`).Code != 201 {
 		t.Fatal("library setup")
 	}
-	if d.req("POST", "/web/libraries/"+otherLib+"/app-passwords/"+d.id+"/revoke", url.Values{}).Code != 404 {
+	if d.req("POST", "/libraries/"+otherLib+"/app-passwords/"+d.id+"/revoke", url.Values{}).Code != 404 {
 		t.Fatal("cross-library revocation")
 	}
 	otherOwner, _ := auth.NewUserID(nil)

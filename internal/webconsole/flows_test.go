@@ -99,7 +99,7 @@ func (f *fixture) libraryAPI(method, path, body string) *httptest.ResponseRecord
 
 func (f *fixture) login() {
 	f.t.Helper()
-	w := f.req("POST", "/web/login", url.Values{"username": {"observer"}, "password": {f.pass}})
+	w := f.req("POST", "/login", url.Values{"username": {"observer"}, "password": {f.pass}})
 	if w.Code != 303 {
 		f.t.Fatalf("login status %d", w.Code)
 	}
@@ -110,12 +110,12 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	f.login()
 	admin := f.cookie
 	target := url.Values{"username": {"field-device"}, "password": {rand.Text()}}
-	if f.req("POST", "/web/accounts/create", target).Code != 403 {
+	if f.req("POST", "/accounts/create", target).Code != 403 {
 		t.Fatal("owner could create accounts")
 	}
 	f.config.AdminUsers = []string{"observer"}
 	f.mount()
-	if f.req("POST", "/web/accounts/create", target).Code != 303 || f.req("POST", "/web/accounts/create", target).Code != 409 {
+	if f.req("POST", "/accounts/create", target).Code != 303 || f.req("POST", "/accounts/create", target).Code != 409 {
 		t.Fatal("create or duplicate")
 	}
 	id, _ := auth.NewUserID(nil)
@@ -131,13 +131,13 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	if f.libraryAPI("GET", "?PageToken=invalid", "").Code != 400 {
 		t.Fatal("cursor error")
 	}
-	w := f.req("POST", "/web/login", target)
+	w := f.req("POST", "/login", target)
 	if w.Code != 303 {
 		t.Fatal("new login")
 	}
 	other := w.Result().Cookies()[0]
 	f.cookie = other
-	if f.req("GET", "/web/libraries/"+id, nil).Code != 404 {
+	if f.req("GET", "/libraries/"+id, nil).Code != 404 {
 		t.Fatal("foreign library visible")
 	}
 	if list := f.libraryAPI("GET", "", ""); list.Code != 200 || strings.Contains(list.Body.String(), id) {
@@ -150,7 +150,7 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 		t.Fatal("same UUID in separate owner scope")
 	}
 	f.cookie = admin
-	detail := f.req("GET", "/web/libraries/"+id, nil)
+	detail := f.req("GET", "/libraries/"+id, nil)
 	if detail.Code != 200 || strings.Contains(detail.Body.String(), "Other") || !strings.Contains(detail.Body.String(), "尚未发布文件") {
 		t.Fatal("expected the owner's empty file list")
 	}
@@ -158,36 +158,36 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	if info.Code != 200 || !strings.Contains(info.Body.String(), "Atlas") || strings.Contains(info.Body.String(), "Other") || !strings.Contains(info.Body.String(), `"HeadCommitId":null`) {
 		t.Fatal("expected only the owner's unpublished library metadata")
 	}
-	if f.req("POST", "/web/accounts/review", url.Values{"username": {"field-device"}}).Code != 200 {
+	if f.req("POST", "/accounts/review", url.Values{"username": {"field-device"}}).Code != 200 {
 		t.Fatal("reset review")
 	}
 	reset := url.Values{"username": {"field-device"}, "password": {rand.Text()}}
-	if f.req("POST", "/web/accounts/reset", reset).Code != 400 {
+	if f.req("POST", "/accounts/reset", reset).Code != 400 {
 		t.Fatal("missing confirmation")
 	}
 	reset.Set("confirm", "yes")
-	if f.req("POST", "/web/accounts/reset", reset).Code != 303 {
+	if f.req("POST", "/accounts/reset", reset).Code != 303 {
 		t.Fatal("reset failed")
 	}
 	f.cookie = other
-	if f.req("GET", "/web/libraries", nil).Code != 303 || f.req("POST", "/web/login", target).Code != 401 || f.req("POST", "/web/login", reset).Code != 303 {
+	if f.req("GET", "/libraries", nil).Code != 303 || f.req("POST", "/login", target).Code != 401 || f.req("POST", "/login", reset).Code != 303 {
 		t.Fatal("reset login semantics")
 	}
 }
 func TestAdminGrantAndRevocation(t *testing.T) {
 	f := newFixture(t)
 	f.login()
-	if f.req("GET", "/web/accounts", nil).Code != 403 {
+	if f.req("GET", "/accounts", nil).Code != 403 {
 		t.Fatal("implicit administrator")
 	}
 	f.config.AdminUsers = []string{"OBSERVER"}
 	f.mount()
-	if f.req("GET", "/web/accounts", nil).Code != 200 {
+	if f.req("GET", "/accounts", nil).Code != 200 {
 		t.Fatal("authorized admin rejected")
 	}
 	f.config.AdminUsers = nil
 	f.mount()
-	if f.req("GET", "/web/accounts", nil).Code != 403 || f.req("GET", "/web/libraries", nil).Code != 200 {
+	if f.req("GET", "/accounts", nil).Code != 403 || f.req("GET", "/libraries", nil).Code != 200 {
 		t.Fatal("existing session did not lose only admin rights")
 	}
 	f.config.AdminUsers = []string{"missing"}
@@ -197,16 +197,16 @@ func TestAdminGrantAndRevocation(t *testing.T) {
 }
 func TestWorkspaceNavigationBySession(t *testing.T) {
 	f := newFixture(t)
-	login := f.req("GET", "/web/login", nil).Body.String()
+	login := f.req("GET", "/login", nil).Body.String()
 	if !strings.Contains(login, `autocomplete="current-password"`) || strings.Contains(login, `<nav`) || strings.Contains(login, "工作空间") {
 		t.Fatal("expected a standalone login form without workspace navigation")
 	}
 	f.login()
-	entry := f.req("GET", "/web/", nil)
-	if entry.Code != 303 || entry.Header().Get("Location") != "/web/libraries" {
+	entry := f.req("GET", "/", nil)
+	if entry.Code != 303 || entry.Header().Get("Location") != "/libraries" {
 		t.Fatal("signed-in entry did not lead to libraries")
 	}
-	libraries := f.req("GET", "/web/libraries", nil).Body.String()
+	libraries := f.req("GET", "/libraries", nil).Body.String()
 	if !strings.Contains(libraries, `aria-label="主导航"`) || !strings.Contains(libraries, `>资料库</a>`) || strings.Contains(libraries, "控制台入口") {
 		t.Fatal("expected libraries navigation without the redundant console entry")
 	}
@@ -214,7 +214,7 @@ func TestWorkspaceNavigationBySession(t *testing.T) {
 
 func TestSessionLifecycle(t *testing.T) {
 	f := newFixture(t)
-	bad := f.req("POST", "/web/login", url.Values{"username": {"observer"}, "password": {"invalid"}})
+	bad := f.req("POST", "/login", url.Values{"username": {"observer"}, "password": {"invalid"}})
 	if bad.Code != 401 || bad.Header().Get("Set-Cookie") != "" {
 		t.Fatal("invalid login accepted")
 	}
@@ -222,18 +222,18 @@ func TestSessionLifecycle(t *testing.T) {
 	if !f.cookie.Secure || !f.cookie.HttpOnly || f.cookie.Path != "/" || f.cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatal("cookie policy")
 	}
-	if f.req("GET", "/web/libraries", nil).Code != 200 {
+	if f.req("GET", "/libraries", nil).Code != 200 {
 		t.Fatal("valid cookie rejected")
 	}
-	if f.req("POST", "/web/logout", nil).Code != 403 {
+	if f.req("POST", "/logout", nil).Code != 403 {
 		t.Fatal("missing origin accepted")
 	}
-	if f.req("POST", "/web/logout", url.Values{}).Code != 303 || f.req("GET", "/web/libraries", nil).Code != 303 {
+	if f.req("POST", "/logout", url.Values{}).Code != 303 || f.req("GET", "/libraries", nil).Code != 303 {
 		t.Fatal("logout failed to revoke cookie")
 	}
 	f.login()
 	f.now = f.now.Add(31 * 24 * time.Hour)
-	if f.req("GET", "/web/libraries", nil).Code != 303 {
+	if f.req("GET", "/libraries", nil).Code != 303 {
 		t.Fatal("expired cookie accepted")
 	}
 }
@@ -264,14 +264,14 @@ func TestSessionNamespacesAndPasswordReset(t *testing.T) {
 	}
 	b := f.cookie
 	f.cookie = &http.Cookie{Name: b.Name, Value: login.Session.AccessToken}
-	if check("") != 401 || f.req("GET", "/web/libraries", nil).Code != 303 {
+	if check("") != 401 || f.req("GET", "/libraries", nil).Code != 303 {
 		t.Fatal("CLI token accepted as cookie")
 	}
 	f.cookie = b
 	if err := f.db.ResetPassword(t.Context(), "observer", "replaced", f.now); err != nil {
 		t.Fatal(err)
 	}
-	if check(login.Session.AccessToken) != 401 || check("") != 401 || f.req("GET", "/web/libraries", nil).Code != 303 {
+	if check(login.Session.AccessToken) != 401 || check("") != 401 || f.req("GET", "/libraries", nil).Code != 303 {
 		t.Fatal("password reset failed to revoke both sessions")
 	}
 }

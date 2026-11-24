@@ -69,5 +69,5 @@ func (c *console) deleteVersion(w http.ResponseWriter, r *http.Request, who iden
 
 func redirectVersionHistory(w http.ResponseWriter, r *http.Request, v library.VersionTarget, anchor, result string) {
 	q := url.Values{"commit": {anchor}, "path": {v.Path}, "result": {result}}
-	http.Redirect(w, r, "/web/libraries/"+v.LibraryID+"/file-history?"+q.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, "/libraries/"+v.LibraryID+"/file-history?"+q.Encode(), http.StatusSeeOther)
 }

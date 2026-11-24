@@ -1,7 +1,7 @@
 {{define "trash"}}
 <header class="list-toolbar"><div class="location">
-  <a href="/web/libraries">我的资料库</a><span aria-hidden="true">/</span>
-  <a href="/web/libraries/{{.Data.LibraryID}}">{{.Data.LibraryName}}</a><span aria-hidden="true">/</span><h1>回收站</h1>
+  <a href="/libraries">我的资料库</a><span aria-hidden="true">/</span>
+  <a href="/libraries/{{.Data.LibraryID}}">{{.Data.LibraryName}}</a><span aria-hidden="true">/</span><h1>回收站</h1>
 </div></header>
 {{if .Message}}<p class="list-footer" role="status">{{.Message}}</p>{{end}}
 {{if .Data.Entries}}
@@ -23,7 +23,7 @@
       </div>
       <dialog class="panel library-dialog" id="restore-{{.ID}}" aria-labelledby="restore-title-{{.ID}}" aria-describedby="restore-path-{{.ID}}">
         <h2 id="restore-title-{{.ID}}">{{$action}}</h2>
-        <form method="post" class="fields" action="/web/libraries/{{$.Data.LibraryID}}/trash/restore">
+        <form method="post" class="fields" action="/libraries/{{$.Data.LibraryID}}/trash/restore">
           <input type="hidden" name="id" value="{{.ID}}"><strong id="restore-path-{{.ID}}">{{.Path}}</strong>
           {{if eq .Kind "Version"}}<p>版本 <code>{{printf "%.12s" .Source}}</code> 将放回版本列表，当前文件不变。</p>
           {{else}}<label>恢复路径<input name="destination" placeholder="{{.Path}}" aria-describedby="restore-hint-{{.ID}}"></label>

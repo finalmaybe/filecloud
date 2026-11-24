@@ -30,15 +30,15 @@ func TestSharedLibraryAPIWithCookieJar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux.Handle("/web/", web)
 	mux.Handle("/v1/sessions", f.sessions)
-	mux.Handle("/", f.config.Catalog)
+	mux.Handle("/v1/libraries", f.config.Catalog)
+	mux.Handle("/v1/libraries/", f.config.Catalog)
+	mux.Handle("/", web)
 	jar, _ := cookiejar.New(nil)
 	client := srv.Client()
 	client.Jar = jar
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	webURL, _ := url.Parse(srv.URL + "/web/")
-	jar.SetCookies(webURL, []*http.Cookie{{Name: auth.BrowserCookieName, Value: "obsolete", Path: "/web/"}})
+	webURL, _ := url.Parse(srv.URL + "/")
 
 	do := func(req *http.Request, want int) string {
 		t.Helper()
@@ -56,12 +56,12 @@ func TestSharedLibraryAPIWithCookieJar(t *testing.T) {
 		}
 		return string(body)
 	}
-	login, _ := http.NewRequest("POST", srv.URL+"/web/login", strings.NewReader(url.Values{"username": {"observer"}, "password": {f.pass}}.Encode()))
+	login, _ := http.NewRequest("POST", srv.URL+"/login", strings.NewReader(url.Values{"username": {"observer"}, "password": {f.pass}}.Encode()))
 	login.Header.Set("Origin", srv.URL)
 	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	do(login, 303)
-	if cookies := jar.Cookies(webURL); len(cookies) != 1 || cookies[0].Value == "obsolete" {
-		t.Fatal("legacy cookie not replaced")
+	if cookies := jar.Cookies(webURL); len(cookies) != 1 || cookies[0].Value == "" {
+		t.Fatal("browser session cookie missing")
 	}
 	payload, _ := json.Marshal(map[string]string{"Username": "observer", "Password": f.pass, "DeviceName": "cli"})
 	cliLogin, _ := http.NewRequest("POST", srv.URL+"/v1/sessions", strings.NewReader(string(payload)))

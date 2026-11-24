@@ -58,7 +58,7 @@ func TestFileVersionActions(t *testing.T) {
 	if _, err := f.db.UpdateLibraryHead(ctx, user.ID, lib, &first, 1, head, nil, f.now); err != nil {
 		t.Fatal(err)
 	}
-	base := "/web/libraries/" + lib + "/file-history"
+	base := "/libraries/" + lib + "/file-history"
 	form := url.Values{"path": {"dir/" + name}, "commit": {first}, "anchor": {head}}
 	download := func() string { return base + "/download?" + form.Encode() }
 	apiVersion := func() string {
@@ -71,7 +71,7 @@ func TestFileVersionActions(t *testing.T) {
 		if err := f.sessions.SetAccountPassword(ctx, "second", f.pass, "test", true); err != nil {
 			t.Fatal(err)
 		}
-		login := f.req("POST", "/web/login", url.Values{"username": {"second"}, "password": {f.pass}})
+		login := f.req("POST", "/login", url.Values{"username": {"second"}, "password": {f.pass}})
 		f.cookie = login.Result().Cookies()[0]
 		if w := f.libraryAPI("PUT", "/"+lib, `{"Name":"Other"}`); w.Code != 201 {
 			t.Fatal(w.Code)
@@ -159,7 +159,7 @@ func TestFileVersionActions(t *testing.T) {
 	if w.Code != 204 || w.Body.Len() != 0 || w.Header().Get("Location") != "" {
 		t.Fatalf("delete API should succeed without a body or redirect: %d", w.Code)
 	}
-	trash := f.req("GET", "/web/libraries/"+lib+"/trash", nil)
+	trash := f.req("GET", "/libraries/"+lib+"/trash", nil)
 	if trash.Code != 200 || !strings.Contains(trash.Body.String(), "放回版本列表") || !strings.Contains(trash.Body.String(), first[:12]) || strings.Contains(trash.Body.String(), `name="destination"`) {
 		t.Fatal("deleted revision must identify its version and offer timeline restore only")
 	}

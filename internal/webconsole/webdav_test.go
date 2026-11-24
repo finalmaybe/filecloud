@@ -45,7 +45,7 @@ func newDrive(t *testing.T) *drive {
 	d.id, d.secret = d.issue()
 	return d
 }
-func (d *drive) page() string { return "/web/libraries/" + d.lib + "/app-passwords" }
+func (d *drive) page() string { return "/libraries/" + d.lib + "/app-passwords" }
 func (d *drive) issue() (string, string) {
 	d.t.Helper()
 	w := d.req("POST", d.page(), url.Values{"name": {"Laptop"}})
@@ -126,7 +126,7 @@ func TestDAVOfficeSave(t *testing.T) {
 	d.call(304, "GET", "office/book.xlsx", "", "If-None-Match", tag)
 	d.call(201, "COPY", "office/book.xlsx", "", "Destination", "/dav/"+d.lib+"/copy")
 	d.call(204, "DELETE", "office/book.xlsx", "", "If-Match", tag)
-	w := d.req("GET", "/web/libraries/"+d.lib+"/trash", nil)
+	w := d.req("GET", "/libraries/"+d.lib+"/trash", nil)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "book.xlsx") {
 		t.Fatal("deleted file missing in trash")
 	}
@@ -140,7 +140,12 @@ func TestDAVCredentialsAndLockLifecycle(t *testing.T) {
 	if strings.Contains(list, secret) || strings.Contains(list, other) {
 		t.Fatal("credential list contains a secret")
 	}
-	for _, control := range []string{`class="entry-table credential-list"`, `commandfor="create-credential"`, `commandfor="view-` + first + `"`, `commandfor="delete-` + first + `"`, `<time datetime=`} {
+	for _, control := range []string{
+		`class="entry-table credential-list"`, `commandfor="create-credential"`, `commandfor="view-` + first + `"`,
+		`commandfor="delete-` + first + `"`, `<time datetime=`,
+		`data-copy="username-` + first + `" aria-label="复制用户名" title="复制用户名"><svg`,
+		`data-copy="address-` + first + `" aria-label="复制地址" title="复制地址"><svg`,
+	} {
 		if !strings.Contains(list, control) {
 			t.Fatal("missing credential list control:", control)
 		}
@@ -261,7 +266,7 @@ func TestDAVLockEnforcedByNativeAndWebPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	publish(object.ID(empty), 503)
-	w := d.req("POST", "/web/libraries/"+d.lib+"/trash/move", url.Values{"commit": {*lib.HeadCommitID}, "path": {"doc"}})
+	w := d.req("POST", "/libraries/"+d.lib+"/trash/move", url.Values{"commit": {*lib.HeadCommitID}, "path": {"doc"}})
 	if w.Code != 423 {
 		t.Fatalf("web deletion = %d", w.Code)
 	}

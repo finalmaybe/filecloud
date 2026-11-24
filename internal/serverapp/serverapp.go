@@ -97,7 +97,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	davOrigin := flags.String("dav-origin", "", "Enable /dav/ for this public origin (default: disabled)")
-	webOrigin := flags.String("web-origin", "", "Enable /web/ for this browser origin (default: disabled)")
+	webOrigin := flags.String("web-origin", "", "Enable the Web console for this browser origin (default: disabled)")
 	gcAt := flags.String("gc-at", "03:00", "Daily in-process garbage collection time (local HH:MM or off)")
 	trashDays := flags.Int("trash-days", 0, "Set saved default recycle bin retention (initially 30 days)")
 	historyDays := flags.Int("history-days", 0, "Set saved default snapshot retention (initially 60 days)")
@@ -432,19 +432,27 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 		return errors.Join(err, listener.Close())
 	}
 	mux := http.NewServeMux()
+	healthHandler := health.NewHandler(store, logger)
+	mux.Handle("/healthz", healthHandler)
+	mux.Handle("/readyz", healthHandler)
+	// Keep unmatched machine-protocol paths out of the browser HTML handler.
+	mux.Handle("/v1", healthHandler)
+	mux.Handle("/v1/", healthHandler)
+	mux.Handle("/dav", healthHandler)
+	mux.Handle("/dav/", healthHandler)
 	mux.Handle("/v1/sessions", sessions)
 	mux.Handle("/v1/sessions/current", sessions)
 	mux.Handle("/v1/libraries", libraries)
 	mux.Handle("/v1/libraries/", libraries)
-	mux.Handle("/", health.NewHandler(store, logger))
 	if browser != nil {
 		webConfig.Sessions, webConfig.Store, webConfig.Catalog = sessions, store, libraries
 		web, err := webconsole.NewHandler(browser, webConfig)
 		if err != nil {
 			return errors.Join(err, listener.Close())
 		}
-		mux.Handle("/web", web)
-		mux.Handle("/web/", web)
+		mux.Handle("/", web)
+	} else {
+		mux.Handle("/", healthHandler)
 	}
 	var root http.Handler = mux
 	if webConfig.DAVOrigin != "" {

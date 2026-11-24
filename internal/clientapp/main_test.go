@@ -247,28 +247,31 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 				t.Fatal("serve did not announce its address")
 			}
 			client := &http.Client{Timeout: 5 * time.Second}
-			webStatus, home, css := 404, "404 page not found", "404 page not found"
+			webStatus, home, css, missing := 404, "404 page not found", "404 page not found", "404 page not found"
 			if enabled {
-				webStatus, home, css = 200, "账号登录", ".skip"
+				webStatus, home, css, missing = 200, "账号登录", ".skip", "页面不存在"
 			}
 			for _, tc := range []struct {
-				path   string
-				status int
-				body   string
+				path    string
+				status  int
+				body    string
+				browser bool
 			}{
-				{"/web/", webStatus, home},
-				{"/web/assets/console.css", webStatus, css},
-				{"/", 404, "404 page not found"},
-				{"/website", 404, "404 page not found"},
-				{"/healthz", 200, `{"RetCode":0,"Message":"success"}`},
-				{"/readyz", 200, `{"RetCode":0,"Message":"success"}`},
-				{"/v1/libraries", 401, `"RetCode":1001`},
+				{"/", webStatus, home, true},
+				{"/assets/console.css", webStatus, css, true},
+				{"/web", 404, missing, true},
+				{"/website", 404, missing, true},
+				{"/healthz", 200, `{"RetCode":0,"Message":"success"}`, false},
+				{"/readyz", 200, `{"RetCode":0,"Message":"success"}`, false},
+				{"/v1/libraries", 401, `"RetCode":1001`, false},
+				{"/v1/unknown", 404, "404 page not found", false},
+				{"/dav/unknown", 404, "404 page not found", false},
 			} {
 				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+tc.path, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.HasPrefix(tc.path, "/web/") {
+				if tc.browser {
 					req.Host = "console.example"
 				}
 				res, err := client.Do(req)
@@ -283,8 +286,8 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 				if res.StatusCode != tc.status || !strings.Contains(string(body), tc.body) {
 					t.Errorf("GET %s: status %d, want %d with %q", tc.path, res.StatusCode, tc.status, tc.body)
 				}
-				if (!enabled || !strings.HasPrefix(tc.path, "/web/")) && res.Header.Get("Content-Security-Policy") != "default-src 'none'" {
-					t.Errorf("GET %s: legacy CSP changed", tc.path)
+				if (!enabled || !tc.browser) && res.Header.Get("Content-Security-Policy") != "default-src 'none'" {
+					t.Errorf("GET %s: non-Web CSP changed", tc.path)
 				}
 			}
 		})

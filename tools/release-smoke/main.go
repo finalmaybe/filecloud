@@ -212,7 +212,7 @@ func checkPackagedWeb(ctx context.Context, binary, dataDir string) error {
 		return err
 	}
 	defer server.stop()
-	for path, marker := range map[string]string{"/web/login": "autocomplete=\"current-password\"", "/web/assets/console.css": ".skip", "/web/assets/atlas.svg": "<svg", "/web/assets/console.js": "clipboard", "/web/assets/libraries.js": "/v1/libraries", "/web/assets/files.js": "loadDirectory"} {
+	for path, marker := range map[string]string{"/login": "autocomplete=\"current-password\"", "/assets/console.css": ".skip", "/assets/atlas.svg": "<svg", "/assets/console.js": "clipboard", "/assets/libraries.js": "/v1/libraries", "/assets/files.js": "loadDirectory"} {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.url+path, nil)
 		if err != nil {
 			return err

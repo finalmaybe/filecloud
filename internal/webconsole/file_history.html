@@ -1,12 +1,12 @@
 {{define "file-history"}}
 <header class="section-title"><h1>文件历史版本</h1><p>{{.Path}}</p></header>
-<a class="inline" href="/web/libraries/{{.LibraryID}}?commit={{.Anchor}}&amp;path={{.Parent}}">返回文件列表</a>
+<a class="inline" href="/libraries/{{.LibraryID}}?commit={{.Anchor}}&amp;path={{.Parent}}">返回文件列表</a>
 <section class="panel version-standalone" data-api="/v1/libraries/{{.LibraryID}}/file-history" tabindex="-1">
   {{if .Current}}{{template "current-version" .}}{{end}}
   {{if .Versions}}<ol class="version-list" aria-label="文件变更记录（从新到旧）">{{range .Versions}}{{template "version-entry" (versionRow $ .)}}{{end}}</ol>{{end}}
   <div class="version-continuation">
     <p class="no-changes" {{if .Versions}}hidden{{end}}>这批记录中没有此文件的变更。</p>
-    {{if .Next}}<a class="version-more tool-link" href="/web/libraries/{{.LibraryID}}/file-history?commit={{.Anchor}}&amp;path={{.Path}}&amp;cursor={{.Next}}">加载更早的记录</a>{{else}}<p>已到最早记录</p>{{end}}
+    {{if .Next}}<a class="version-more tool-link" href="/libraries/{{.LibraryID}}/file-history?commit={{.Anchor}}&amp;path={{.Path}}&amp;cursor={{.Next}}">加载更早的记录</a>{{else}}<p>已到最早记录</p>{{end}}
   </div>
 </section>
 {{end}}
@@ -45,9 +45,9 @@
   <button type="button" class="version-menu-toggle" popovertarget="version-menu-{{.CommitID}}" aria-label="版本操作" aria-describedby="version-label-{{.CommitID}}" title="版本操作">{{template "icon" "more"}}</button>
   <form class="version-actions" id="version-menu-{{.CommitID}}" popover method="post">
     <input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="commit" value="{{.CommitID}}"><input type="hidden" name="anchor" value="{{.Anchor}}">
-    {{if not .IsCurrent}}<details><summary>{{template "icon" "history"}}恢复版本</summary><p>将这个版本的内容和修改时间恢复到原路径。其他文件保持不变。</p><button class="version-restore" formaction="/web/libraries/{{.LibraryID}}/file-history/restore">确认恢复</button></details>{{end}}
-    <a class="version-download" href="/web/libraries/{{.LibraryID}}/file-history/download?path={{.Path}}&amp;commit={{.CommitID}}">{{template "icon" "download"}}下载版本</a>
-    {{if not .IsCurrent}}<details class="destructive"><summary>{{template "icon" "trash"}}删除版本</summary><p>将所选记录移入资料库回收站，不改变当前文件。到期前可以放回版本列表。</p><button class="version-delete" formaction="/web/libraries/{{.LibraryID}}/file-history/delete">确认删除</button></details>{{end}}
+    {{if not .IsCurrent}}<details><summary>{{template "icon" "history"}}恢复版本</summary><p>将这个版本的内容和修改时间恢复到原路径。其他文件保持不变。</p><button class="version-restore" formaction="/libraries/{{.LibraryID}}/file-history/restore">确认恢复</button></details>{{end}}
+    <a class="version-download" href="/libraries/{{.LibraryID}}/file-history/download?path={{.Path}}&amp;commit={{.CommitID}}">{{template "icon" "download"}}下载版本</a>
+    {{if not .IsCurrent}}<details class="destructive"><summary>{{template "icon" "trash"}}删除版本</summary><p>将所选记录移入资料库回收站，不改变当前文件。到期前可以放回版本列表。</p><button class="version-delete" formaction="/libraries/{{.LibraryID}}/file-history/delete">确认删除</button></details>{{end}}
   </form>
 </li>{{end}}
 

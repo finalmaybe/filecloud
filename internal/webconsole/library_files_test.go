@@ -46,7 +46,7 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base := "/web/libraries/" + id
+	base := "/libraries/" + id
 	list := f.libraryAPI("GET", "", "")
 	if list.Code != 200 || !strings.Contains(list.Body.String(), `"LibraryId":"`+id+`"`) || !strings.Contains(list.Body.String(), `"HeadCommitId":"`+commit+`"`) {
 		t.Fatal("library list missing published library metadata")
@@ -58,7 +58,7 @@ func TestFileListOpensFileScopedVersions(t *testing.T) {
 	if strings.Contains(page.Body.String(), `id="device-guide"`) || strings.Contains(page.Body.String(), `id="library-id"`) {
 		t.Fatal("file list still contains library information or binding guide")
 	}
-	if page.Code != 200 || !strings.Contains(page.Body.String(), `data-api="/v1/libraries/`+id+`/files"`) || !strings.Contains(page.Body.String(), `/web/assets/files.js`) {
+	if page.Code != 200 || !strings.Contains(page.Body.String(), `data-api="/v1/libraries/`+id+`/files"`) || !strings.Contains(page.Body.String(), `/assets/files.js`) {
 		t.Fatal("file list page did not connect to the directory API")
 	}
 	files := f.libraryAPI("GET", "/"+id+"/files?Path=docs", "")

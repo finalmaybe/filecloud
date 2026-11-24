@@ -30,7 +30,7 @@ func (c *console) private(next privatePage) http.HandlerFunc {
 			if r.Method == http.MethodPost {
 				http.Error(w, "请重新登录", 401)
 			} else {
-				http.Redirect(w, r, "/web/login", 303)
+				http.Redirect(w, r, "/login", 303)
 			}
 			return
 		}
@@ -74,8 +74,7 @@ func (c *console) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, c.cookie(session.AccessToken, session.ExpiresAt))
-	c.clearLegacyCookie(w)
-	http.Redirect(w, r, "/web/libraries", 303)
+	http.Redirect(w, r, "/libraries", 303)
 }
 func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
 	cookie, _ := r.Cookie(auth.BrowserCookieName)
@@ -86,13 +85,7 @@ func (c *console) logout(w http.ResponseWriter, r *http.Request, who identity) {
 	expired := c.cookie("", time.Unix(1, 0))
 	expired.MaxAge = -1
 	http.SetCookie(w, expired)
-	c.clearLegacyCookie(w)
-	http.Redirect(w, r, "/web/login", 303)
-}
-func (c *console) clearLegacyCookie(w http.ResponseWriter) {
-	old := c.cookie("", time.Unix(1, 0))
-	old.Path, old.MaxAge = "/web/", -1
-	http.SetCookie(w, old)
+	http.Redirect(w, r, "/login", 303)
 }
 func (c *console) overview(w http.ResponseWriter, r *http.Request, who identity) {
 	ready := "已就绪"

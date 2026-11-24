@@ -116,10 +116,11 @@ main.explorer { padding: 0 0 32px; }
 .credentials .action.destructive { background: var(--orange); }
 #issued-hint { margin-top: 8px; }
 #issued-credential { width: min(36rem, calc(100% - 32px)); }
-:is(#issued-credential, #info-dialog) .metadata { align-items: center; }
-:is(#issued-credential, #info-dialog) dd:has([data-copy]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-:is(#issued-credential, #info-dialog) [data-copy] { display: grid; place-items: center; width: 44px; padding: 0; }
+:is(.credentials, #info-dialog) .metadata { align-items: center; }
+:is(.credentials, #info-dialog) dd:has([data-copy]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+:is(.credentials, #info-dialog) [data-copy] { display: grid; place-items: center; width: 44px; padding: 0; }
 #issued-credential [data-copy-status] { margin-right: auto; }
+.credentials [id^="view-"] [data-copy-status]:not(:empty) { display: block; margin-top: 12px; }
 
 /* File version sidebar */
 .file-workspace:has(#version-sidebar:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) clamp(21rem, 29vw, 27rem); align-items: start; }

@@ -60,5 +60,5 @@ func (c *console) revokePassword(w http.ResponseWriter, r *http.Request, who ide
 		c.problem(w, r, who, err)
 		return
 	}
-	http.Redirect(w, r, "/web/libraries/"+r.PathValue("library")+"/app-passwords", http.StatusSeeOther)
+	http.Redirect(w, r, "/libraries/"+r.PathValue("library")+"/app-passwords", http.StatusSeeOther)
 }
