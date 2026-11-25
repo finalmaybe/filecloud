@@ -148,7 +148,7 @@ printf 'hello, filecloud\n' > "$WORKTREE/hello.txt"
 
 非回环服务地址必须使用 HTTPS。生产部署应让服务端只监听回环地址，再通过可信反向代理提供 TLS；不要把 Bearer token 写入命令行、Git 仓库或普通日志。
 
-源码版还可[启用 WebDAV 网络盘](./docs/operations/deployment-and-client.md#启用-webdav-网络盘)。在 Web 资料库详情的「应用密码」页签发凭据，复制地址即可挂载该库。可写客户端需支持写锁或版本条件；已验证范围见[验收记录](./docs/acceptance/webdav-office.md)。
+源码版还可[启用 WebDAV 网络盘](./docs/operations/deployment-and-client.md#启用-webdav-网络盘)。WebDAV 默认关闭。管理员在「头像 → 管理设置 → 文件访问」开启后，用户可在 Web 资料库详情的「应用密码」页签发凭据，复制地址即可挂载该库。可写客户端需支持写锁或版本条件；已验证范围见[验收记录](./docs/acceptance/webdav-office.md)。
 
 ## 常用命令
 

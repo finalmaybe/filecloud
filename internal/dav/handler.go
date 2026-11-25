@@ -84,11 +84,18 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) error {
 	if origins := r.Header.Values("Origin"); len(origins) > 0 && (len(origins) != 1 || !h.Origin.MatchesOrigin(origins[0])) {
 		return failure(403)
 	}
+	ctx := r.Context()
+	enabled, err := h.Store.WebDAVEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return failure(http.StatusNotFound)
+	}
 	id, secret, ok := r.BasicAuth()
 	if !ok || len(r.Header.Values("Authorization")) != 1 {
 		return failure(401)
 	}
-	ctx := r.Context()
 	cred, err := h.Store.AuthenticateDAV(ctx, id, secret, time.Now())
 	if err != nil {
 		return err

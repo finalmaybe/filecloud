@@ -16,27 +16,38 @@
   {{template "symbols"}}
   <main class="viewer" aria-label="文件预览">{{template "viewer-toolbar" .Data}}<div class="viewer-body">{{template "viewer-stage" .Data}}</div></main>
   {{else}}
-  {{$listView := or (eq .View "libraries") (eq .View "library") (eq .View "trash") (eq .View "app-passwords")}}
+  {{$listView := eq .View "libraries" "library" "trash" "app-passwords" "accounts"}}
   {{if .SignedIn}}
+  {{$adminView := eq .View "settings" "overview" "accounts"}}
   <a class="skip" href="#content">跳到主要内容</a>
   {{template "symbols"}}
   <header class="topbar">
     <div class="app-name">
       <button type="button" id="nav-toggle" aria-label="主导航" aria-controls="sidebar" aria-expanded="false" hidden>{{template "icon" "menu"}}</button>
       <a class="brand" href="/libraries">{{template "icon" "brand"}}Filecloud</a>
-      <span class="app-label">工作空间</span>
+      <span class="app-label">{{if $adminView}}管理设置{{else}}工作空间{{end}}</span>
     </div>
     {{if $listView}}
-    {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{end}}
+    {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{else if eq .View "accounts"}}{{$label = "按用户名筛选"}}{{end}}
     <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"></label>
     {{end}}
     <details class="account-menu">
       <summary aria-label="账号菜单" title="账号菜单">{{template "icon" "avatar"}}</summary>
-      <form class="action-list" action="/logout" method="post"><button type="submit">{{template "icon" "logout"}}退出</button></form>
+      <div class="action-list">
+        {{if .Admin}}<a href="/settings">{{template "icon" "settings"}}管理设置</a>{{end}}
+        <form action="/logout" method="post"><button type="submit">{{template "icon" "logout"}}退出</button></form>
+      </div>
     </details>
   </header>
   <aside class="rail" id="sidebar">
     <nav aria-label="主导航">
+      {{if $adminView}}
+      <p class="rail-label">管理设置</p>
+      <a href="/settings" {{if eq .View "settings"}}aria-current="page"{{end}}>{{template "icon" "settings"}}文件访问</a>
+      <p class="rail-label">服务管理</p>
+      <a href="/overview" {{if eq .View "overview"}}aria-current="page"{{end}}>{{template "icon" "server"}}服务概览</a>
+      <a href="/accounts" {{if eq .View "accounts"}}aria-current="page"{{end}}>{{template "icon" "users"}}账号管理</a>
+      {{else}}
       <p class="rail-label">文件空间</p>
       <a href="/libraries" {{if eq .View "libraries"}}aria-current="page"{{end}}>{{template "icon" "folder"}}资料库</a>
       {{$lib := ""}}{{if eq .View "library"}}{{$lib = .Data.ID}}{{else if or (eq .View "file-history") (eq .View "trash") (eq .View "retention") (eq .View "app-passwords")}}{{$lib = .Data.LibraryID}}{{end}}
@@ -47,10 +58,7 @@
       <a href="/libraries/{{$lib}}/app-passwords" {{if eq .View "app-passwords"}}aria-current="page"{{end}}>{{template "icon" "key"}}应用密码</a>
       <a href="/libraries/{{$lib}}/retention" {{if eq .View "retention"}}aria-current="page"{{end}}>{{template "icon" "history"}}保留设置</a>
       {{end}}
-      {{if .Admin}}
-      <p class="rail-label">服务管理</p>
-      <a href="/overview" {{if eq .View "overview"}}aria-current="page"{{end}}>{{template "icon" "server"}}服务概览</a>
-      <a href="/accounts" {{if or (eq .View "accounts") (eq .View "confirm")}}aria-current="page"{{end}}>{{template "icon" "users"}}账号管理</a>{{end}}
+      {{end}}
     </nav>
     <span class="rail-foot">{{template "icon" "server"}}Filecloud Server</span>
   </aside>
@@ -66,7 +74,7 @@
     {{else if eq .View "retention"}}{{template "retention" .}}
     {{else if eq .View "error"}}<section class="panel"><h1>{{.Title}}</h1><p role="alert">{{.Message}}</p><a class="action" href="/libraries">重新打开资料库列表</a></section>
     {{else if eq .View "accounts"}}{{template "accounts" .}}
-    {{else if eq .View "confirm"}}{{template "confirm" .}}
+    {{else if eq .View "settings"}}{{template "settings" .}}
     {{else if eq .View "overview"}}{{template "overview" .Data}}
     {{else}}
     <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或返回首页。</p><a class="action" href="/">返回首页 <span aria-hidden="true">→</span></a></section>

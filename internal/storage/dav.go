@@ -23,6 +23,17 @@ var davMigration = []string{
 var ErrDAVLocked = errors.New("resource locked")
 var ErrDAVCondition = errors.New("DAV condition changed")
 
+func (s *Store) WebDAVEnabled(ctx context.Context) (bool, error) {
+	var enabled bool
+	err := s.db.QueryRowContext(ctx, `SELECT webdav_enabled FROM server_settings WHERE id=1`).Scan(&enabled)
+	return enabled, err
+}
+
+func (s *Store) SetWebDAVEnabled(ctx context.Context, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE server_settings SET webdav_enabled=? WHERE id=1`, enabled)
+	return err
+}
+
 type DAVCredential struct {
 	ID, Owner, Library, Name string
 	Created, Expires         time.Time

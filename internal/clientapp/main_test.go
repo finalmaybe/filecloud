@@ -248,10 +248,10 @@ func TestServeOptionalWebAndDAVRoutes(t *testing.T) {
 			}
 			client := &http.Client{Timeout: 5 * time.Second}
 			webStatus, home, css, missing := 404, "404 page not found", "404 page not found", "404 page not found"
-			davStatus, davBody := 404, "404 page not found"
+			davBody := "404 page not found"
 			if enabled {
 				webStatus, home, css, missing = 200, "账号登录", ".skip", "页面不存在"
-				davStatus, davBody = 401, "Unauthorized"
+				davBody = "Not Found"
 			}
 			for _, tc := range []struct {
 				path        string
@@ -267,7 +267,7 @@ func TestServeOptionalWebAndDAVRoutes(t *testing.T) {
 				{"/readyz", 200, `{"RetCode":0,"Message":"success"}`, false},
 				{"/v1/libraries", 401, `"RetCode":1001`, false},
 				{"/v1/unknown", 404, "404 page not found", false},
-				{"/dav/", davStatus, davBody, true},
+				{"/dav/", 404, davBody, true},
 			} {
 				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+tc.path, nil)
 				if err != nil {

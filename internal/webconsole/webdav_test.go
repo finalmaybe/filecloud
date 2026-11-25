@@ -30,6 +30,9 @@ type drive struct {
 func newDrive(t *testing.T) *drive {
 	t.Helper()
 	f := newFixture(t)
+	if err := f.db.SetWebDAVEnabled(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
 	f.login()
 	lib, _ := auth.NewUserID(nil)
 	if f.libraryAPI("PUT", "/"+lib, `{"Name":"Office"}`).Code != 201 {

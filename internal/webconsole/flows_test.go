@@ -158,9 +158,6 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	if info.Code != 200 || !strings.Contains(info.Body.String(), "Atlas") || strings.Contains(info.Body.String(), "Other") || !strings.Contains(info.Body.String(), `"HeadCommitId":null`) {
 		t.Fatal("expected only the owner's unpublished library metadata")
 	}
-	if f.req("POST", "/accounts/review", url.Values{"username": {"field-device"}}).Code != 200 {
-		t.Fatal("reset review")
-	}
 	reset := url.Values{"username": {"field-device"}, "password": {rand.Text()}}
 	if f.req("POST", "/accounts/reset", reset).Code != 400 {
 		t.Fatal("missing confirmation")

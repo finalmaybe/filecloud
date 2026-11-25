@@ -1,0 +1,18 @@
+{{define "settings"}}
+<section class="global-settings" aria-labelledby="settings-heading">
+  <h1 id="settings-heading">{{.Title}}</h1>
+  <p>这里的设置适用于服务器上的所有资料库。</p>
+  <h2>文件访问</h2>
+  <form class="setting-row" method="post" action="/settings/webdav">
+    <div>
+      <strong id="dav-label">WebDAV 网络盘</strong>
+      <p id="dav-description">允许用户通过应用密码将资料库挂载为网络盘。</p>
+    </div>
+    <input type="hidden" name="enabled" value="{{if .Data}}false{{else}}true{{end}}">
+    <button type="submit" class="setting-switch" role="switch" aria-checked="{{.Data}}" aria-labelledby="dav-label" aria-describedby="dav-description">
+      {{if .Data}}已开启{{else}}已关闭{{end}}<span aria-hidden="true"></span>
+    </button>
+  </form>
+  <p class="setting-hint">关闭后，网络盘将停止接受新请求。已有应用密码会保留，重新开启后仍可使用有效凭据。</p>
+</section>
+{{end}}

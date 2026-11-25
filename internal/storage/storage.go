@@ -109,6 +109,13 @@ func metadataMigrations() []migration {
 		}},
 		{version: 8, statements: retentionMigration},
 		{version: 9, statements: davMigration},
+		{version: 10, statements: []string{
+			`CREATE TABLE server_settings (
+				id INTEGER PRIMARY KEY CHECK(id = 1),
+				webdav_enabled INTEGER NOT NULL DEFAULT 0 CHECK(webdav_enabled IN (0, 1))
+			)`,
+			`INSERT INTO server_settings(id) VALUES (1)`,
+		}},
 	}
 }
 

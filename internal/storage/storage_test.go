@@ -101,7 +101,7 @@ func TestInitCreatesLayoutAndSchemaIdempotently(t *testing.T) {
 	if err := rows.Close(); err != nil {
 		t.Fatalf("close table rows: %v", err)
 	}
-	if got := strings.Join(tables, ","); got != "access_tokens,dav_credentials,dav_locks,deleted_file_versions,libraries,published_commit_roles,published_commits,retention_defaults,schema_migrations,trash_entries,trash_versions,upload_charges,users" {
+	if got := strings.Join(tables, ","); got != "access_tokens,dav_credentials,dav_locks,deleted_file_versions,libraries,published_commit_roles,published_commits,retention_defaults,schema_migrations,server_settings,trash_entries,trash_versions,upload_charges,users" {
 		t.Fatalf("tables = %q, want library schema", got)
 	}
 
@@ -109,8 +109,8 @@ func TestInitCreatesLayoutAndSchemaIdempotently(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*), MAX(version) FROM schema_migrations").Scan(&count, &version); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if count != 9 || version != 9 {
-		t.Fatalf("migration rows = %d, version = %d; want 9, 9", count, version)
+	if count != 10 || version != 10 {
+		t.Fatalf("migration rows = %d, version = %d; want 10, 10", count, version)
 	}
 }
 

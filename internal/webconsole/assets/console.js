@@ -310,8 +310,41 @@ function finishVersionDeletion(dialog, row) {
   window.scrollTo(scrollX, scrollY);
 }
 
-const cancelReset = document.querySelector('#cancel-reset');
-if (cancelReset) document.addEventListener('keydown', event => {if (event.key === 'Escape' && !event.defaultPrevented) cancelReset.click();});
+for (const dialog of document.querySelectorAll('.reset-account')) {
+  const form = dialog.querySelector('form');
+  const submit = form.querySelector('[type="submit"]');
+  const cancel = form.querySelector('[command="close"]');
+  const error = form.querySelector('[role="alert"]');
+  dialog.addEventListener('cancel', event => { if (submit.disabled) event.preventDefault(); });
+  dialog.addEventListener('close', () => { form.reset(); error.hidden = true; });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    submit.disabled = cancel.disabled = true;
+    submit.textContent = '正在重置…';
+    error.hidden = true;
+    try {
+      const response = await fetch(form.action, {method: 'POST', headers: {Accept: 'text/plain'},
+        body: new URLSearchParams(new FormData(form)), redirect: 'error'});
+      if (response.status !== 204) {
+        error.textContent = response.status === 403 ? '需要管理员权限，请重新登录。' :
+          response.headers.get('Content-Type')?.startsWith('text/plain') ? await response.text() : '暂时无法重置密码，请稍后重试。';
+        error.hidden = false;
+        return;
+      }
+      const notice = document.querySelector('#account-notice');
+      notice.hidden = false;
+      notice.textContent = `已重置「${form.elements.namedItem('username').value}」的密码，原有会话和应用密码已失效。`;
+      dialog.close();
+    } catch {
+      error.textContent = '未能确认重置结果，请检查网络连接。';
+      error.hidden = false;
+    } finally {
+      submit.disabled = cancel.disabled = false;
+      submit.textContent = '确认重置密码';
+    }
+  });
+}
+
 const probe = document.querySelector('#probe');
 probe?.addEventListener('click', async () => {
   probe.disabled = true;

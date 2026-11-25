@@ -2,9 +2,10 @@ package webconsole
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/storage"
-	"net/http"
 )
 
 func (c *console) accounts(w http.ResponseWriter, r *http.Request, who identity) {
@@ -15,20 +16,28 @@ func (c *console) accounts(w http.ResponseWriter, r *http.Request, who identity)
 	case "reset":
 		msg = "密码已重置，目标账号的已有会话均已撤销。"
 	}
-	c.show(w, r, who, 200, "账号管理", "accounts", nil, msg)
+	c.showAccounts(w, r, who, http.StatusOK, msg)
 }
-func (c *console) reviewReset(w http.ResponseWriter, r *http.Request, who identity) {
-	name, err := auth.ValidateUsername(r.PostForm.Get("username"))
+
+func (c *console) showAccounts(w http.ResponseWriter, r *http.Request, who identity, status int, msg string) {
+	accounts, err := c.Store.ListAccounts(r.Context())
 	if err != nil {
-		c.show(w, r, who, 400, "账号管理", "accounts", nil, "请输入目标用户名。")
+		c.problem(w, r, who, err)
 		return
 	}
-	c.show(w, r, who, 200, "核对重置影响", "confirm", name, "")
+	data := struct {
+		Accounts []storage.AccountSummary
+		Admins   map[string]bool
+		Failed   bool
+	}{accounts, c.admins, status >= 400}
+	c.show(w, r, who, status, "账号管理", "accounts", data, msg)
 }
+
 func (c *console) saveAccount(w http.ResponseWriter, r *http.Request, who identity) {
 	create := r.URL.Path == "/accounts/create"
+	inlineReset := !create && r.Header.Get("Accept") == "text/plain"
 	if !create && r.PostForm.Get("confirm") != "yes" {
-		c.show(w, r, who, 400, "核对重置影响", "confirm", r.PostForm.Get("username"), "请先确认会话撤销的影响。")
+		http.Error(w, "请先核对账号并确认重置密码。", http.StatusBadRequest)
 		return
 	}
 	err := c.Sessions.SetAccountPassword(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.RemoteAddr, create)
@@ -45,7 +54,15 @@ func (c *console) saveAccount(w http.ResponseWriter, r *http.Request, who identi
 		case errors.Is(err, storage.ErrUserNotFound):
 			code, msg = 404, "目标账号不存在。"
 		}
-		c.show(w, r, who, code, "账号管理", "accounts", nil, msg)
+		if inlineReset {
+			http.Error(w, msg, code)
+		} else {
+			c.showAccounts(w, r, who, code, msg)
+		}
+		return
+	}
+	if inlineReset {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	done := "reset"

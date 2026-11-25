@@ -97,7 +97,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	var rawOrigin *string
-	flags.Func("site-url", "Enable the Web console and WebDAV at this `URL`, e.g. http://127.0.0.1:8080 (no path or trailing slash; default: both disabled)", func(value string) error {
+	flags.Func("site-url", "Enable the Web console at this `URL`, e.g. http://127.0.0.1:8080 (no path or trailing slash); WebDAV is off by default and can be enabled in Settings", func(value string) error {
 		rawOrigin = &value
 		return nil
 	})

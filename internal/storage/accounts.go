@@ -30,6 +30,34 @@ type User struct {
 	PasswordHash string
 }
 
+// AccountSummary contains the non-secret fields used by the account directory.
+type AccountSummary struct {
+	ID, Username string
+	CreatedAt    time.Time
+}
+
+func (s *Store) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, created_at FROM users ORDER BY username_key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var accounts []AccountSummary
+	for rows.Next() {
+		var account AccountSummary
+		var created string
+		if err := rows.Scan(&account.ID, &account.Username, &created); err != nil {
+			return nil, err
+		}
+		account.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, rows.Err()
+}
+
 // CanonicalUsername returns the NFC display form and its NFC case-fold key.
 func CanonicalUsername(username string) (display, key string) {
 	display = norm.NFC.String(username)
