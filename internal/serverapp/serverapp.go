@@ -96,8 +96,11 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	flags.SetOutput(stderr)
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
-	davOrigin := flags.String("dav-origin", "", "Enable /dav/ for this public origin (default: disabled)")
-	webOrigin := flags.String("web-origin", "", "Enable the Web console for this browser origin (default: disabled)")
+	var rawOrigin *string
+	flags.Func("public-origin", "Enable the Web console and WebDAV at this public `origin` (default: both disabled)", func(value string) error {
+		rawOrigin = &value
+		return nil
+	})
 	gcAt := flags.String("gc-at", "03:00", "Daily in-process garbage collection time (local HH:MM or off)")
 	trashDays := flags.Int("trash-days", 0, "Set saved default recycle bin retention (initially 30 days)")
 	historyDays := flags.Int("history-days", 0, "Set saved default snapshot retention (initially 60 days)")
@@ -129,7 +132,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		return err
 	}
 	if *dataDir == "" || flags.NArg() != 0 {
-		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--web-origin origin] [--dav-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
+		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--public-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
 	}
 	if *globalKDFCapacity < 1 || *sourceIPKDFCapacity < 1 || *usernameKDFCapacity < 1 {
 		return errors.New("kdf concurrency limits must be positive")
@@ -165,8 +168,8 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if historyConfig.GlobalConcurrency < 1 || historyConfig.UserConcurrency < 1 || historyConfig.RequestTimeout <= 0 {
 		return errors.New("history limits must be positive")
 	}
-	if len(admins) > 0 && *webOrigin == "" {
-		return errors.New("web-admin-user requires web-origin")
+	if len(admins) > 0 && rawOrigin == nil {
+		return errors.New("--web-admin-user requires --public-origin")
 	}
 	if *trashDays < 0 || *historyDays < 0 || *trashDays > 36500 || *historyDays > 36500 {
 		return errors.New("retention must be 1–36500 days")
@@ -175,7 +178,14 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if err != nil {
 		return err
 	}
-	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, *webOrigin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build), DAVOrigin: *davOrigin}, auth.HandlerConfig{
+	var origin *auth.BrowserOrigin
+	if rawOrigin != nil {
+		origin, err = auth.NewBrowserOrigin(*rawOrigin, *listen)
+		if err != nil {
+			return fmt.Errorf("--public-origin: %w", err)
+		}
+	}
+	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, origin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{
 		GlobalKDFLimit:   *globalKDFCapacity,
 		SourceIPKDFLimit: *sourceIPKDFCapacity,
 		UsernameKDFLimit: *usernameKDFCapacity,
@@ -380,7 +390,7 @@ func (t *requestTracker) wait() {
 	<-t.allDone
 }
 
-func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defaults storage.Retention, dataDir, address string, stdout, stderr io.Writer, webOrigin string, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
+func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defaults storage.Retention, dataDir, address string, stdout, stderr io.Writer, origin *auth.BrowserOrigin, webConfig webconsole.Config, authConfig auth.HandlerConfig, uploadConfig storage.UploadConfig, headConfig libraryapi.HeadValidationConfig, historyConfig libraryapi.HistoryConfig) (retErr error) {
 	store, err := storage.OpenForServe(ctx, dataDir)
 	if err != nil {
 		return err
@@ -420,14 +430,7 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}
-	var browser *auth.BrowserOrigin
-	if webOrigin != "" {
-		browser, err = auth.NewBrowserOrigin(webOrigin, address)
-		if err != nil {
-			return errors.Join(err, listener.Close())
-		}
-	}
-	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{BrowserOrigin: browser, Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig})
+	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{BrowserOrigin: origin, Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig})
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}
@@ -444,22 +447,14 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 	mux.Handle("/v1/sessions/current", sessions)
 	mux.Handle("/v1/libraries", libraries)
 	mux.Handle("/v1/libraries/", libraries)
-	if browser != nil {
+	var root http.Handler = mux
+	if origin != nil {
 		webConfig.Sessions, webConfig.Store, webConfig.Catalog = sessions, store, libraries
-		web, err := webconsole.NewHandler(browser, webConfig)
+		web, err := webconsole.NewHandler(origin, webConfig)
 		if err != nil {
 			return errors.Join(err, listener.Close())
 		}
 		mux.Handle("/", web)
-	} else {
-		mux.Handle("/", healthHandler)
-	}
-	var root http.Handler = mux
-	if webConfig.DAVOrigin != "" {
-		origin, err := auth.NewBrowserOrigin(webConfig.DAVOrigin, address)
-		if err != nil {
-			return errors.Join(err, listener.Close())
-		}
 		handler := &dav.Handler{Origin: origin, Store: store, Catalog: libraries}
 		root = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/dav" || strings.HasPrefix(r.URL.Path, "/dav/") {
@@ -468,6 +463,8 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 			}
 			mux.ServeHTTP(w, r)
 		})
+	} else {
+		mux.Handle("/", healthHandler)
 	}
 	requests := newRequestTracker(root)
 	server := &http.Server{

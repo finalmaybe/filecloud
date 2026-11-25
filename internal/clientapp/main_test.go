@@ -224,7 +224,7 @@ func TestServeHealthLockConflictAndShutdown(t *testing.T) {
 	}
 }
 
-func TestServeOptionalWebRoutes(t *testing.T) {
+func TestServeOptionalWebAndDAVRoutes(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "data")
 	if err := run(t.Context(), []string{"init", "--data-dir", dataDir}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
 			args := []string{"serve", "--data-dir", dataDir, "--listen", "127.0.0.1:0"}
 			if enabled {
-				args = append(args, "--web-origin", "https://console.example")
+				args = append(args, "--public-origin", "https://console.example")
 			}
 			output := newLineWriter()
 			cmd := startCommand(t, args, output, io.Discard)
@@ -248,14 +248,16 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 			}
 			client := &http.Client{Timeout: 5 * time.Second}
 			webStatus, home, css, missing := 404, "404 page not found", "404 page not found", "404 page not found"
+			davStatus, davBody := 404, "404 page not found"
 			if enabled {
 				webStatus, home, css, missing = 200, "账号登录", ".skip", "页面不存在"
+				davStatus, davBody = 401, "Unauthorized"
 			}
 			for _, tc := range []struct {
-				path    string
-				status  int
-				body    string
-				browser bool
+				path        string
+				status      int
+				body        string
+				publicRoute bool
 			}{
 				{"/", webStatus, home, true},
 				{"/assets/console.css", webStatus, css, true},
@@ -265,13 +267,13 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 				{"/readyz", 200, `{"RetCode":0,"Message":"success"}`, false},
 				{"/v1/libraries", 401, `"RetCode":1001`, false},
 				{"/v1/unknown", 404, "404 page not found", false},
-				{"/dav/unknown", 404, "404 page not found", false},
+				{"/dav/", davStatus, davBody, true},
 			} {
 				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+tc.path, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if tc.browser {
+				if tc.publicRoute {
 					req.Host = "console.example"
 				}
 				res, err := client.Do(req)
@@ -286,7 +288,7 @@ func TestServeOptionalWebRoutes(t *testing.T) {
 				if res.StatusCode != tc.status || !strings.Contains(string(body), tc.body) {
 					t.Errorf("GET %s: status %d, want %d with %q", tc.path, res.StatusCode, tc.status, tc.body)
 				}
-				if (!enabled || !tc.browser) && res.Header.Get("Content-Security-Policy") != "default-src 'none'" {
+				if (!enabled || !tc.publicRoute) && res.Header.Get("Content-Security-Policy") != "default-src 'none'" {
 					t.Errorf("GET %s: non-Web CSP changed", tc.path)
 				}
 			}

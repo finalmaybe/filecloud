@@ -30,8 +30,6 @@ type drive struct {
 func newDrive(t *testing.T) *drive {
 	t.Helper()
 	f := newFixture(t)
-	f.config.DAVOrigin = origin
-	f.mount()
 	f.login()
 	lib, _ := auth.NewUserID(nil)
 	if f.libraryAPI("PUT", "/"+lib, `{"Name":"Office"}`).Code != 201 {
@@ -51,6 +49,9 @@ func (d *drive) issue() (string, string) {
 	w := d.req("POST", d.page(), url.Values{"name": {"Laptop"}})
 	if w.Code != 201 || w.Header().Get("Cache-Control") != "no-store" {
 		d.t.Fatalf("issue: %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `<code id="issued-address">`+origin+"/dav/"+d.lib+"/</code>") {
+		d.t.Fatal("mount address does not use the configured public origin")
 	}
 	m := regexp.MustCompile(`(?s)<code id="issued-username">([^<]+)</code>.*?<code id="issued-password">([^<]+)</code>`).FindStringSubmatch(w.Body.String())
 	if m == nil {

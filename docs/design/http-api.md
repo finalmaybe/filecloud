@@ -14,7 +14,7 @@
 Authorization: Bearer <opaque-token>
 ```
 
-启用 `--web-origin` 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory、DeleteFileVersion 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 和删除版本 DELETE 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
+通过 `--public-origin` 启用 Web 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory、DeleteFileVersion 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 和删除版本 DELETE 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
 
 服务端先鉴权，再查找用户请求的资料库。第一阶段只有资料库所有者可访问。
 

@@ -23,16 +23,9 @@ func (c *console) appPasswords(w http.ResponseWriter, r *http.Request, who ident
 		c.problem(w, r, who, err)
 		return
 	}
-	data := appPasswordPage{LibraryID: lib.ID, LibraryName: lib.Name, Now: time.Now().UTC()}
-	if c.DAVOrigin != "" {
-		data.Address = c.DAVOrigin + "/dav/" + lib.ID + "/"
-	}
+	data := appPasswordPage{LibraryID: lib.ID, LibraryName: lib.Name, Address: c.origin.String() + "/dav/" + lib.ID + "/", Now: time.Now().UTC()}
 	status := 200
 	if r.Method == "POST" {
-		if data.Address == "" {
-			http.Error(w, "WebDAV 未启用", 403)
-			return
-		}
 		name := strings.TrimSpace(r.PostForm.Get("name"))
 		if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 128 {
 			http.Error(w, "请输入不超过 128 个字符的凭据名称", 400)

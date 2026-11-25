@@ -20,7 +20,6 @@ var files embed.FS
 
 type Build struct{ Version, Commit, BuildDate string }
 type Config struct {
-	DAVOrigin  string
 	Build      Build
 	AdminUsers []string
 	Catalog    *library.Catalog

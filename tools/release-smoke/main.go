@@ -207,7 +207,7 @@ type runningServer struct {
 
 func checkPackagedWeb(ctx context.Context, binary, dataDir string) error {
 	const host = "console.example"
-	server, err := startServer(ctx, binary, dataDir, "--web-origin", "https://"+host)
+	server, err := startServer(ctx, binary, dataDir, "--public-origin", "https://"+host)
 	if err != nil {
 		return err
 	}

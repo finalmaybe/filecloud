@@ -11,7 +11,7 @@ import (
 
 const BrowserCookieName = "filecloud_web"
 
-// BrowserOrigin is the configured public origin for requests using a Web session.
+// BrowserOrigin is the configured public origin shared by the Web console and WebDAV.
 type BrowserOrigin struct {
 	scheme, host, alternate string
 }
@@ -19,24 +19,24 @@ type BrowserOrigin struct {
 func NewBrowserOrigin(raw, listen string) (*BrowserOrigin, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || strings.ContainsAny(raw, "?#") || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, errors.New("web-origin must be an HTTP(S) origin without credentials, path, query, or fragment")
+		return nil, errors.New("origin must be an HTTP(S) origin without credentials, path, query, or fragment")
 	}
 	if port := u.Port(); port != "" {
 		n, err := strconv.ParseUint(port, 10, 16)
 		if err != nil || n == 0 {
-			return nil, errors.New("invalid web-origin port")
+			return nil, errors.New("invalid origin port")
 		}
 	} else if strings.HasSuffix(u.Host, ":") {
-		return nil, errors.New("empty web-origin port")
+		return nil, errors.New("empty origin port")
 	}
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil || !loopback(host) {
-		return nil, errors.New("web console requires a loopback listen address")
+		return nil, errors.New("the public origin requires a loopback listen address")
 	}
 	port := "443"
 	if u.Scheme == "http" {
 		if !loopback(u.Hostname()) {
-			return nil, errors.New("web-origin must use HTTPS except on loopback")
+			return nil, errors.New("origin must use HTTPS except on loopback")
 		}
 		port = "80"
 	}
@@ -53,6 +53,8 @@ func NewBrowserOrigin(raw, listen string) (*BrowserOrigin, error) {
 func loopback(host string) bool {
 	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
 }
+
+func (o *BrowserOrigin) String() string { return o.scheme + "://" + o.host }
 
 func (o *BrowserOrigin) Secure() bool { return o.scheme == "https" }
 

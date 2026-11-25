@@ -48,14 +48,6 @@ func TestDAVCredentialBoundaries(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatal("cross-origin management accepted")
 	}
-	d.config.DAVOrigin = ""
-	d.mount()
-	if w := d.req("GET", d.page(), nil); !strings.Contains(w.Body.String(), "WebDAV 未启用") {
-		t.Fatal("missing disabled state")
-	}
-	if d.req("POST", d.page(), url.Values{"name": {"pc"}}).Code != 403 {
-		t.Fatal("issued credential with DAV disabled")
-	}
 }
 func TestDAVCollectionConditions(t *testing.T) {
 	d := newDrive(t)
