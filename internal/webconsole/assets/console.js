@@ -40,21 +40,24 @@ if (entries) {
     document.querySelector('#visible-count').textContent = visible;
     document.querySelector('#filter-empty').hidden = visible !== 0;
   });
-
-  const dismissOutside = event => {
-    const open = entries.querySelector('.row-actions[open]');
-    if (open && !open.contains(event.target)) open.open = false;
-  };
-  document.addEventListener('click', dismissOutside);
-  document.addEventListener('focusin', dismissOutside);
-  entries.addEventListener('keydown', event => {
-    const open = event.target.closest('.row-actions[open]');
-    if (open && event.key === 'Escape') {
-      open.open = false;
-      open.querySelector('summary').focus();
-    }
-  });
 }
+
+const openMenu = '.account-menu[open], .row-actions[open]';
+const dismissOutside = event => {
+  const open = document.querySelector(openMenu);
+  if (open && !open.contains(event.target)) open.open = false;
+};
+document.addEventListener('click', dismissOutside);
+document.addEventListener('focusin', dismissOutside);
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const open = document.querySelector(openMenu);
+  if (open) {
+    event.preventDefault();
+    open.open = false;
+    open.querySelector('summary').focus();
+  }
+});
 
 const issuedCredential = document.getElementById('issued-credential');
 if (issuedCredential) {
@@ -308,7 +311,7 @@ function finishVersionDeletion(dialog, row) {
 }
 
 const cancelReset = document.querySelector('#cancel-reset');
-if (cancelReset) document.addEventListener('keydown', event => {if (event.key === 'Escape') cancelReset.click();});
+if (cancelReset) document.addEventListener('keydown', event => {if (event.key === 'Escape' && !event.defaultPrevented) cancelReset.click();});
 const probe = document.querySelector('#probe');
 probe?.addEventListener('click', async () => {
   probe.disabled = true;

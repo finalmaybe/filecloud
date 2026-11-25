@@ -30,7 +30,10 @@
     {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{end}}
     <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"></label>
     {{end}}
-    <form class="logout" action="/logout" method="post"><button>{{template "icon" "logout"}}退出登录</button></form>
+    <details class="account-menu">
+      <summary aria-label="账号菜单" title="账号菜单">{{template "icon" "avatar"}}</summary>
+      <form class="action-list" action="/logout" method="post"><button type="submit">{{template "icon" "logout"}}退出</button></form>
+    </details>
   </header>
   <aside class="rail" id="sidebar">
     <nav aria-label="主导航">
