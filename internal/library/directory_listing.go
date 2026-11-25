@@ -1,6 +1,7 @@
 package library
 
 import (
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -43,6 +44,41 @@ func (c *Catalog) listFiles(w http.ResponseWriter, r *http.Request) {
 		Message   string
 		Directory directoryListing
 	}{0, "success", listing})
+}
+
+func (c *Catalog) getLibrarySize(w http.ResponseWriter, r *http.Request) {
+	h := c.core
+	lib := r.PathValue("LibraryId")
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	commit := q.Get("CommitId")
+	if err != nil || !validUUID(lib) || len(q) != 1 || len(q["CommitId"]) != 1 || !object.ValidID(commit) {
+		h.invalid(w)
+		return
+	}
+	owner, _ := auth.UserID(r.Context())
+	ctx, release, err := c.admit(r.Context(), owner)
+	if err != nil {
+		h.writeBrowseError(w, err)
+		return
+	}
+	defer release()
+	done := h.store.UseLibrary(owner, lib)
+	defer done()
+	root, err := c.publishedEntry(ctx, owner, lib, commit, ".")
+	if err != nil {
+		h.writeBrowseError(w, err)
+		return
+	}
+	size, err := c.entrySize(ctx, owner, lib, root, make(map[string]*big.Int))
+	if err != nil {
+		h.writeBrowseError(w, err)
+		return
+	}
+	h.writeJSON(w, http.StatusOK, struct {
+		RetCode int
+		Message string
+		Size    string
+	}{0, "success", size.String()})
 }
 
 func parseDirectoryQuery(raw string) (commit, path string, offset int, err error) {

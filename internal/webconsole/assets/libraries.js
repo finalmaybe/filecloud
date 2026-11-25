@@ -1,3 +1,4 @@
+import {setByteSize} from './byte-size.js';
 import {setLocalTime} from './local-time.js';
 
 const table = document.querySelector('.libraries');
@@ -62,6 +63,16 @@ async function loadLibraries() {
       next.hidden = false;
     }
     status.hidden = true;
+    // Size reads share the owner's traversal slot; leave navigation available while they run.
+    for (const cell of table.querySelectorAll('[data-size-url]')) {
+      try {
+        const {Size} = await libraryRequest(cell.dataset.sizeUrl);
+        setByteSize(cell, Size);
+      } catch {
+        cell.textContent = '未知';
+        cell.title = '未能读取该版本的大小，可刷新列表重试';
+      }
+    }
   } catch (err) {
     status.textContent = err.message;
     document.querySelector('#list-retry').hidden = false;
@@ -72,6 +83,12 @@ function appendLibrary(library) {
   const row = document.querySelector('#library-row').content.firstElementChild.cloneNode(true);
   row.querySelector('.entry-link').href = `/libraries/${library.LibraryId}`;
   row.querySelector('.entry-name').textContent = library.Name;
+  const size = row.querySelector('.entry-size');
+  if (library.HeadCommitId) {
+    size.dataset.sizeUrl = `/v1/libraries/${library.LibraryId}/size?` + new URLSearchParams({CommitId: library.HeadCommitId});
+  } else {
+    setByteSize(size, '0');
+  }
   setLocalTime(row.querySelector('time'), library.CreatedAt);
   setLibraryState(row, library);
   const toggle = row.querySelector('summary');

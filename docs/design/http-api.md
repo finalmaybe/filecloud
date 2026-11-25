@@ -14,7 +14,7 @@
 Authorization: Bearer <opaque-token>
 ```
 
-通过 `--site-url` 启用 Web 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetFileHistory、DeleteFileVersion 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 和删除版本 DELETE 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
+通过 `--site-url` 启用 Web 时，ListLibraries、GetLibrary、CreateLibrary、ListFiles、GetLibrarySize、GetFileHistory、DeleteFileVersion 也接受同源 Web 登录的 HttpOnly Cookie。Cookie 请求校验 Host（不匹配为 `421/1002`），建库 PUT 和删除版本 DELETE 还校验 Origin（缺失、不匹配为 `403/1002`）。显式 Authorization 头始终走 Bearer 认证，失败不回退。浏览器 Cookie 不授予会话 API、Head、资料库提交历史或对象传输权限。未启用 Web 时所有受保护接口维持 Bearer 专用。
 
 服务端先鉴权，再查找用户请求的资料库。第一阶段只有资料库所有者可访问。
 
@@ -186,6 +186,10 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 `GET /v1/libraries/{LibraryId}/files` 返回当前发布版本的根目录。可选查询参数：`CommitId` 固定已发布提交，`Path` 指定规范相对目录（默认 `.`），`Offset` 是从零开始的目录项偏移量（默认 0）。
 
 响应包含 `RetCode`、`Message` 和 `Directory`。`Directory` 含 `CommitId`、`Path`、`Parent`、`Entries`（每项含 `Name`、`Type`、`ModifiedAt`、`Size`）和 `NextOffset`。`Size` 是十进制字节数字符串：文件为逻辑长度，目录为该快照下所有子文件长度之和（递归、按路径计数），空文件和空目录均为 `"0"`。每页最多 50 项；翻页沿用返回的 `CommitId` 和 `Path`，传入 `NextOffset`；零表示结束。尚未发布的资料库根目录返回 `CommitId: null` 和 `Entries: []`；已发布的空目录返回实际提交 ID 和空数组。未知库、他人资料库、未发布的提交和不存在的路径返回 `404/2000`；非法参数、超出目录长度的偏移或请求文件而非目录返回 `400/1000`。只读取元数据，不下载文件内容。
+
+## GetLibrarySize
+
+`GET /v1/libraries/{LibraryId}/size?CommitId=…` 返回 `RetCode`、`Message` 和 `Size`。`Size` 为该已发布快照根目录的逻辑字节总数（十进制字符串），包含全部子目录，每个文件路径分别计数，不叠加其他版本或回收站。网页先显示资料库列表，再按各行的 `HeadCommitId` 读取大小；没有 Head 的库直接显示 `0 B`。
 
 ## GetFileHistory
 

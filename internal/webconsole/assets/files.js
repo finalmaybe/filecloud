@@ -1,3 +1,4 @@
+import {setByteSize} from './byte-size.js';
 import {setLocalTime} from './local-time.js';
 
 const directoryPath = location.pathname;
@@ -68,15 +69,6 @@ function observeNextPage() {
   }
 }
 
-function formatSize(bytes) {
-  let n = Number(bytes);
-  for (const unit of ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB']) {
-    if (n < 1024) return `${Number(n.toFixed(1))} ${unit}`;
-    n /= 1024;
-  }
-  return `${bytes} B`;
-}
-
 function renderDirectory({CommitId, Path, Parent, Entries}) {
   if (!CommitId) { workspace.hidden = true; document.querySelector('#unpublished').hidden = false; return; }
   const link = path => '?' + new URLSearchParams({commit: CommitId, path});
@@ -95,9 +87,7 @@ function renderDirectory({CommitId, Path, Parent, Entries}) {
     const folder = entry.Type === 'Directory';
     const row = document.querySelector(folder ? '#folder-row' : '#file-row').content.cloneNode(true);
     row.querySelector('.entry-name').textContent = entry.Name;
-    const size = row.querySelector('.entry-size');
-    size.textContent = formatSize(entry.Size);
-    size.title = `${entry.Size} 字节`;
+    setByteSize(row.querySelector('.entry-size'), entry.Size);
     const query = link(path);
     row.querySelector('.entry-link').href = folder ? query : `${directoryPath}/file-preview${query}`;
     row.querySelector('summary').setAttribute('aria-label', entry.Name + ' 的更多操作');

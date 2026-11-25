@@ -162,6 +162,7 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 		"GET /v1/libraries/{LibraryId}/file-history":               catalog.getFileHistory,
 		"DELETE /v1/libraries/{LibraryId}/file-history/{CommitId}": catalog.deleteFileVersion,
 		"GET /v1/libraries/{LibraryId}/files":                      catalog.listFiles,
+		"GET /v1/libraries/{LibraryId}/size":                       catalog.getLibrarySize,
 	} {
 		mux.HandleFunc(pattern, handle)
 		if config.BrowserOrigin != nil {

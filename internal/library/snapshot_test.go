@@ -34,7 +34,11 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	assertStatusCode(t, serve(h, "GET", endpoint, "", _otherToken), 404, 2000)
 	assertStatusCode(t, serve(h, "GET", endpoint+"?Offset=bad", "", ""), 401, 1001)
 	empty := putMetadata(t, s, "directories", `{"Entries":[],"Type":"Directory","Version":1}`)
-	file := putMetadata(t, s, "files", `{"Blocks":[],"Size":"0","Type":"File","Version":1}`)
+	block := object.ID([]byte("a"))
+	if _, err := s.PutObject(t.Context(), _ownerID, _headLibraryID, "blocks", block, strings.NewReader("a")); err != nil {
+		t.Fatal(err)
+	}
+	file := putMetadata(t, s, "files", fmt.Sprintf(`{"Blocks":[%q],"Size":"1","Type":"File","Version":1}`, block))
 	var entries []string
 	for i := range 55 {
 		entries = append(entries, fmt.Sprintf(`{"Id":%q,"ModifiedAt":"2026-08-09T00:00:00Z","Name":"观测%02d","Type":"File"}`, file, i))
@@ -52,6 +56,16 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	}
 	next := putCommit(t, s, _ownerID, []string{id}, empty)
 	publishHead(t, h, next, `"head-version-1"`, 200, 0)
+	const sizeURL = "/v1/libraries/" + _headLibraryID + "/size?CommitId="
+	for commit, want := range map[string]string{id: "55", next: "0"} {
+		res := serve(h, "GET", sizeURL+commit, "", _ownerToken)
+		assertStatusCode(t, res, 200, 0)
+		var result struct{ Size string }
+		if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil || result.Size != want {
+			t.Fatalf("logical size: got %q, want %q (%v)", result.Size, want, err)
+		}
+	}
+	assertStatusCode(t, serve(h, "GET", sizeURL+id, "", _otherToken), 404, 2000)
 	second := readDirectory(fmt.Sprintf("?CommitId=%s&Offset=%d", *first.CommitID, first.NextOffset))
 	if len(second.Entries) != 5 || second.Entries[0].Name != "观测50" || second.NextOffset != 0 {
 		t.Fatal("directory pagination followed the new Head")
@@ -65,7 +79,7 @@ func TestSnapshotPinnedPathsAndPaging(t *testing.T) {
 	assertStatusCode(t, serve(h, "GET", endpoint+"?CommitId="+id, "", _otherToken), 404, 2000)
 	assertStatusCode(t, serve(h, "GET", endpoint+"?Path=missing", "", _ownerToken), 404, 2000)
 	v, e := c.Snapshot(t.Context(), _ownerID, _headLibraryID, id, "观测54", 0)
-	if e != nil || v.ID != file || v.Kind != "File" || v.Blocks != 0 {
+	if e != nil || v.ID != file || v.Kind != "File" || v.Blocks != 1 {
 		t.Fatal("file metadata", e)
 	}
 	if _, e = c.Snapshot(t.Context(), _ownerID, _headLibraryID, next, "观测54", 0); !errors.Is(e, storage.ErrLibraryNotFound) {

@@ -94,7 +94,7 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 	mux.HandleFunc("POST /accounts/create", c.admin(c.saveAccount))
 	mux.HandleFunc("POST /accounts/reset", c.admin(c.saveAccount))
 	mux.HandleFunc("POST /accounts/{account}/delete", c.admin(c.deleteAccount))
-	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css"} {
+	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/byte-size.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css"} {
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})
