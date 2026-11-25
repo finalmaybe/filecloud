@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/text/cases"
@@ -18,7 +20,9 @@ var (
 	// ErrUsernameExists reports a canonical username uniqueness conflict.
 	ErrUsernameExists = errors.New("username already exists")
 	// ErrUserNotFound reports that no canonical username matches.
-	ErrUserNotFound = errors.New("user not found")
+	ErrUserNotFound   = errors.New("user not found")
+	ErrAccountChanged = errors.New("account or library count changed")
+	ErrAccountCleanup = errors.New("account deleted but object cleanup incomplete")
 	// ErrSessionNotFound reports that a token does not identify an active session.
 	ErrSessionNotFound = errors.New("session not found")
 )
@@ -34,10 +38,13 @@ type User struct {
 type AccountSummary struct {
 	ID, Username string
 	CreatedAt    time.Time
+	LibraryCount int
 }
 
 func (s *Store) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, created_at FROM users ORDER BY username_key`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, created_at,
+		(SELECT COUNT(*) FROM libraries WHERE owner_user_id=users.id)
+		FROM users ORDER BY username_key`)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +53,7 @@ func (s *Store) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
 	for rows.Next() {
 		var account AccountSummary
 		var created string
-		if err := rows.Scan(&account.ID, &account.Username, &created); err != nil {
+		if err := rows.Scan(&account.ID, &account.Username, &created, &account.LibraryCount); err != nil {
 			return nil, err
 		}
 		account.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -56,6 +63,30 @@ func (s *Store) ListAccounts(ctx context.Context) ([]AccountSummary, error) {
 		accounts = append(accounts, account)
 	}
 	return accounts, rows.Err()
+}
+
+// DeleteAccount deletes the confirmed owner and cascades all library metadata and credentials.
+func (s *Store) DeleteAccount(ctx context.Context, id string, libraryCount int) error {
+	if !validObjectScopeID(id) || !filepath.IsLocal(id) {
+		return ErrUserNotFound
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id=?
+		AND (SELECT COUNT(*) FROM libraries WHERE owner_user_id=users.id)=?`, id, libraryCount)
+	if err != nil {
+		return fmt.Errorf("delete account: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAccountChanged
+	}
+	// Unlink only after SQLite commits: a failed cascade must leave live files intact.
+	if err := os.RemoveAll(filepath.Join(s.objectsDir, id)); err != nil {
+		return errors.Join(ErrAccountCleanup, err)
+	}
+	return nil
 }
 
 // CanonicalUsername returns the NFC display form and its NFC case-fold key.

@@ -3,6 +3,7 @@ package webconsole
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/mingming-cn/filecloud/internal/auth"
 	"github.com/mingming-cn/filecloud/internal/storage"
@@ -15,6 +16,8 @@ func (c *console) accounts(w http.ResponseWriter, r *http.Request, who identity)
 		msg = "账号已创建。"
 	case "reset":
 		msg = "密码已重置，目标账号的已有会话均已撤销。"
+	case "delete":
+		msg = "账号及其资料库已删除。"
 	}
 	c.showAccounts(w, r, who, http.StatusOK, msg)
 }
@@ -31,6 +34,29 @@ func (c *console) showAccounts(w http.ResponseWriter, r *http.Request, who ident
 		Failed   bool
 	}{accounts, c.admins, status >= 400}
 	c.show(w, r, who, status, "账号管理", "accounts", data, msg)
+}
+
+func (c *console) deleteAccount(w http.ResponseWriter, r *http.Request, who identity) {
+	id := r.PathValue("account")
+	if c.admins[id] {
+		c.showAccounts(w, r, who, http.StatusForbidden, "不能删除管理员账号。")
+		return
+	}
+	count, err := strconv.Atoi(r.PostForm.Get("libraries"))
+	if r.PostForm.Get("confirm") != "yes" || err != nil || count < 0 {
+		c.showAccounts(w, r, who, http.StatusBadRequest, "请先核对账号和资料库数量，再确认删除。")
+		return
+	}
+	switch err := c.Store.DeleteAccount(r.Context(), id, count); {
+	case errors.Is(err, storage.ErrAccountChanged), errors.Is(err, storage.ErrUserNotFound):
+		c.showAccounts(w, r, who, http.StatusConflict, "账号已不存在或资料库数量已变化，请重新核对列表。")
+	case errors.Is(err, storage.ErrAccountCleanup):
+		c.showAccounts(w, r, who, http.StatusInternalServerError, "账号已删除，部分文件尚未清理。请检查存储权限并运行离线 GC。")
+	case err != nil:
+		c.problem(w, r, who, err)
+	default:
+		http.Redirect(w, r, "/accounts?done=delete", http.StatusSeeOther)
+	}
 }
 
 func (c *console) saveAccount(w http.ResponseWriter, r *http.Request, who identity) {

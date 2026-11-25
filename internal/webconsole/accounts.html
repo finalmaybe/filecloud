@@ -17,6 +17,7 @@
             {{template "row-actions-toggle" .Username}}
             <div class="action-list">
               <button type="button" commandfor="reset-{{.ID}}" command="show-modal" aria-haspopup="dialog">{{template "icon" "key"}}重置密码</button>
+              {{if not (index $.Data.Admins .ID)}}<button type="button" class="destructive" commandfor="delete-{{.ID}}" command="show-modal" aria-haspopup="dialog">{{template "icon" "trash"}}删除账号</button>{{end}}
             </div>
           </details>
         </div></td>
@@ -41,14 +42,25 @@
   <dialog class="panel library-dialog reset-account" id="reset-{{.ID}}" aria-labelledby="reset-title-{{.ID}}" aria-describedby="reset-effect-{{.ID}}">
     <h2 id="reset-title-{{.ID}}">重置密码</h2>
     <form class="fields" method="post" action="/accounts/reset">
-      <p id="reset-effect-{{.ID}}">重置 <strong>{{.Username}}</strong> 的密码后，该账号所有设备的 Web 和 CLI 会话以及 WebDAV 应用密码都会失效。</p>
+      <small id="reset-effect-{{.ID}}">重置 <strong>{{.Username}}</strong> 的密码后，该账号所有设备的 Web 和 CLI 会话以及 WebDAV 应用密码都会失效。</small>
       <input type="hidden" name="username" value="{{.Username}}">
+      <input type="hidden" name="confirm" value="yes">
       <label>新密码<input type="password" name="password" required autocomplete="new-password" autofocus></label>
-      <label><span><input type="checkbox" name="confirm" value="yes" required> 我已核对账号并确认重置密码</span></label>
       <p role="alert" hidden></p>
-      <div class="dialog-actions"><button type="button" commandfor="reset-{{.ID}}" command="close">取消</button><button type="submit" class="action">确认重置密码</button></div>
+      <div class="dialog-actions"><button type="button" commandfor="reset-{{.ID}}" command="close">取消</button><button type="submit" class="action">确认</button></div>
     </form>
   </dialog>
+  {{if not (index $.Data.Admins .ID)}}
+  <dialog class="panel library-dialog delete-account" id="delete-{{.ID}}" aria-labelledby="delete-title-{{.ID}}" aria-describedby="delete-effect-{{.ID}}">
+    <h2 id="delete-title-{{.ID}}">删除账号</h2>
+    <form class="fields" method="post" action="/accounts/{{.ID}}/delete">
+      <p id="delete-effect-{{.ID}}">将永久删除账号「<strong>{{.Username}}</strong>」及其 <strong>{{.LibraryCount}}</strong> 个资料库，包括服务器上的文件、历史版本和回收站内容。此操作无法撤销。</p>
+      <small>该账号的登录会话和 WebDAV 应用密码将失效，已同步到设备的本地文件会保留。</small>
+      <input type="hidden" name="libraries" value="{{.LibraryCount}}"><input type="hidden" name="confirm" value="yes">
+      <div class="dialog-actions"><button type="button" commandfor="delete-{{.ID}}" command="close" autofocus>取消</button><button type="submit" class="action destructive">确认删除</button></div>
+    </form>
+  </dialog>
+  {{end}}
   {{end}}
 </div>
 {{end}}

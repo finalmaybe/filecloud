@@ -243,6 +243,11 @@ func (s *Store) ObjectsDir() string {
 	return s.objectsDir
 }
 
+// DiskCapacity reports available and total bytes on the object store's filesystem.
+func (s *Store) DiskCapacity() (free, total uint64, err error) {
+	return diskUsage(s.objectsDir)
+}
+
 // CheckReady verifies metadata access, object storage writes, and the held data-directory lock.
 func (s *Store) CheckReady(ctx context.Context) error {
 	if err := s.lock.check(); err != nil {

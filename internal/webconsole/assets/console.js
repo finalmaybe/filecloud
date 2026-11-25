@@ -340,14 +340,16 @@ for (const dialog of document.querySelectorAll('.reset-account')) {
       error.hidden = false;
     } finally {
       submit.disabled = cancel.disabled = false;
-      submit.textContent = '确认重置密码';
+      submit.textContent = '确认';
     }
   });
 }
 
 const probe = document.querySelector('#probe');
-probe?.addEventListener('click', async () => {
+probe?.form.addEventListener('submit', async event => {
+  event.preventDefault();
   probe.disabled = true;
+  probe.textContent = '检查中…';
   await Promise.all([['live','/healthz','存活'], ['ready','/readyz','已就绪']].map(async ([id, url, ok]) => {
     let state = '未知';
     try {
@@ -356,9 +358,12 @@ probe?.addEventListener('click', async () => {
       if (res.ok && data.RetCode === 0) state = ok;
       else if (id === 'ready' && res.status === 503 && data.RetCode === 5001) state = '未就绪';
     } catch { /* No probe response: the storage state is unknown. */ }
-    document.getElementById(id).textContent = state;
+    const label = document.getElementById(id);
+    label.textContent = state;
+    label.dataset.state = state === ok ? 'ok' : state === '未就绪' ? 'warning' : 'unknown';
   }));
   setLocalTime(document.getElementById('checked'), new Date().toISOString());
+  probe.textContent = '重新检查';
   probe.disabled = false;
 });
 
