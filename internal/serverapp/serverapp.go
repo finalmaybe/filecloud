@@ -97,7 +97,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	dataDir := flags.String("data-dir", "", "Filecloud data directory")
 	listen := flags.String("listen", _defaultListen, "HTTP listen address")
 	var rawOrigin *string
-	flags.Func("public-origin", "Enable the Web console and WebDAV at this public `origin` (default: both disabled)", func(value string) error {
+	flags.Func("site-url", "Enable the Web console and WebDAV at this `URL`, e.g. http://127.0.0.1:8080 (no path or trailing slash; default: both disabled)", func(value string) error {
 		rawOrigin = &value
 		return nil
 	})
@@ -132,7 +132,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		return err
 	}
 	if *dataDir == "" || flags.NArg() != 0 {
-		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--public-origin origin] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
+		return fmt.Errorf("usage: %s serve --data-dir path [--listen address] [--site-url URL] [--kdf-global-capacity n] [--kdf-source-ip-capacity n] [--kdf-username-capacity n]", program)
 	}
 	if *globalKDFCapacity < 1 || *sourceIPKDFCapacity < 1 || *usernameKDFCapacity < 1 {
 		return errors.New("kdf concurrency limits must be positive")
@@ -169,7 +169,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		return errors.New("history limits must be positive")
 	}
 	if len(admins) > 0 && rawOrigin == nil {
-		return errors.New("--web-admin-user requires --public-origin")
+		return errors.New("--web-admin-user requires --site-url")
 	}
 	if *trashDays < 0 || *historyDays < 0 || *trashDays > 36500 || *historyDays > 36500 {
 		return errors.New("retention must be 1–36500 days")
@@ -182,7 +182,7 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	if rawOrigin != nil {
 		origin, err = auth.NewBrowserOrigin(*rawOrigin, *listen)
 		if err != nil {
-			return fmt.Errorf("--public-origin: %w", err)
+			return fmt.Errorf("--site-url: %w", err)
 		}
 	}
 	return serve(ctx, schedule, *confirmHistory, storage.Retention{TrashDays: *trashDays, HistoryDays: *historyDays}, *dataDir, *listen, stdout, stderr, origin, webconsole.Config{AdminUsers: admins, Build: webconsole.Build(build)}, auth.HandlerConfig{

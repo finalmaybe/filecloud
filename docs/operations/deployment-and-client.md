@@ -127,12 +127,12 @@ curl -fsS http://127.0.0.1:8080/readyz
 Web 控制台和 WebDAV 网络盘默认都关闭，共用一个公开地址。要在本机启用，请用以下命令**替换**上面的 `serve` 命令，然后打开 `http://127.0.0.1:8080/`：
 
 ```bash
-./filecloud-server serve --data-dir "$DATA_DIR" --public-origin http://127.0.0.1:8080
+./filecloud-server serve --data-dir "$DATA_DIR" --site-url http://127.0.0.1:8080
 ```
 
-`--public-origin` 填浏览器和网络盘客户端看到的来源（协议、主机及可选端口，不含路径、尾斜杠、账号信息或查询参数）。启用 Web 时监听回环地址；只有回环来源可使用 HTTP。页面、样式与图像都在二进制内，不用部署静态目录。浏览器登录使用独立的 HttpOnly、SameSite 会话 cookie；HTTPS 配置还会设置 Secure。资料库和文件列表需要 JavaScript：`/v1/libraries` 用于列库，`PUT /v1/libraries/{id}` 用于建库，`GET /v1/libraries/{id}/files` 用于读取目录；反向代理需将整个公开 origin 转发到同一服务。会话最长 30 天，退出只撤销本次登录。移除 `--public-origin` 和 Web 管理员参数后重启，即可同时关闭网页和网络盘。
+`--site-url` 填浏览器和网络盘客户端使用的访问地址（协议、主机及可选端口，不含路径、尾斜杠、账号信息或查询参数）。启用 Web 时监听回环地址；只有回环来源可使用 HTTP。页面、样式与图像都在二进制内，不用部署静态目录。浏览器登录使用独立的 HttpOnly、SameSite 会话 cookie；HTTPS 配置还会设置 Secure。资料库和文件列表需要 JavaScript：`/v1/libraries` 用于列库，`PUT /v1/libraries/{id}` 用于建库，`GET /v1/libraries/{id}/files` 用于读取目录；反向代理需将整个公开 origin 转发到同一服务。会话最长 30 天，退出只撤销本次登录。移除 `--site-url` 和 Web 管理员参数后重启，即可同时关闭网页和网络盘。
 
-**管理员授权**：先在停服的主机上用 `user add` 创建第一个账号。用 `--public-origin` 启用网页后，按需为每个管理员重复指定 `--web-admin-user ACCOUNT_NAME`。服务端按规范用户名解析已有账号，配置不存在的账号将拒绝启动；默认没有 Web 管理员。移除某个账号参数并重启后，该账号旧的浏览器会话随即失去管理权限，自己的资料库仍可访问。保留本机停服管理命令作为救援入口。
+**管理员授权**：先在停服的主机上用 `user add` 创建第一个账号。用 `--site-url` 启用网页后，按需为每个管理员重复指定 `--web-admin-user ACCOUNT_NAME`。服务端按规范用户名解析已有账号，配置不存在的账号将拒绝启动；默认没有 Web 管理员。移除某个账号参数并重启后，该账号旧的浏览器会话随即失去管理权限，自己的资料库仍可访问。保留本机停服管理命令作为救援入口。
 
 网页上的日期和时间按浏览器当前时区显示；将鼠标停在时间上可查看时区名称。
 
@@ -153,10 +153,10 @@ Web 控制台和 WebDAV 网络盘默认都关闭，共用一个公开地址。�
 ### 启用 WebDAV 网络盘
 
 ```bash
-./filecloud-server serve --data-dir "$DATA_DIR" --public-origin https://cloud.example.com
+./filecloud-server serve --data-dir "$DATA_DIR" --site-url https://cloud.example.com
 ```
 
-`--public-origin` 用同一个公开地址同时启用 Web 和 WebDAV。`--listen` 仍独立控制本机监听地址，默认为 `127.0.0.1:8080`。只在本机使用时，可将示例中的公开地址换成 `http://127.0.0.1:8080`。
+`--site-url` 用同一个公开地址同时启用 Web 和 WebDAV。`--listen` 仍独立控制本机监听地址，默认为 `127.0.0.1:8080`。只在本机使用时，可将示例中的公开地址换成 `http://127.0.0.1:8080`。
 
 在 Web 打开资料库，选择侧栏「应用密码」，点击标题右侧的「创建应用密码」，在弹窗中填写凭据名称并确认。复制挂载地址，在网络盘登录框填写页面给出的**挂载用户名和应用密码**，不要填账号主密码。密码只显示一次，有效期一年。每个凭据只访问一个库，可以多台设备共用；若要分别撤销，请分别签发。从列表的「… → 查看」可查看挂载信息；选择「删除」并确认会撤销该凭据、释放写锁并将它从列表移除。退出网页不会中断网络盘，重置账号密码会撤销所有应用密码。
 
@@ -287,7 +287,7 @@ sudo systemctl start filecloud
 - 回环地址可以使用 HTTP，例如 `http://127.0.0.1:8080`。
 - 非回环地址必须使用 HTTPS，例如 `https://cloud.example.com`。
 
-因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。若启用 Web 和 WebDAV，请为回环监听的 `serve` 加上 `--public-origin https://cloud.example.com`，让代理保留浏览器的 Host（含非默认端口）。服务端不从 `X-Forwarded-Host` 推断公开地址。登录并发限制也按直连 IP 计算：使用下面的配置时，所有经过该代理的登录共享回环 IP 的并发槽（默认 1），添加 `X-Forwarded-For` 不会改变此行为。
+因此不要把 `filecloud-server serve --listen 0.0.0.0:8080` 直接暴露到公网。若启用 Web 和 WebDAV，请为回环监听的 `serve` 加上 `--site-url https://cloud.example.com`，让代理保留浏览器的 Host（含非默认端口）。服务端不从 `X-Forwarded-Host` 推断公开地址。登录并发限制也按直连 IP 计算：使用下面的配置时，所有经过该代理的登录共享回环 IP 的并发槽（默认 1），添加 `X-Forwarded-For` 不会改变此行为。
 
 ```nginx
 server {
@@ -810,7 +810,7 @@ filecloud-server gc --data-dir PATH [--dry-run] [--grace-period DURATION]
 以下两项在 `v0.3.0` 标签之后加入，使用当前源码构建的二进制：
 
 ```text
-filecloud-server serve --data-dir PATH [--listen ADDRESS] [--public-origin ORIGIN] [--web-admin-user USERNAME ...]
+filecloud-server serve --data-dir PATH [--listen ADDRESS] [--site-url URL] [--web-admin-user USERNAME ...]
 filecloud-client library status --client-dir PATH --worktree PATH
 ```
 

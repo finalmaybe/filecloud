@@ -19,7 +19,7 @@ type BrowserOrigin struct {
 func NewBrowserOrigin(raw, listen string) (*BrowserOrigin, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || strings.ContainsAny(raw, "?#") || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, errors.New("origin must be an HTTP(S) origin without credentials, path, query, or fragment")
+		return nil, errors.New("use http:// or https:// followed by a host and optional port (e.g. http://127.0.0.1:8080), without credentials, path, query, or fragment")
 	}
 	if port := u.Port(); port != "" {
 		n, err := strconv.ParseUint(port, 10, 16)

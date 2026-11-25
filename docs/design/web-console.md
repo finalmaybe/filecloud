@@ -8,7 +8,7 @@
 
 ## 开关、来源与身份
 
-- `filecloud-server serve --public-origin <origin>` 在同一地址启用 Web 和 WebDAV；省略时两者均关闭。配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后 `/` 是浏览器入口，页面位于 `/login`、`/libraries`、`/accounts` 等路径，资产位于 `/assets/`；同时为下述资料库 API 启用浏览器会话。`/v1/`、`/dav/`、`/healthz` 和 `/readyz` 保持独立，未知 Web 页面返回 404，不回落到首页。
+- `filecloud-server serve --site-url <URL>` 在同一地址启用 Web 和 WebDAV；省略时两者均关闭。配置值是浏览器看到的完整外部 origin（scheme、host、可选 port；无路径、凭据、query 或 fragment）。启用后 `/` 是浏览器入口，页面位于 `/login`、`/libraries`、`/accounts` 等路径，资产位于 `/assets/`；同时为下述资料库 API 启用浏览器会话。`/v1/`、`/dav/`、`/healthz` 和 `/readyz` 保持独立，未知 Web 页面返回 404，不回落到首页。
 - 生产使用固定 HTTPS origin，反向代理终止 TLS，后端监听回环；本机试用仅在监听地址和配置的 HTTP origin 均为回环地址时允许明文。按配置校验请求 Host 与写请求 Origin，不从任意转发头推断公开地址或授予权限。代理须保留外部 Host。
 - 可重复的本机启动参数 `--web-admin-user <username>`：启动时按现有规范用户名解析为已有用户 ID，失败则报配置错误；未启用 Web 不接受此参数。授权集合固定到本次服务运行。配置变更并重启即生效；旧会话下一次请求按新集合判断。默认集合为空，不按用户名、首用户、首个登录者或来源 IP 自动提权。首个账号仍由主机在停服时创建。
 

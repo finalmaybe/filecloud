@@ -233,7 +233,7 @@ func TestServeOptionalWebAndDAVRoutes(t *testing.T) {
 		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
 			args := []string{"serve", "--data-dir", dataDir, "--listen", "127.0.0.1:0"}
 			if enabled {
-				args = append(args, "--public-origin", "https://console.example")
+				args = append(args, "--site-url", "https://console.example")
 			}
 			output := newLineWriter()
 			cmd := startCommand(t, args, output, io.Discard)
