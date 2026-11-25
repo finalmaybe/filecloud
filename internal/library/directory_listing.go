@@ -9,14 +9,10 @@ import (
 	"github.com/mingming-cn/filecloud/internal/object"
 )
 
-type directoryEntry struct {
-	Name, Type, ModifiedAt string
-}
-
 type directoryListing struct {
 	CommitID     *string `json:"CommitId"`
 	Path, Parent string
-	Entries      []directoryEntry
+	Entries      []SnapshotEntry
 	NextOffset   int
 }
 
@@ -38,12 +34,9 @@ func (c *Catalog) listFiles(w http.ResponseWriter, r *http.Request) {
 		h.invalid(w)
 		return
 	}
-	listing := directoryListing{Path: page.Path, Parent: page.Parent, Entries: make([]directoryEntry, len(page.Entries)), NextOffset: page.Next}
+	listing := directoryListing{Path: page.Path, Parent: page.Parent, Entries: page.Entries, NextOffset: page.Next}
 	if page.CommitID != "" {
 		listing.CommitID = &page.CommitID
-	}
-	for i, entry := range page.Entries {
-		listing.Entries[i] = directoryEntry{entry.Name, entry.Type, entry.ModifiedAt}
 	}
 	h.writeJSON(w, http.StatusOK, struct {
 		RetCode   int

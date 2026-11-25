@@ -13,6 +13,42 @@ import (
 	"github.com/mingming-cn/filecloud/internal/object"
 )
 
+func TestFileListSizesFollowSnapshotPaths(t *testing.T) {
+	d := newDrive(t)
+	d.call(201, "MKCOL", "docs/", "")
+	d.call(201, "MKCOL", "docs/sub/", "")
+	d.call(201, "PUT", "docs/sub/a", "abc")
+	d.call(201, "PUT", "docs/sub/b", "abc")
+	d.call(201, "COPY", "docs/sub/", "", "Destination", "/dav/"+d.lib+"/docs/copy/")
+	d.call(201, "MKCOL", "empty/", "")
+	d.call(201, "PUT", "zero", "")
+	check := func(query string, sizes map[string]string) string {
+		t.Helper()
+		w := d.libraryAPI("GET", "/"+d.lib+"/files"+query, "")
+		var result struct {
+			Directory struct {
+				CommitID string `json:"CommitId"`
+				Entries  []struct{ Name, Size string }
+			}
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || len(result.Directory.Entries) != len(sizes) {
+			t.Fatalf("unexpected directory response: %d", w.Code)
+		}
+		for _, entry := range result.Directory.Entries {
+			if want, ok := sizes[entry.Name]; !ok || entry.Size != want {
+				t.Fatalf("%s: got %q bytes, want %q", entry.Name, entry.Size, want)
+			}
+		}
+		return result.Directory.CommitID
+	}
+	root := map[string]string{"docs": "12", "empty": "0", "zero": "0"}
+	commit := check("", root)
+	check("?Path=docs/sub", map[string]string{"a": "3", "b": "3"})
+	d.call(201, "PUT", "docs/sub/c", "another")
+	check("?CommitId="+commit, root)
+	check("", map[string]string{"docs": "19", "empty": "0", "zero": "0"})
+}
+
 func TestFileListOpensFileScopedVersions(t *testing.T) {
 	f := newFixture(t)
 	f.login()

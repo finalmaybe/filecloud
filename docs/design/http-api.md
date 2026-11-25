@@ -185,7 +185,7 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 `GET /v1/libraries/{LibraryId}/files` 返回当前发布版本的根目录。可选查询参数：`CommitId` 固定已发布提交，`Path` 指定规范相对目录（默认 `.`），`Offset` 是从零开始的目录项偏移量（默认 0）。
 
-响应包含 `RetCode`、`Message` 和 `Directory`。`Directory` 含 `CommitId`、`Path`、`Parent`、`Entries`（每项含 `Name`、`Type`、`ModifiedAt`）和 `NextOffset`。每页最多 50 项；翻页沿用返回的 `CommitId` 和 `Path`，传入 `NextOffset`；零表示结束。尚未发布的资料库根目录返回 `CommitId: null` 和 `Entries: []`；已发布的空目录返回实际提交 ID 和空数组。未知库、他人资料库、未发布的提交和不存在的路径返回 `404/2000`；非法参数、超出目录长度的偏移或请求文件而非目录返回 `400/1000`。只读取元数据，不下载文件内容。
+响应包含 `RetCode`、`Message` 和 `Directory`。`Directory` 含 `CommitId`、`Path`、`Parent`、`Entries`（每项含 `Name`、`Type`、`ModifiedAt`、`Size`）和 `NextOffset`。`Size` 是十进制字节数字符串：文件为逻辑长度，目录为该快照下所有子文件长度之和（递归、按路径计数），空文件和空目录均为 `"0"`。每页最多 50 项；翻页沿用返回的 `CommitId` 和 `Path`，传入 `NextOffset`；零表示结束。尚未发布的资料库根目录返回 `CommitId: null` 和 `Entries: []`；已发布的空目录返回实际提交 ID 和空数组。未知库、他人资料库、未发布的提交和不存在的路径返回 `404/2000`；非法参数、超出目录长度的偏移或请求文件而非目录返回 `400/1000`。只读取元数据，不下载文件内容。
 
 ## GetFileHistory
 

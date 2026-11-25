@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/big"
 	"path"
 	"sort"
 	"strings"
@@ -18,8 +19,13 @@ type Snapshot struct {
 	LibraryID, CommitID, Path, Parent, Kind, ID, ModifiedAt string
 	Size                                                    int64
 	Blocks                                                  int
-	Entries                                                 []object.DirectoryEntry
+	Entries                                                 []SnapshotEntry
 	Next                                                    int
+}
+
+type SnapshotEntry struct {
+	Name, Type, ModifiedAt string
+	Size                   string // Logical bytes, including all descendants for a directory.
 }
 
 // Snapshot resolves from a verified published root; callers cannot select object IDs or disk paths.
@@ -46,6 +52,7 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 				return v, ErrInvalidPage
 			}
 			v.Kind = "Directory"
+			v.Entries = []SnapshotEntry{}
 			return v, nil
 		}
 		v.CommitID = *item.HeadCommitID
@@ -77,11 +84,51 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 		return v, ErrInvalidPage
 	}
 	end := min(offset+50, len(d.Entries))
-	v.Entries = d.Entries[offset:end]
+	v.Entries = make([]SnapshotEntry, 0, end-offset)
+	sizes := make(map[string]*big.Int)
+	for _, entry := range d.Entries[offset:end] {
+		size, err := c.entrySize(ctx, owner, lib, entry, sizes)
+		if err != nil {
+			return v, err
+		}
+		v.Entries = append(v.Entries, SnapshotEntry{Name: entry.Name, Type: entry.Type, ModifiedAt: entry.ModifiedAt, Size: size.String()})
+	}
 	if end < len(d.Entries) {
 		v.Next = end
 	}
 	return v, nil
+}
+
+// Shared objects need only one read per page, but contribute once for each path.
+func (c *Catalog) entrySize(ctx context.Context, owner, lib string, entry object.DirectoryEntry, sizes map[string]*big.Int) (*big.Int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if size := sizes[entry.ID]; size != nil {
+		return size, nil
+	}
+	size := new(big.Int)
+	if entry.Type == "File" {
+		file, err := c.openEntryFile(ctx, owner, lib, entry)
+		if err != nil {
+			return nil, err
+		}
+		size.SetInt64(file.Size)
+	} else {
+		dir, err := c.directory(ctx, owner, lib, entry.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range dir.Entries {
+			childSize, err := c.entrySize(ctx, owner, lib, child, sizes)
+			if err != nil {
+				return nil, err
+			}
+			size.Add(size, childSize)
+		}
+	}
+	sizes[entry.ID] = size
+	return size, nil
 }
 
 func (c *Catalog) publishedEntry(ctx context.Context, owner, lib, commit, filePath string) (object.DirectoryEntry, error) {
