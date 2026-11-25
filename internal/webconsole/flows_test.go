@@ -151,7 +151,7 @@ func TestOnlineAccountsAndOwnerIsolation(t *testing.T) {
 	}
 	f.cookie = admin
 	detail := f.req("GET", "/libraries/"+id, nil)
-	if detail.Code != 200 || strings.Contains(detail.Body.String(), "Other") || !strings.Contains(detail.Body.String(), "尚未发布文件") {
+	if detail.Code != 200 || strings.Contains(detail.Body.String(), "Other") || !strings.Contains(detail.Body.String(), "还没有同步过文件") {
 		t.Fatal("expected the owner's empty file list")
 	}
 	info := f.libraryAPI("GET", "", "")

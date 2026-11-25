@@ -8,7 +8,7 @@
 <a href="/libraries" id="list-retry" hidden>重新打开资料库列表</a>
 <table class="entry-table libraries" hidden>
   <caption class="sr">资料库索引</caption>
-  <thead><tr><th scope="col">名称</th><th scope="col">发布状态</th><th scope="col" class="entry-size" title="当前发布版本的文件总大小，不含历史版本和回收站">大小</th><th scope="col">创建日期</th></tr></thead>
+  <thead><tr><th scope="col">名称</th><th scope="col" class="entry-size" title="当前版本的文件总大小，不含历史版本和回收站">大小</th><th scope="col">创建日期</th></tr></thead>
   <tbody></tbody>
 </table>
 <template id="library-row">
@@ -20,7 +20,6 @@
           <div class="action-list"><button type="button" aria-haspopup="dialog" aria-controls="info-dialog">{{template "icon" "info"}}详情</button></div>
         </details>
       </div></td>
-      <td><span class="state"></span></td>
       <td class="entry-size">统计中…</td>
       <td class="date"><span class="mobile-label">创建于 </span><time data-date-only></time></td>
     </tr>
@@ -51,7 +50,7 @@
   <a class="tool-link" id="directory-parent" hidden>上一级目录</a>
 </header>
 <noscript>请启用 JavaScript 以浏览文件列表。</noscript>
-<div class="empty" id="unpublished" hidden>{{template "icon" "folder"}}<h2>尚未发布文件</h2><p>在设备上绑定工作目录并完成首次同步后，文件会显示在这里。</p></div>
+<div class="empty" id="unpublished" hidden>{{template "icon" "folder"}}<h2>还没有同步过文件</h2><p>请在设备上绑定文件夹并完成首次同步。</p></div>
 <div class="empty" id="empty-directory" hidden>{{template "icon" "folder"}}<h2>此目录为空。</h2></div>
 {{template "library-files" .}}
 <dialog id="delete-dialog" class="panel library-dialog" aria-labelledby="delete-title" aria-describedby="delete-target delete-effect">
@@ -71,7 +70,6 @@
 {{define "library-record"}}
     <h3 id="info-name"></h3>
     <dl class="metadata">
-      <dt>发布状态</dt><dd><span class="state"></span></dd>
       <dt>创建时间</dt><dd><time id="info-created"></time></dd>
       <dt>资料库 ID</dt><dd><code id="library-id"></code><button type="button" data-copy="library-id" aria-label="复制资料库 ID" title="复制资料库 ID">{{template "icon" "copy"}}</button></dd>
       <dt id="head-label">当前 Head</dt><dd><code id="head-id"></code><button type="button" data-copy="head-id" aria-label="复制 Head" title="复制 Head">{{template "icon" "copy"}}</button></dd>

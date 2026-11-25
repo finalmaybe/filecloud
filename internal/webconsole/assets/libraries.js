@@ -90,7 +90,6 @@ function appendLibrary(library) {
     setByteSize(size, '0');
   }
   setLocalTime(row.querySelector('time'), library.CreatedAt);
-  setLibraryState(row, library);
   const toggle = row.querySelector('summary');
   toggle.setAttribute('aria-label', library.Name + ' 的更多操作');
   row.querySelector('button').addEventListener('click', () => {
@@ -101,18 +100,11 @@ function appendLibrary(library) {
     const head = info.querySelector('#head-id');
     head.textContent = library.HeadCommitId || '';
     head.closest('dd').hidden = info.querySelector('#head-label').hidden = !library.HeadCommitId;
-    setLibraryState(info, library);
     row.querySelector('details').open = false;
     toggle.focus({preventScroll: true});
     info.showModal();
   });
   table.tBodies[0].append(row);
-}
-
-function setLibraryState(container, library) {
-  const state = container.querySelector('.state');
-  state.classList.toggle('published', !!library.HeadCommitId);
-  state.textContent = library.HeadCommitId ? '已发布' : '尚未发布';
 }
 
 async function libraryRequest(path, options) {
