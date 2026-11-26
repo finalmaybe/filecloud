@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "/wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function AppPasswords(id: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.AppPasswords", id);
+}
+
 export function Bind(id: string, path: string, allowImport: boolean): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.Bind", id, path, allowImport);
 }
@@ -17,12 +21,40 @@ export function CancelReview(): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.CancelReview");
 }
 
+export function CheckDirectory(id: string): $CancellablePromise<$models.BindingCheck> {
+    return $Call.ByName("main.Workspace.CheckDirectory", id);
+}
+
 export function ConfirmDeletion(v: $models.Review): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.ConfirmDeletion", v);
 }
 
+export function ConflictPreview(id: string, pair: $models.Conflict, copySide: boolean): $CancellablePromise<$models.Preview> {
+    return $Call.ByName("main.Workspace.ConflictPreview", id, pair, copySide);
+}
+
 export function CreateLibrary(name: string, trashDays: number, historyDays: number): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.CreateLibrary", name, trashDays, historyDays);
+}
+
+export function DismissConflict(id: string, pair: $models.Conflict): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.DismissConflict", id, pair);
+}
+
+export function DownloadFile(id: string, commit: string, file: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.DownloadFile", id, commit, file);
+}
+
+export function FileVersions(id: string, commit: string, file: string, cursor: string): $CancellablePromise<$models.VersionsPage> {
+    return $Call.ByName("main.Workspace.FileVersions", id, commit, file, cursor);
+}
+
+export function Files(id: string, commit: string, dir: string, offset: number): $CancellablePromise<$models.Directory> {
+    return $Call.ByName("main.Workspace.Files", id, commit, dir, offset);
+}
+
+export function FinishRestore(v: $models.RestoreImpact, confirm: boolean): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.FinishRestore", v, confirm);
 }
 
 export function ForgetUnavailableSession(): $CancellablePromise<void> {
@@ -33,6 +65,18 @@ export function History(id: string, cursor: string): $CancellablePromise<$models
     return $Call.ByName("main.Workspace.History", id, cursor);
 }
 
+export function LibraryInfo(id: string): $CancellablePromise<$models.LibraryInfo> {
+    return $Call.ByName("main.Workspace.LibraryInfo", id);
+}
+
+export function LibrarySize(id: string): $CancellablePromise<string> {
+    return $Call.ByName("main.Workspace.LibrarySize", id);
+}
+
+export function LocalPreview(id: string, name: string): $CancellablePromise<$models.Preview> {
+    return $Call.ByName("main.Workspace.LocalPreview", id, name);
+}
+
 export function Login(server: string, username: string, password: string, device: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.Login", server, username, password, device);
 }
@@ -41,12 +85,32 @@ export function Logout(): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.Logout");
 }
 
+export function MergeSource(id: string, commit: string): $CancellablePromise<$models.Commit> {
+    return $Call.ByName("main.Workspace.MergeSource", id, commit);
+}
+
+export function NotificationPolicy(issues: boolean, done: boolean): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.NotificationPolicy", issues, done);
+}
+
 export function OpenWorktree(id: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.OpenWorktree", id);
 }
 
+export function PauseAll(on: boolean): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.PauseAll", on);
+}
+
 export function PickDirectory(id: string): $CancellablePromise<string> {
     return $Call.ByName("main.Workspace.PickDirectory", id);
+}
+
+export function PreviewFile(id: string, commit: string, file: string): $CancellablePromise<$models.Preview> {
+    return $Call.ByName("main.Workspace.PreviewFile", id, commit, file);
+}
+
+export function PreviewRestore(id: string, commit: string, path: string): $CancellablePromise<$models.RestoreImpact | null> {
+    return $Call.ByName("main.Workspace.PreviewRestore", id, commit, path);
 }
 
 export function Refresh(more: boolean): $CancellablePromise<void> {
@@ -55,6 +119,18 @@ export function Refresh(more: boolean): $CancellablePromise<void> {
 
 export function RequestSync(id: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.RequestSync", id);
+}
+
+export function RestoreTrash(id: string, item: number, dest: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.RestoreTrash", id, item, dest);
+}
+
+export function RestoreVersion(id: string, commit: string, file: string, anchor: string): $CancellablePromise<string> {
+    return $Call.ByName("main.Workspace.RestoreVersion", id, commit, file, anchor);
+}
+
+export function Retention(id: string, p: $models.Policy, apply: boolean, confirm: string): $CancellablePromise<$models.PolicyImpact> {
+    return $Call.ByName("main.Workspace.Retention", id, p, apply, confirm);
 }
 
 export function RetryBinding(id: string): $CancellablePromise<void> {
@@ -71,6 +147,10 @@ export function SetPaused(id: string, paused: boolean): $CancellablePromise<void
 
 export function Snapshot(): $CancellablePromise<$models.View | null> {
     return $Call.ByName("main.Workspace.Snapshot");
+}
+
+export function Trash(id: string, before: number): $CancellablePromise<$models.TrashPage> {
+    return $Call.ByName("main.Workspace.Trash", id, before);
 }
 
 export function Unbind(id: string): $CancellablePromise<void> {

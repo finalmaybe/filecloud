@@ -3,7 +3,7 @@
     "strict": true, "skipLibCheck": true, "noEmitOnError": true,
     "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"], "rootDir": ".", "outDir": "dist",
-    "paths": { "/wails/runtime.js": ["./node_modules/@wailsio/runtime/types/index.d.ts"] }
+    "paths": { "/pdfjs/pdf.min.mjs": ["./node_modules/pdfjs-dist/types/src/pdf.d.ts"], "/wails/runtime.js": ["./node_modules/@wailsio/runtime/types/index.d.ts"] }
   },
-  "files": ["app.ts"]
+  "files": ["app.ts","quick.ts"]
 }

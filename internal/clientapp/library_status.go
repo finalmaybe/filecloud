@@ -15,6 +15,11 @@ type statusDeletion struct{ Deleted, Tracked int64 }
 
 type statusConfirmation struct{ Kind, CandidatePrefix string }
 
+type statusRestore struct {
+	SourceCommit, SourcePath, Candidate            string
+	Created, Updated, Replaced, Removed, Preserved int64
+}
+
 type libraryStatus struct {
 	Confirmation *statusConfirmation `json:",omitempty"`
 	LibraryID    string              `json:"LibraryId"`
@@ -22,6 +27,7 @@ type libraryStatus struct {
 	SyncBase     string
 	Pending      string
 	Deletion     *statusDeletion `json:",omitempty"`
+	Restore      *statusRestore  `json:",omitempty"`
 	NextCommand  []string        `json:",omitempty"`
 }
 
@@ -104,6 +110,7 @@ func readLibraryStatus(ctx context.Context, dir, path string) (_ libraryStatus, 
 		status.Pending, status.NextCommand = "restore", next
 		if !p.RestoreConfirmed {
 			status.Pending = "restore-confirmation"
+			status.Restore = &statusRestore{p.SourceCommit, p.SourcePath, p.CandidateCommit[:deleteCandidatePrefixLen], p.CreatedCount, p.UpdatedCount, p.TypeReplacementCount, p.RemovedDescendantCount, p.PreservedCurrentOnlyCount}
 			status.Confirmation = &statusConfirmation{"restore", p.CandidateCommit[:deleteCandidatePrefixLen]}
 			next[2] = "restore"
 			status.NextCommand = append(next, "--confirm", p.CandidateCommit[:deleteCandidatePrefixLen])

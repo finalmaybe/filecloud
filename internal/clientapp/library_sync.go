@@ -478,6 +478,13 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 		return err
 	}
 	pending.ApplyState = "finalized"
+	if config.conflictSaved != nil {
+		for _, p := range promotions {
+			if err := config.conflictSaved(p.source, p.target); err != nil {
+				return err
+			}
+		}
+	}
 	if len(latePaths) != 0 {
 		if err := finishSyncCleanup(ctx, db, options, pending, io.Discard, config); err != nil {
 			return err

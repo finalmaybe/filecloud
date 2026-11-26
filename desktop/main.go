@@ -37,6 +37,14 @@ func (p *Preferences) EnableNotifications() (bool, error) {
 	return p.notifications.RequestNotificationAuthorization()
 }
 
+func (p *Preferences) NotificationsAllowed() bool {
+	if !p.ready.Load() {
+		return false
+	}
+	on, _ := p.notifications.CheckNotificationAuthorization()
+	return on
+}
+
 func (p *Preferences) AutoStart() (bool, error) { return p.startup.IsEnabled() }
 func (p *Preferences) SetAutoStart(on bool) error {
 	if on {
@@ -96,27 +104,45 @@ func run() error {
 		prefs.startup = imageStartup{image: image, entry: filepath.Join(root, "autostart", "org.filecloud.desktop.AppImage.desktop")}
 	}
 	app.RegisterService(application.NewService(prefs))
-	win = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Filecloud", Name: "workspace", Width: 1120, Height: 740, MinWidth: 480, MinHeight: 420, URL: "/"})
+	width, height := 1440, 900
+	if !s.Snapshot().SignedIn {
+		width, height = 830, 450
+	}
+	win = app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Filecloud", Name: "workspace", Width: width, Height: height, MinWidth: 480, MinHeight: 420, URL: "/"})
 	s.pick = func() (string, error) {
 		return app.Dialog.OpenFile().CanChooseFiles(false).CanChooseDirectories(true).AttachToWindow(win).SetTitle("选择工作目录").PromptForSingleSelection()
 	}
 	s.open = app.Browser.OpenFile
+	s.openWeb = app.Browser.OpenURL
+	s.saveFile = func(name string) (string, error) {
+		return app.Dialog.SaveFile().AttachToWindow(win).SetFilename(name).PromptForSingleSelection()
+	}
 	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { win.Hide(); e.Cancel() })
 	app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) { show() })
 	tray := app.SystemTray.New()
 	tray.SetIcon(icon)
 	tray.SetTooltip("Filecloud")
 	menu := app.NewMenu()
+	quick := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "quick", Title: "Filecloud · 同步概览", Width: 340, Height: 384, DisableResize: true, Hidden: true, Frameless: true, AlwaysOnTop: true, HideOnFocusLost: true, Windows: application.WindowsWindow{HiddenOnTaskbar: true}, URL: "/quick.html"})
+	tray.AttachWindow(quick).WindowOffset(6)
+	menu.Add("同步概览").OnClick(func(*application.Context) { tray.ShowWindow() })
+	menu.Add("需要处理").OnClick(func(*application.Context) { show(); app.Event.Emit("navigate", "attention") })
+	menu.AddSeparator()
 	menu.Add("打开 Filecloud").OnClick(func(*application.Context) { show() })
+	menu.Add("设置…").OnClick(func(*application.Context) { show(); app.Event.Emit("navigate", "settings") })
 	menu.Add("退出 Filecloud").OnClick(func(*application.Context) { app.Quit() })
 	tray.SetMenu(menu)
-	tray.OnClick(show)
 	stop := make(chan struct{})
 	ns := prefs.notifications
 	s.notify = func(id string) {
 		if prefs.ready.Load() {
 			if allowed, _ := ns.CheckNotificationAuthorization(); allowed {
-				_ = ns.SendNotification(notifications.NotificationOptions{ID: id, Title: "Filecloud", Body: "有同步事项需要处理，请打开客户端查看。"})
+				body := "有同步事项需要处理，请打开客户端查看。"
+				if id == "" {
+					body = "本轮同步已完成。"
+					id = "sync-complete"
+				}
+				_ = ns.SendNotification(notifications.NotificationOptions{ID: id, Title: "Filecloud", Body: body})
 			}
 		}
 	}
@@ -126,7 +152,11 @@ func run() error {
 			ns.OnNotificationResponse(func(r notifications.NotificationResult) {
 				if r.Error == nil {
 					show()
-					app.Event.Emit("attention", r.Response.ID)
+					if r.Response.ID == "sync-complete" {
+						app.Event.Emit("navigate", "activity")
+					} else {
+						app.Event.Emit("attention", r.Response.ID)
+					}
 				}
 			})
 		}

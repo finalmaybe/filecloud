@@ -210,7 +210,7 @@ go test ./internal/clientapp -run '^TestCrossPlatformAcceptanceMatrix$' -count=1
 | [HTTP API 契约](./docs/design/http-api.md) | 认证、资料库、对象、Head 和历史接口 |
 | [历史浏览与安全恢复](./docs/design/history-and-safe-restore.md) | 主线历史、合并来源、恢复预览和确认语义 |
 | [Web 控制台契约](./docs/design/web-console.md) | 源码版的浏览器会话、文件预览与版本操作，以及和 CLI 的分工 |
-| [桌面客户端 PRD](./docs/design/desktop-client-prd.md) · [技术方案](./docs/design/desktop-client-architecture.md) | Linux、Windows、macOS 桌面设计、与 CLI 的分工及发布门槛；[开发预览](./desktop/README.md) |
+| [桌面设计稿（PDF）](./docs/design/desktop-mockups/filecloud-desktop-design.pdf) · [技术方案](./docs/design/desktop-client-architecture.md) | Linux、Windows、macOS 桌面设计、与 CLI 的分工及发布门槛；[开发预览](./desktop/README.md) |
 | [第一阶段实施计划](./docs/design/phase-1-plan.md) | 1A、1B、1C 的原始交付范围和完成标准 |
 | [1C 部署性能基线](./docs/operations/performance-baseline.md) | 性能测量、资源上限和安全默认值 |
 | [分发说明](./docs/distribution.md) | 平台归档、发布门禁和许可材料 |

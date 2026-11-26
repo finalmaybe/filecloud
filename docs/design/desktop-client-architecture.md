@@ -1,6 +1,6 @@
 # Filecloud 桌面客户端技术方案 · 首版
 
-**状态：已进入开发预览，正式发布验收未完成。** [构建与验证](../../desktop/README.md)。 基线 `eb3902c`，2026-11-22。需求编号 D1–D7、验收 A1–A6 见 [PRD](desktop-client-prd.md)。[三端稿](desktop-mockups/README.md)描述界面，[三端官方资料](../research/desktop-platform-design.md)说明系统差异。
+**状态：已进入开发预览，正式发布验收未完成。** [构建与验证](../../desktop/README.md)。 基线 `eb3902c`，2026-11-22。需求编号 D1–D7、验收 A1–A6 见 [PRD](desktop-client-prd.md)。本文记录首版架构；当前界面与恢复交互见[新版桌面设计稿](desktop-mockups/filecloud-desktop-design.pdf)和[实现说明](../../desktop/README.md)，[三端官方资料](../research/desktop-platform-design.md)说明系统差异。
 
 ## 1. 决策：窗口不是同步引擎
 

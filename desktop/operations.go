@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -118,6 +119,8 @@ func (s *Workspace) Unbind(id string) error {
 	delete(s.states, id)
 	delete(s.problems, id)
 	delete(s.data.Paused, id)
+	delete(s.data.LastSuccess, id)
+	delete(s.data.Conflicts, id)
 	delete(s.data.Intents, id)
 	s.review = nil
 	return s.save()
@@ -195,16 +198,16 @@ func (s *Workspace) syncOne(id, prefix string) error {
 	s.running = id
 	s.publish()
 	defer func() { s.running = ""; s.publish() }()
-	args := []string{"library", "sync", "--output=jsonl", "--client-dir", s.clientDir(), "--worktree", b.Worktree}
+	args := []string{"library", "sync", "--output=jsonl", "--conflict-paths", "--client-dir", s.clientDir(), "--worktree", b.Worktree}
 	if prefix != "" {
 		args = append(args, "--confirm-delete", prefix)
 	}
 	data, runErr := s.exec("", args...)
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var result, code string
-	var scanned bool
+	var scanned, conflictAdded bool
 	for {
-		var msg struct{ Type, Outcome, Code string }
+		var msg struct{ Type, Outcome, Code, Source, Target string }
 		err := dec.Decode(&msg)
 		if err == io.EOF {
 			break
@@ -214,6 +217,13 @@ func (s *Workspace) syncOne(id, prefix string) error {
 			break
 		}
 		switch msg.Type {
+		case "conflict_saved":
+			item := Conflict{msg.Source, msg.Target}
+			if !slices.Contains(s.data.Conflicts[id], item) {
+				s.data.Conflicts[id] = append(s.data.Conflicts[id], item)
+				conflictAdded = true
+				s.activity(id, "conflict_saved", time.Now())
+			}
 		case "scan_completed":
 			scanned = true
 		case "result":
@@ -235,6 +245,9 @@ func (s *Workspace) syncOne(id, prefix string) error {
 	}
 	s.delays[id] = delay
 	s.due[id] = now.Add(delay)
+	if code == "" {
+		s.data.LastSuccess[id] = now.UTC().Format(time.RFC3339Nano)
+	}
 	old := s.problems[id]
 	s.problems[id] = code
 	lastUnchanged := false
@@ -258,16 +271,19 @@ func (s *Workspace) syncOne(id, prefix string) error {
 			}
 		}
 		s.activity(id, kind, now)
-		if err := s.save(); err != nil {
-			return err
-		}
+	}
+	if err := s.save(); err != nil {
+		return err
 	}
 	_, statusErr := s.readStatus(b)
-	if code != "" && code != old && s.notify != nil && (code == "delete_confirmation" || code == "auth_required") {
+	if !s.data.MuteIssues && s.notify != nil && (conflictAdded || code != old && (code == "delete_confirmation" || code == "auth_required")) {
 		s.notify(id)
 	}
 	if code != "" {
 		return errors.New(code)
+	}
+	if code == "" && result == "ok" && s.data.NotifyDone && s.notify != nil {
+		s.notify("")
 	}
 	return statusErr
 }
@@ -301,7 +317,10 @@ func (s *Workspace) tick(now time.Time) {
 	}
 }
 
-type Commit struct{ CommitId, CreatedAt, Message string }
+type Commit struct {
+	CommitId, CreatedAt, Message string
+	Parents                      []string
+}
 type HistoryPage struct {
 	Commits       []Commit
 	NextPageToken string

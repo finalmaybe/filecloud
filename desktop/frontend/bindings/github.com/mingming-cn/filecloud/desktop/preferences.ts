@@ -13,6 +13,10 @@ export function EnableNotifications(): $CancellablePromise<boolean> {
     return $Call.ByName("main.Preferences.EnableNotifications");
 }
 
+export function NotificationsAllowed(): $CancellablePromise<boolean> {
+    return $Call.ByName("main.Preferences.NotificationsAllowed");
+}
+
 export function Quit(): $CancellablePromise<void> {
     return $Call.ByName("main.Preferences.Quit");
 }

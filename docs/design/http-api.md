@@ -45,6 +45,7 @@ Authorization: Bearer <opaque-token>
 | 413 | 3005 | PayloadTooLarge | 正文、对象数量或单批次超限 |
 | 428 | 3006 | PreconditionRequired | Head 更新缺少 `If-Match` |
 | 409 | 3007 | CurrentFileVersion | 不能删除该文件的当前版本 |
+| 409 | 3008 | RestoreOccupied | 回收站恢复位置已有内容，需改名或取消 |
 | 429 | 4000 | RateLimited | 超限；响应携带 `Retry-After` |
 | 500 | 5000 | Internal | 未公开的服务端错误 |
 | 503 | 5001 | Unavailable | 存储暂不可用，可重试 |
@@ -76,6 +77,18 @@ Authorization: Bearer <opaque-token>
 - 资料库 ID 由客户端生成，创建使用资源 `PUT`，重复请求天然幂等。
 - Head 更新以 `If-Match` 实现并发控制；网络结果未知时先读取 Head，不盲目重放。
 - 客户端只自动重试明确幂等请求的网络错误、429 和 503；`CreateSession` 禁止自动重试。其他 4xx 必须重新计算或提示用户。
+
+## 桌面文件检查器与恢复
+
+以下路径相对于 `/v1/libraries/{LibraryId}`，仅接受资料库所有者的 Bearer 会话。桌面主进程发起请求，窗口不接收凭据。网页控制台继续使用原有登录、表单和 Origin 校验。
+
+| 请求 | 输入与结果 |
+|---|---|
+| `GET /content` | `CommitId`、`Path` 固定已发布快照中的文件。返回验证过的文件字节作为附件，支持范围读取。 |
+| `POST /file-history/{CommitId}/restore` | `Path`、`AnchorCommitId` 固定文件与已核对的当前版本。返回 `Head`；内容与修改时间相同则不生成新版本。 |
+| `GET /trash` | 可选 `Before`（上一页的 `Next`）。返回最多 100 条 `Entries`（`ID`、`Path`、`Kind`、`DeletedAt`、`ExpiresAt`）与 `Next`，0 表示末页。 |
+| `POST /trash/{id}/restore` | `Destination` 为可选的资料库相对路径；占用返回 `409/3008`，成功返回 `204`。`Version` 记录只放回版本列表。 |
+| `POST /retention` | JSON：`TrashDays`、`HistoryDays`，0 跟随默认，历史另支持 -1 永久。`Apply:false` 预览 `Count`、`RestoredRecords`、`Bytes` 和 `Token`。保存时发送相同天数、`Apply:true`、`Confirm`；服务端重算影响，确认不匹配返回 `412`。 |
 
 ## CreateSession
 

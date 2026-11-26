@@ -82,7 +82,7 @@ func (r _restorePublicationRound) preview(ctx context.Context, pending _pendingP
 		return _publicationOutcome{}, errors.New("bound library Head is empty")
 	}
 	if snapshot.root != r.binding.SyncBaseRoot || *head.CommitID != r.binding.SyncBase {
-		return _publicationOutcome{}, errors.New("worktree is not converged with Sync Base and Head; run sync first")
+		return _publicationOutcome{}, errSyncBeforeRestore
 	}
 	source, plan, err := r.plan(ctx, snapshot, request.sourceCommit, request.sourcePath)
 	if errors.Is(err, _errRestoreSourcePathNotFound) {
@@ -257,7 +257,7 @@ func (r _restorePublicationRound) discardStalePreview(ctx context.Context, pendi
 	if err := discardPendingPublication(ctx, r.db, r.binding.Worktree, pending); err != nil {
 		return _publicationOutcome{}, err
 	}
-	return _publicationOutcome{kind: _publicationOutcomeRerunRestore}, errors.New("stale restore candidate discarded; rerun restore")
+	return _publicationOutcome{kind: _publicationOutcomeRerunRestore}, staleSyncCandidate("stale restore candidate discarded; rerun restore")
 }
 
 func (r _restorePublicationRound) revalidationFailed(ctx context.Context, pending _restorePublicationState, err error) (_publicationOutcome, error) {

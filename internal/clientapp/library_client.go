@@ -63,6 +63,7 @@ func isTransientHTTPStatus(status int) bool {
 
 type libraryClientConfig struct {
 	syncEvent                       func(string) error
+	conflictSaved                   func(source, target string) error
 	checkFilesystem                 func(*os.File) error
 	now                             func() time.Time
 	syncFile                        func(*os.File) error
@@ -199,6 +200,8 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		}
 		defer clear(options.token)
 		return bindLibrary(ctx, options, stdout, config)
+	case "check-directory":
+		return checkBindingDirectory(args[1:], stdout, stderr)
 	case "bindings":
 		return runLibraryBindings(ctx, args[1:], stdout, stderr)
 	case "status":
@@ -859,6 +862,7 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	clientDir := flags.String("client-dir", "", "Filecloud client state directory")
 	worktree := flags.String("worktree", "", "Worktree directory")
 	output := flags.String("output", "text", "text or jsonl")
+	reportCopies := flags.Bool("conflict-paths", false, "Include relative conflict-copy paths in local JSONL output")
 	confirmDelete := flags.String("confirm-delete", "", "Confirm a protected deletion candidate")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -867,6 +871,11 @@ func runLibrarySync(ctx context.Context, args []string, stdout, stderr io.Writer
 	case "jsonl":
 		stream := syncStream{writer: stdout}
 		config.syncEvent = stream.observe
+		if *reportCopies {
+			config.conflictSaved = func(source, target string) error {
+				return json.NewEncoder(stream.writer).Encode(struct{ Type, Source, Target string }{"conflict_saved", source, target})
+			}
+		}
 		defer func() { retErr = stream.finish(retErr) }()
 		stdout = io.Discard
 	case "text":
@@ -2991,7 +3000,7 @@ func updateRemoteHeadWithAttempts(ctx context.Context, base *url.URL, libraryID 
 		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
 			var failure struct{ Reason string }
 			if status == http.StatusServiceUnavailable && json.Unmarshal(data, &failure) == nil && failure.Reason == "DAVLocked" {
-				return remoteHead{}, false, errors.New("文档正在网络盘中编辑，本地修改已保留")
+				return remoteHead{}, false, errDAVEditing
 			}
 			if attempt+1 == attempts {
 				return remoteHead{}, false, fmt.Errorf("publish library Head failed after %d attempts: server returned %s",

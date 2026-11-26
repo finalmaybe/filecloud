@@ -7,15 +7,57 @@ export interface Activity {
     "Kind": string;
 }
 
+export interface BindingCheck {
+    "Path": string;
+    "Filesystem": string;
+    "Empty": boolean;
+    "Published": boolean;
+}
+
 export interface Commit {
     "CommitId": string;
     "CreatedAt": string;
     "Message": string;
+    "Parents": string[] | null;
+}
+
+export interface Conflict {
+    "Source": string;
+    "Target": string;
+}
+
+export interface Directory {
+    "CommitId": string;
+    "Path": string;
+    "Parent": string;
+    "Entries": FileEntry[] | null;
+    "NextOffset": number;
+}
+
+export interface FileEntry {
+    "Name": string;
+    "Type": string;
+    "ModifiedAt": string;
+    "Size": string;
+}
+
+export interface FileVersion {
+    "CommitId": string;
+    "CreatedAt": string;
+    "ModifiedAt": string;
+    "Change": string;
+    "IsCurrent": boolean;
 }
 
 export interface HistoryPage {
     "Commits": Commit[] | null;
     "NextPageToken": string;
+}
+
+export interface LibraryInfo {
+    "HeadCommitId": string;
+    "TrashDays": number;
+    "HistoryDays": number;
 }
 
 export interface LibraryView {
@@ -27,6 +69,39 @@ export interface LibraryView {
     "Problem": string;
     "Paused": boolean;
     "Running": boolean;
+    "LastSuccess": string;
+    "Conflicts": Conflict[] | null;
+}
+
+export interface Policy {
+    "TrashDays": number;
+    "HistoryDays": number;
+}
+
+export interface PolicyImpact {
+    "Count": number;
+    "RestoredRecords": number;
+    "Bytes": number;
+    "Token": string;
+}
+
+export interface Preview {
+    "Media": string;
+    "Content": string;
+    "Notice": string;
+}
+
+export interface RestoreImpact {
+    "ID": string;
+    "Worktree": string;
+    "SourceCommit": string;
+    "SourcePath": string;
+    "Candidate": string;
+    "Created": number;
+    "Updated": number;
+    "Replaced": number;
+    "Removed": number;
+    "Preserved": number;
 }
 
 export interface Review {
@@ -37,11 +112,34 @@ export interface Review {
     "Tracked": number;
 }
 
+export interface TrashEntry {
+    "ID": number;
+    "Path": string;
+    "Kind": string;
+    "DeletedAt": string;
+    "ExpiresAt": string;
+}
+
+export interface TrashPage {
+    "Entries": TrashEntry[] | null;
+    "Next": number;
+}
+
+export interface VersionsPage {
+    "Versions": FileVersion[] | null;
+    "NextPageToken": string;
+}
+
 export interface View {
     "DefaultTrashDays": number;
     "DefaultHistoryDays": number;
     "Revision": number;
     "Server": string;
+    "Username": string;
+    "DeviceName": string;
+    "Version": string;
+    "NotifyDone": boolean;
+    "MuteIssues": boolean;
     "SignedIn": boolean;
     "CatalogSession": boolean;
     "LogoutPending": boolean;

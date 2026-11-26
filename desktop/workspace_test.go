@@ -73,6 +73,11 @@ func TestDesktopTwoDevices(t *testing.T) {
 		s.pick = func() (string, error) { return path, nil }
 		p, err := s.PickDirectory(id)
 		must(t, err)
+		check, err := s.CheckDirectory(id)
+		must(t, err)
+		if check.Path != path || !check.Empty || check.Filesystem == "" {
+			t.Fatal("incorrect directory preflight")
+		}
 		must(t, s.Bind(id, p, false))
 		return p
 	}
@@ -140,6 +145,100 @@ func TestDesktopTwoDevices(t *testing.T) {
 	must(t, err)
 	if len(h.Commits) < 2 {
 		t.Fatal("missing mainline history")
+	}
+	// A historical preview must never authorize a different candidate, including after cancellation.
+	old := h.Commits[1].CommitId
+	files, err := a.Files(id, old, ".", 0)
+	must(t, err)
+	if files.CommitId != old || len(files.Entries) != 10 {
+		t.Fatal("snapshot selection drifted")
+	}
+	preview, err := a.PreviewFile(id, old, "0")
+	must(t, err)
+	if preview.Media != "text/plain" || preview.Content != "sync data" {
+		t.Fatal("preview does not match selected snapshot")
+	}
+	impact, err := a.PreviewRestore(id, old, "0")
+	must(t, err)
+	if impact == nil || impact.Created != 1 || impact.SourcePath != "0" {
+		t.Fatal("missing restore impact")
+	}
+	must(t, a.FinishRestore(*impact, false))
+	if a.FinishRestore(*impact, true) == nil {
+		t.Fatal("cancelled restore was accepted")
+	}
+	impact, err = a.PreviewRestore(id, old, "0")
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pa, "1"), []byte("edit during preview"), 0600))
+	if err := a.FinishRestore(*impact, true); !errors.Is(err, commandError("stale_candidate")) {
+		t.Fatalf("changed restore: %v", err)
+	}
+	must(t, a.RequestSync(id))
+	impact, err = a.PreviewRestore(id, old, "0")
+	must(t, err)
+	must(t, a.FinishRestore(*impact, true))
+	must(t, b.RequestSync(id))
+	if raw, err := os.ReadFile(filepath.Join(pb, "0")); err != nil || string(raw) != "sync data" {
+		t.Fatal("restored file did not converge")
+	}
+	bin, err := a.Trash(id, 0)
+	must(t, err)
+	if len(bin.Entries) == 0 {
+		t.Fatal("missing deleted file")
+	}
+	entry := bin.Entries[0]
+	if err := a.RestoreTrash(id, entry.ID, "0"); err == nil {
+		t.Fatal("trash restore replaced existing file")
+	}
+	must(t, a.RestoreTrash(id, entry.ID, "renamed"))
+	policy := Policy{TrashDays: 30, HistoryDays: 1}
+	change, err := a.Retention(id, policy, false, "")
+	must(t, err)
+	if change.Token == "" {
+		t.Fatal("shortened retention without preview")
+	}
+	if _, err := a.Retention(id, policy, true, "wrong"); err == nil {
+		t.Fatal("accepted stale retention approval")
+	}
+	_, err = a.Retention(id, policy, true, change.Token)
+	must(t, err)
+	// Compare only real, journal-reported conflict copies; a comparison never edits the worktree.
+	must(t, a.RequestSync(id))
+	must(t, b.RequestSync(id))
+	must(t, os.WriteFile(filepath.Join(pa, "1"), []byte("remote text"), 0600))
+	must(t, os.WriteFile(filepath.Join(pb, "1"), []byte("local text"), 0600))
+	must(t, a.RequestSync(id))
+	must(t, b.RequestSync(id))
+	copies := b.Snapshot().Libraries[0].Conflicts
+	if len(copies) != 1 {
+		t.Fatalf("expected one preserved conflict, got %d", len(copies))
+	}
+	for side, want := range map[bool]string{false: "remote text", true: "local text"} {
+		v, err := b.ConflictPreview(id, copies[0], side)
+		must(t, err)
+		if v.Content != want {
+			t.Fatal("incorrect conflict side")
+		}
+	}
+	must(t, b.DismissConflict(id, copies[0]))
+	if _, err := os.Stat(filepath.Join(pb, filepath.FromSlash(copies[0].Target))); err != nil {
+		t.Fatal("dismissing a comparison removed its file")
+	}
+	info, err := b.LibraryInfo(id)
+	must(t, err)
+	versions, err := b.FileVersions(id, info.HeadCommitId, "1", "")
+	must(t, err)
+	if len(versions.Versions) < 2 {
+		t.Fatal("missing historical file version")
+	}
+	past := versions.Versions[len(versions.Versions)-1]
+	newHead, err := b.RestoreVersion(id, past.CommitId, "1", info.HeadCommitId)
+	must(t, err)
+	if newHead == info.HeadCommitId {
+		t.Fatal("file restore did not publish")
+	}
+	if _, err := b.RestoreVersion(id, past.CommitId, "1", info.HeadCommitId); err == nil {
+		t.Fatal("accepted stale file-version anchor")
 	}
 	must(t, a.SetPaused(id, true))
 	must(t, a.Unbind(id))

@@ -16,6 +16,7 @@ func runLibraryRestore(ctx context.Context, args []string, stdout, stderr io.Wri
 	worktree := flags.String("worktree", "", "Bound worktree directory")
 	commitID := flags.String("commit", "", "Complete historical CommitId")
 	sourcePath := flags.String("path", "", "Protocol-relative snapshot path or .")
+	cancel := flags.String("cancel", "", "Discard this unconfirmed restore preview")
 	confirm := flags.String("confirm", "", "Confirm a pending restore candidate")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -34,6 +35,12 @@ func runLibraryRestore(ctx context.Context, args []string, stdout, stderr io.Wri
 			confirmSet = true
 		}
 	})
+	if *cancel != "" {
+		if commitSet || pathSet || confirmSet || len(*cancel) != deleteCandidatePrefixLen || !isLowerHex(*cancel) {
+			return errors.New("restore --cancel requires only the pending candidate prefix")
+		}
+		return cancelRestorePreview(ctx, *clientDir, *worktree, *cancel, config)
+	}
 	if confirmSet {
 		if commitSet || pathSet {
 			return errors.New("restore --confirm cannot combine with --commit or --path")
@@ -82,6 +89,23 @@ func runRestorePublication(ctx context.Context, clientDir, worktree string, requ
 	default:
 		return _errPublicationRequestInvalid
 	}
+}
+
+func cancelRestorePreview(ctx context.Context, dir, worktree, prefix string, config libraryClientConfig) (retErr error) {
+	s, err := openLockedBoundWorktreeSession(ctx, dir, worktree, config)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, s.Close()) }()
+	current, err := loadPendingPublication(ctx, s.db, s.binding)
+	if err != nil {
+		return err
+	}
+	p, ok := current.(_restorePublicationState)
+	if !ok || p.RestoreConfirmed || p.CandidateCommit[:deleteCandidatePrefixLen] != prefix {
+		return _errWrongRestorePrefix
+	}
+	return discardPendingPublication(ctx, s.db, s.binding.Worktree, p)
 }
 
 func isLowerHex(value string) bool {

@@ -3,6 +3,12 @@
   "private": true,
   "license": "GPL-3.0-only",
   "type": "module",
-  "scripts": { "build": "tsc -p tsconfig.json && node assets.mjs" },
-  "devDependencies": { "typescript": "6.0.2", "@wailsio/runtime": "3.1.0" }
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node assets.mjs"
+  },
+  "devDependencies": {
+    "@wailsio/runtime": "3.1.0",
+    "pdfjs-dist": "5.4.624",
+    "typescript": "6.0.2"
+  }
 }

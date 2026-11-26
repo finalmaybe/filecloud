@@ -1,14 +1,16 @@
 # Filecloud Desktop（开发预览）
 
-三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud-client` 子程序；无需开启服务端 Web 控制台。设计与范围：[PRD](../docs/design/desktop-client-prd.md)、[技术方案](../docs/design/desktop-client-architecture.md)、[预览图](../docs/design/desktop-mockups/README.md)。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
+三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud-client` 子程序；无需开启服务端 Web 控制台。界面和交互以 [16 页桌面设计稿](../docs/design/desktop-mockups/filecloud-desktop-design.pdf) 为准；[首版 PRD](../docs/design/desktop-client-prd.md) 与[技术方案](../docs/design/desktop-client-architecture.md)记录原始基础。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
 
 ## 试用
 
-在「连接到 Filecloud」登录 → 选择或创建资料库 → 选本地工作目录并绑定。首次导入非空目录要另行勾选，远端已有版本时请选择空目录。只支持本机 ext4、APFS、固定 NTFS；不要让两套客户端状态管理同一个工作目录。
+在「连接你的 Filecloud」登录 → 选择或新建资料库 → 选择本地文件夹，核对目录检查结果后连接。首次导入非空目录要另行勾选，远端已有版本时请选择空目录。只支持本机 ext4、APFS、固定 NTFS；不要让两套客户端状态管理同一个工作目录。
 
 - 已绑定资料库可立即同步、暂停后续轮次、打开工作目录和浏览分页主线历史。默认每轮结束后等待 30 秒；关窗保持调度，再次从系统入口启动会唤回已有窗口。「退出应用」才停止调度。
-- 打开「需要处理 → 查看影响」可核对删除的资料库、路径和计数。取消不会发布；确认仅应用于核对的候选。若有 CLI 历史恢复预览，回原 CLI 确认。
-- 「设置与账号」可切换登录系统后启动、授权通知、重新登录或退出账号。账号 token 使用系统凭据库，不可用时仅在进程内保存；CLI 绑定原有的受限凭据存储不变。重新登录后从「绑定操作 → 刷新绑定凭据」刷新已收敛的绑定；若旧凭据失效且不能刷新，按[保全流程](../docs/operations/deployment-and-client.md#刷新绑定凭据)操作。
+- 「需要处理 → 检查删除」列出工作目录、删除计数、占比和候选码。取消不会发布。遇到冲突时，可并排对照实际保留的两份内容，标记已整理不会删除文件。
+- 「资料库 → 浏览文件」查看已发布版本，支持文本、图片、PDF 快速预览和下载。文件检查器恢复单文件版本；「版本历史」可查看合并来源、浏览快照、预览并确认前向恢复。取消历史恢复会撤销本次未确认的预览。
+- 「回收站」可恢复文件、目录或版本记录；「资料库设置」分别管理回收站与历史保留期。缩短历史保留期需要核对影响。文件内容、版本恢复、回收站和保留策略需要同时更新服务端（[HTTP 接口](../docs/design/http-api.md#桌面文件检查器与恢复)）；WebDAV 应用密码在独立登录的网页控制台管理。
+- 「设置」可切换登录系统后启动、授权通知、重新登录或退出账号。账号 token 使用系统凭据库，不可用时仅在进程内保存；CLI 绑定原有的受限凭据存储不变。重新登录后从「资料库设置 → 刷新绑定凭据」刷新已收敛的绑定；若旧凭据失效且不能刷新，按[保全流程](../docs/operations/deployment-and-client.md#刷新绑定凭据)操作。
 - 桌面状态位于 `os.UserConfigDir()/filecloud-desktop/`，按服务地址和所有者隔离；近期活动只保留 200 条。如需迁移，请先退出应用并保留工作目录和完整状态目录，不要手动编辑 `client.db`。
 
 ### Linux：运行 AppImage
@@ -35,7 +37,7 @@ bash desktop/build/package.sh
 
 AppImage 从构建机安装的 Ubuntu 软件包收集运行库。发行方应在 WebKitGTK 等依赖有安全更新时更新构建机并重新打包；实际版本、来源包与版权文件在镜像内 `usr/lib/filecloud-desktop/licenses/linux-runtime/`。打包时按固定 SHA-256 校验[官方 Type 2 runtime](https://github.com/AppImage/type2-runtime/tree/fedfad51acc2860b2916a1eef32ba4a500ff31ef)；离线构建可将 `APPIMAGE_RUNTIME` 指向同一份 `runtime-x86_64` 文件。
 
-开发时先在 `desktop/frontend` 运行 `npm ci && npm run build`。修改绑定方法后，在 `desktop/` 使用同版本的 `wails3 generate bindings -ts -b -i -names -noevents -d frontend/bindings`，然后重新构建前端。首次生成前若无嵌入目录，可在 `desktop/frontend` 运行 `node assets.mjs`。不要手改生成的 bindings。
+开发时先在 `desktop/frontend` 运行 `npm ci && npm run build`。修改绑定方法后，在 `desktop/` 使用同版本的 `wails3 generate bindings -ts -b -i -names -noevents -d frontend/bindings`，然后重新构建前端。首次生成前若无嵌入目录，可在 `desktop/frontend` 运行 `npm ci && node assets.mjs`。PDF.js、字体和许可随前端资源离线打包，不加载远程脚本。桌面图标源文件为 `desktop/build/icons/folder.svg`。不要手改生成的 bindings。
 
 ## 验证
 

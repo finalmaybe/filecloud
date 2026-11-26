@@ -10,9 +10,22 @@ export {
 
 export type {
     Activity,
+    BindingCheck,
     Commit,
+    Conflict,
+    Directory,
+    FileEntry,
+    FileVersion,
     HistoryPage,
+    LibraryInfo,
     LibraryView,
+    Policy,
+    PolicyImpact,
+    Preview,
+    RestoreImpact,
     Review,
+    TrashEntry,
+    TrashPage,
+    VersionsPage,
     View
 } from "./models.js";

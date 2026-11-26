@@ -10,4 +10,4 @@
 | macOS：[Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars)、[Sheets](https://developer.apple.com/design/human-interface-guidelines/sheets)、[Alerts](https://developer.apple.com/design/human-interface-guidelines/alerts)、[The menu bar](https://developer.apple.com/design/human-interface-guidelines/the-menu-bar) | Sheet 绑定父窗口并保留上下文；破坏性确认给出取消路径；系统菜单区分关闭窗口与退出 App。 | 从指定资料库打开核对面板，不锁住其他应用。若使用原生警告，安全按钮按系统本地化为「取消」，语义等同预览的「暂不处理」；不设默认删除。测试 Esc/⌘. 取消、⌘W 关窗、⌘Q 退出和 Dock 重开。 |
 | 同类产品：[Seafile – Install and sync Files](https://help.seafile.com/syncing_client/install_sync/)、[Nextcloud – Using the Synchronization Client](https://docs.nextcloud.com/server/stable/user_manual/en/desktop/usage.html) | Seafile 从资料库关联本地目录；Nextcloud 在主界面呈现近期活动、异常以及打开本地文件夹的入口。 | 采用「资料库 → 工作目录」和「活动 → 处理问题」。明确区分本机活动与服务端主线历史；不照搬共享、协作、容量面板或虚拟盘。 |
 
-三个平台复用[同一品牌](../../assets/brand/filecloud-logo.svg)和[同一流程](../design/desktop-mockups/README.md)。图中的系统只是三个观察位置，不是功能分配。边角、按钮顺序、菜单位置可以不同；确认对象、数量、取消效果和发布后果必须一致。
+三个平台复用[同一品牌](../../assets/brand/filecloud-logo.svg)和[同一流程](../design/desktop-mockups/filecloud-desktop-design.pdf)。图中的系统只是三个观察位置，不是功能分配。边角、按钮顺序、菜单位置可以不同；确认对象、数量、取消效果和发布后果必须一致。

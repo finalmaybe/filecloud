@@ -169,6 +169,7 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 			shared.Handle(pattern, auth.RequireSession(store, config.Now, logger, config.BrowserOrigin, handle))
 		}
 	}
+	catalog.registerDesktopOperations(mux)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/head", h.getHead)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/head", h.updateHead)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/history", h.listHistory)

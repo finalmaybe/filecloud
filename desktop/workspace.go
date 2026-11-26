@@ -40,26 +40,33 @@ type choice struct {
 	Import   bool
 }
 type profile struct {
-	Device   string
-	Names    map[string]string
-	Paused   map[string]bool
-	Intents  map[string]choice
-	Activity []Activity
+	Device, Username, DeviceName string
+	LastSuccess                  map[string]string
+	Conflicts                    map[string][]Conflict
+	NotifyDone, MuteIssues       bool
+	Names                        map[string]string
+	Paused                       map[string]bool
+	Intents                      map[string]choice
+	Activity                     []Activity
 }
 type library struct{ LibraryId, DeviceId, Worktree, Phase string }
 type status struct {
 	LibraryId, Worktree, Pending string
 	Confirmation                 *struct{ Kind, CandidatePrefix string }
 	Deletion                     *struct{ Deleted, Tracked int64 }
+	Restore                      *RestoreImpact
 }
 type LibraryView struct {
 	ID, Name, Worktree, Phase, Pending, Problem string
 	Paused, Running                             bool
+	LastSuccess                                 string
+	Conflicts                                   []Conflict
 }
 type View struct {
 	DefaultTrashDays, DefaultHistoryDays                        int
 	Revision                                                    int
-	Server                                                      string
+	Server, Username, DeviceName, Version                       string
+	NotifyDone, MuteIssues                                      bool
 	SignedIn, CatalogSession, LogoutPending, CatalogFresh, More bool
 	Notice                                                      string
 	Libraries                                                   []LibraryView
@@ -88,6 +95,9 @@ type Workspace struct {
 	fresh                                     bool
 	closed                                    atomic.Bool
 	pick                                      func() (string, error)
+	restoreReview                             *RestoreImpact
+	openWeb                                   func(string) error
+	saveFile                                  func(string) (string, error)
 	open                                      func(string) error
 	notify                                    func(string)
 }
@@ -126,6 +136,7 @@ func (s *Workspace) loadProfile() error {
 	s.due = map[string]time.Time{}
 	s.delays = map[string]time.Duration{}
 	s.review = nil
+	s.restoreReview = nil
 	s.selectionID = ""
 	s.cursor = ""
 	s.defaultTrashDays, s.defaultHistoryDays = 0, 0
@@ -138,6 +149,8 @@ func (s *Workspace) loadProfile() error {
 	if err := os.MkdirAll(s.profileDir(), 0700); err != nil {
 		return err
 	}
+	s.data.LastSuccess = map[string]string{}
+	s.data.Conflicts = map[string][]Conflict{}
 	return loadJSON(filepath.Join(s.profileDir(), "workspace.json"), &s.data)
 }
 func (s *Workspace) profileDir() string { return filepath.Join(s.root, s.active.key()) }
@@ -214,7 +227,7 @@ func (s *Workspace) locked() bool {
 	return s.closed.Load() || s.active.LogoutPending || s.active.UserID == ""
 }
 func (s *Workspace) publish() {
-	v := &View{DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "", LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
+	v := &View{Version: version, Username: s.data.Username, DeviceName: s.data.DeviceName, NotifyDone: s.data.NotifyDone, MuteIssues: s.data.MuteIssues, DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "", LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
 	if prev := s.view.Load(); prev != nil {
 		v.Revision = prev.Revision + 1
 	}
@@ -240,7 +253,7 @@ func (s *Workspace) publish() {
 				b.Phase = "binding"
 				b.Worktree = c.Worktree
 			}
-			v.Libraries = append(v.Libraries, LibraryView{id, name, b.Worktree, b.Phase, s.states[id].Pending, s.problems[id], s.data.Paused[id], s.running == id})
+			v.Libraries = append(v.Libraries, LibraryView{ID: id, Name: name, Worktree: b.Worktree, Phase: b.Phase, Pending: s.states[id].Pending, Problem: s.problems[id], Paused: s.data.Paused[id], Running: s.running == id, LastSuccess: s.data.LastSuccess[id], Conflicts: slices.Clone(s.data.Conflicts[id])})
 		}
 		sort.Slice(v.Libraries, func(i, j int) bool {
 			a, b := v.Libraries[i], v.Libraries[j]
@@ -311,6 +324,7 @@ func (s *Workspace) Login(server, username, password, device string) error {
 	if err := saveJSON(filepath.Join(s.root, "account.json"), s.active); err != nil {
 		return err
 	}
+	s.data.Username, s.data.DeviceName = username, device
 	s.token = r.Session.AccessToken
 	s.notice = ""
 	if err := keyring.Set(secretService, s.active.key(), s.token); err != nil {

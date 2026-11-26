@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -19,7 +20,7 @@ import (
 func runMachine(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, build BuildInfo) error {
 	valid := len(args) > 0 && slices.Contains([]string{"version", "login", "logout"}, args[0])
 	if len(args) >= 2 && args[0] == "library" {
-		valid = slices.Contains([]string{"list", "create", "bindings", "bind", "unbind", "status"}, args[1]) || (len(args) >= 3 && args[1] == "history" && args[2] == "list")
+		valid = slices.Contains([]string{"list", "create", "bindings", "bind", "unbind", "status", "restore", "check-directory", "inspect"}, args[1]) || (len(args) >= 3 && args[1] == "history" && args[2] == "list")
 	}
 	if !valid {
 		return errors.New("unsupported machine command")
@@ -29,8 +30,35 @@ func runMachine(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		code := syncErrorCode(err)
 		return errors.Join(errors.New(code), json.NewEncoder(stdout).Encode(syncMessage{Type: "result", Outcome: "failed", Code: code}))
 	}
+	if len(args) >= 2 && args[0] == "library" && args[1] == "restore" {
+		return json.NewEncoder(stdout).Encode(struct{}{})
+	} // The durable impact is available through library status.
 	_, err := result.WriteTo(stdout)
 	return err
+}
+
+func checkBindingDirectory(args []string, out, stderr io.Writer) error {
+	flags := newFlagSet("library check-directory", stderr)
+	path := flags.String("worktree", "", "Local worktree directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *path == "" || flags.NArg() != 0 {
+		return errors.New("select a worktree directory")
+	}
+	root, err := openWorktreeRoot(*path, requireSupportedFilesystem)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	err = root.validateEmpty()
+	if err != nil && !errors.Is(err, errNonemptyWorktree) {
+		return err
+	}
+	return json.NewEncoder(out).Encode(struct {
+		Empty      bool
+		Filesystem string
+	}{err == nil, map[string]string{"linux": "ext4", "darwin": "APFS", "windows": "NTFS"}[runtime.GOOS]})
 }
 
 type localBinding struct {
@@ -95,9 +123,11 @@ func runLibraryBindings(ctx context.Context, args []string, out, stderr io.Write
 }
 
 var (
-	errSyncBusy         = errors.New("binding synchronization is already running")
-	errNonemptyWorktree = errors.New("local worktree is non-empty; local import requires --import-local (issue #8)")
-	errCannotImport     = errors.New("local and remote libraries are both non-empty; bind requires an empty worktree or empty remote library")
+	errSyncBusy          = errors.New("binding synchronization is already running")
+	errNonemptyWorktree  = errors.New("local worktree is non-empty; local import requires --import-local (issue #8)")
+	errSyncBeforeRestore = errors.New("worktree is not converged with Sync Base and Head; run sync first")
+	errDAVEditing        = errors.New("文档正在网络盘中编辑，本地修改已保留")
+	errCannotImport      = errors.New("local and remote libraries are both non-empty; bind requires an empty worktree or empty remote library")
 )
 
 type syncStream struct {
@@ -144,6 +174,12 @@ func syncErrorCode(err error) string {
 	var network net.Error
 	var transient *transientRemoteError
 	switch {
+	case errors.Is(err, errSyncBeforeRestore):
+		return "sync_first"
+	case errors.Is(err, errDAVEditing):
+		return "dav_locked"
+	case errors.Is(err, _errWrongRestorePrefix):
+		return "stale_candidate"
 	case errors.Is(err, errUnsupportedFilesystem):
 		return "unsupported_fs"
 	case errors.Is(err, errNonemptyWorktree):
