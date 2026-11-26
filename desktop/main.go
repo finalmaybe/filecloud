@@ -113,6 +113,7 @@ func run() error {
 		return app.Dialog.OpenFile().CanChooseFiles(false).CanChooseDirectories(true).AttachToWindow(win).SetTitle("选择工作目录").PromptForSingleSelection()
 	}
 	s.open = app.Browser.OpenFile
+	s.reveal = func(path string) error { return revealInManager(app, path) }
 	s.openWeb = app.Browser.OpenURL
 	s.saveFile = func(name string) (string, error) {
 		return app.Dialog.SaveFile().AttachToWindow(win).SetFilename(name).PromptForSingleSelection()

@@ -69,16 +69,16 @@ func (c *Catalog) getLibrarySize(w http.ResponseWriter, r *http.Request) {
 		h.writeBrowseError(w, err)
 		return
 	}
-	size, err := c.entrySize(ctx, owner, lib, root, make(map[string]*big.Int))
+	size, err := c.measureEntry(ctx, owner, lib, root, make(map[string]entryTotals))
 	if err != nil {
 		h.writeBrowseError(w, err)
 		return
 	}
 	h.writeJSON(w, http.StatusOK, struct {
-		RetCode int
-		Message string
-		Size    string
-	}{0, "success", size.String()})
+		RetCode     int
+		Message     string
+		Size, Items string
+	}{0, "success", size.bytes.String(), new(big.Int).Sub(size.items, big.NewInt(1)).String()})
 }
 
 func parseDirectoryQuery(raw string) (commit, path string, offset int, err error) {

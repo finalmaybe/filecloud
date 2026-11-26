@@ -26,6 +26,8 @@ import {
   dialog,
   date,
   pickRow,
+  menu,
+  type LibraryStats,
   type LibraryView,
   type View,
   type Icon,
@@ -82,6 +84,8 @@ function syncAction(l: LibraryView) {
     return btn("检查删除", () => mutate(() => reviewDelete(l)), "", "shield");
   if (l.Pending === "restore-confirmation")
     return btn("核对恢复", () => mutate(() => reviewRestore(l)), "", "history");
+  if (l.Problem === "auth_required")
+    return btn("重新登录", () => go("login"), "", "lock");
   const b = btn(
     l.Problem ? "立即重试" : "同步",
     () => mutate(() => api.RequestSync(l.ID)),
@@ -140,6 +144,26 @@ function drawSidebar() {
     n("footer", "", navBtn("settings", "设置", "settings"), account),
   );
 }
+function updateSessionWarning() {
+  document.querySelector(".session-warning")?.remove();
+  if (
+    view.CatalogSession &&
+    !libraries().some((l) => l.Problem === "auth_required")
+  )
+    return;
+  sidebar.after(
+    box(
+      "session-warning",
+      icon("lock", "orange"),
+      box(
+        "grow",
+        n("strong", "", "需要重新登录，本地文件已保留。"),
+        sub("登录后将再次检查原目录能否安全恢复同步。"),
+      ),
+      btn("重新登录", () => go("login"), "primary"),
+    ),
+  );
+}
 function recent(limit = 200) {
   const list = box("recent-list");
   for (const a of [...(view.Activity || [])].reverse().slice(0, limit)) {
@@ -174,7 +198,60 @@ function recent(limit = 200) {
   if (!list.childElementCount) list.append(sub("还没有本机同步活动。"));
   return list;
 }
-const sizes = new Map<string, { stamp: string; value: Promise<string> }>();
+const sizes = new Map<
+  string,
+  { stamp: string; value: Promise<LibraryStats> }
+>();
+function stats(l: LibraryView) {
+  const stamp =
+    [...(view.Activity || [])]
+      .reverse()
+      .find((a) => a.LibraryID === l.ID && a.Kind === "completed")?.Time || "";
+  let cached = sizes.get(l.ID);
+  if (!cached || cached.stamp !== stamp) {
+    cached = { stamp, value: api.LibraryStats(l.ID) };
+    sizes.set(l.ID, cached);
+  }
+  return cached.value;
+}
+async function fillSummaries(pane: HTMLElement, choose = false) {
+  for (const el of pane.querySelectorAll<HTMLElement>("[data-summary]")) {
+    if (!pane.isConnected) return;
+    const l = libraries().find((x) => x.ID === el.dataset.summary);
+    if (!l) continue;
+    try {
+      const s = await stats(l);
+      el.textContent = choose
+        ? s.Published
+          ? `${bytes(s.Size)} · 已发布版本`
+          : "尚未发布版本"
+        : [
+            bytes(s.Size),
+            s.Items ? `${Number(s.Items).toLocaleString()} 个项目` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+    } catch {
+      el.textContent = "资料库信息暂不可用";
+    }
+  }
+}
+function summary(l: LibraryView) {
+  const el = sub("正在读取…");
+  el.dataset.summary = l.ID;
+  return el;
+}
+function showIssue(l: LibraryView) {
+  selected = l.ID;
+  if (l.Pending.endsWith("-confirmation"))
+    return l.Pending === "delete-confirmation"
+      ? mutate(() => reviewDelete(l))
+      : mutate(() => reviewRestore(l));
+  if (l.Conflicts?.length) {
+    conflictTarget = l.Conflicts[0].Target;
+    go("conflicts");
+  } else go("attention");
+}
 function inspector(l: LibraryView) {
   const side = n("aside", "inspector");
   const bound = l.Phase === "bound";
@@ -192,8 +269,17 @@ function inspector(l: LibraryView) {
   const actions = box(
     "actions",
     ...(bound
-      ? [folderAction(l), syncAction(l)]
-      : [btn("连接文件夹", () => openBind(l), "primary", "folder")]),
+      ? [folderAction(l), libraryMenu(l, "更多 ⌄")]
+      : [
+          l.Phase === "binding"
+            ? btn(
+                "继续上次绑定",
+                () => mutate(() => api.RetryBinding(l.ID)),
+                "primary",
+                "folder",
+              )
+            : btn("连接文件夹", () => openBind(l), "primary", "folder"),
+        ]),
   );
   side.append(actions);
   if (l.Worktree)
@@ -207,24 +293,23 @@ function inspector(l: LibraryView) {
     side.append(
       section(
         "同步",
-        status(l),
-        btn(
-          l.Paused ? "继续自动检查" : "暂停后续同步",
-          () => mutate(() => api.SetPaused(l.ID, !l.Paused)),
-          "outline",
+        box(
+          "sync-controls",
+          status(l),
+          btn(
+            l.Paused ? "继续自动检查" : "暂停后续同步",
+            () => mutate(() => api.SetPaused(l.ID, !l.Paused)),
+            "outline",
+          ),
         ),
+        ...(l.Running ? [] : [syncAction(l)]),
         sub("暂停在当前轮次结束后生效。"),
       ),
     );
   const size = n("span", "", "正在读取…");
-  let cached = sizes.get(l.ID);
-  if (!cached || cached.stamp !== l.LastSuccess) {
-    cached = { stamp: l.LastSuccess, value: api.LibrarySize(l.ID).then(bytes) };
-    sizes.set(l.ID, cached);
-  }
-  void cached.value
+  void stats(l)
     .then((value) => {
-      size.textContent = value;
+      size.textContent = bytes(value.Size);
     })
     .catch(() => {
       size.textContent = "暂不可用";
@@ -256,38 +341,16 @@ function inspector(l: LibraryView) {
     );
   return side;
 }
-function libraryMenu(l: LibraryView) {
-  const menu = n("details", "row-menu"),
-    trigger = n("summary", "", "···");
-  trigger.setAttribute("aria-label", nameOf(l) + "的更多操作");
-  trigger.title = "更多操作";
-  menu.append(
-    trigger,
-    box(
-      "menu-items",
+function libraryMenu(l: LibraryView, caption = "···") {
+  return menu(
+    nameOf(l) + "的更多操作",
+    [
       btn("浏览文件", () => openDetail(l, "文件"), "menu-link", "file"),
       btn("版本历史", () => openDetail(l, "版本历史"), "menu-link", "history"),
       btn("资料库设置", () => openDetail(l, "设置"), "menu-link", "settings"),
-    ),
+    ],
+    caption,
   );
-  menu.ontoggle = () => {
-    if (menu.open)
-      document
-        .querySelectorAll<HTMLDetailsElement>(".row-menu[open]")
-        .forEach((other) => {
-          if (other !== menu) other.open = false;
-        });
-  };
-  menu.onkeydown = (e) => {
-    if (e.key === "Escape") {
-      menu.open = false;
-      trigger.focus();
-    }
-  };
-  menu.addEventListener("focusout", (e) => {
-    if (!menu.contains(e.relatedTarget as Node)) menu.open = false;
-  });
-  return menu;
 }
 function libraryPage() {
   const libs = libraries(),
@@ -366,25 +429,27 @@ function libraryPage() {
         box(
           "",
           n("strong", "", nameOf(l)),
-          sub(
-            l.Conflicts?.length
-              ? `${l.Conflicts.length} 份冲突副本待整理`
-              : l.Phase === "bound"
-                ? "已连接到此设备"
-                : l.Phase === "binding"
-                  ? "连接未完成"
-                  : "远端资料库",
-          ),
+          l.Deleted
+            ? sub(`${l.Deleted} 项删除待确认`)
+            : l.Conflicts?.length
+              ? sub(`${l.Conflicts.length} 份冲突副本待整理`)
+              : summary(l),
         ),
       ),
       n("span", "local-path", l.Worktree || "尚未连接到本机"),
       box(
         "row-state",
         status(l),
-        ...(l.LastSuccess ? [sub(date(l.LastSuccess))] : []),
+        ...(l.Running
+          ? [n("progress", "indeterminate")]
+          : l.LastSuccess && !attention(l)
+            ? [sub(date(l.LastSuccess))]
+            : []),
         ...(l.Phase === ""
-          ? [btn("连接文件夹", () => openBind(l), "link")]
-          : []),
+          ? [btn("连接文件夹", () => openBind(l))]
+          : attention(l)
+            ? [btn("查看", () => showIssue(l), "link")]
+            : []),
       ),
       libraryMenu(l),
     );
@@ -415,6 +480,7 @@ function libraryPage() {
     pane.append(sub("显示本机记录，远端资料库尚未刷新。"));
   pane.append(section("近期活动", recent(3)));
   main.replaceChildren(root);
+  void fillSummaries(root);
 }
 function activities() {
   const issues = page === "attention",
@@ -453,7 +519,11 @@ function activities() {
       ),
     );
   if (issues || activityTab === "进行中") {
-    const items = issues ? libs.filter(attention) : bound;
+    const items = issues
+      ? libs
+          .filter(attention)
+          .sort((a, b) => Number(b.ID === selected) - Number(a.ID === selected))
+      : bound;
     if (!items.length)
       pane.append(
         empty(
@@ -470,7 +540,9 @@ function activities() {
       if (l.Phase === "binding")
         actions.append(
           btn("继续上次绑定", () => mutate(() => api.RetryBinding(l.ID))),
-          btn("选择其他文件夹", () => openBind(l)),
+          ...(l.CanReselect
+            ? [btn("选择其他文件夹", () => openBind(l))]
+            : [sub("请先完成已开始的绑定。")]),
         );
       else if (l.Problem === "auth_required")
         actions.append(btn("重新登录", () => go("login"), "primary"));
@@ -483,17 +555,26 @@ function activities() {
             "outline",
           ),
         );
+      actions.append(libraryMenu(l));
       pane.append(
         box(
-          "task",
+          "task" + (l.Running ? " selected" : ""),
           icon(ic, cls),
           box(
             "grow",
             n("strong", "", nameOf(l)),
             sub(
-              l.Problem === "offline" || l.Problem === "dav_locked"
-                ? "本地修改已保留"
-                : "最近成功同步 · " + date(l.LastSuccess),
+              l.Deleted
+                ? `${l.Deleted} 个路径待核对`
+                : l.Running && l.Scanned
+                  ? "已完成本地扫描"
+                  : l.Problem === "offline" ||
+                      l.Problem === "dav_locked" ||
+                      l.Problem === "retry_later"
+                    ? "本地修改已保留"
+                    : l.Paused
+                      ? "后续自动检查已暂停"
+                      : "最近成功同步 · " + date(l.LastSuccess),
             ),
           ),
           n("span", "", text),
@@ -558,8 +639,39 @@ function settings() {
       section(
         "通用",
         auto,
-        row("device", "关闭窗口后继续在后台运行", "已开启"),
-        row("sync", "自动检查", "每轮结束 30 秒后"),
+        row(
+          "device",
+          "关闭窗口后继续在后台运行",
+          btn(
+            "已开启",
+            () =>
+              dialog(
+                "后台运行",
+                [
+                  sub(
+                    "关闭主窗口后，Filecloud 继续同步。要停止后台运行，请在快捷菜单选择「退出 Filecloud」。",
+                  ),
+                ],
+                "",
+                { cancel: "关闭" },
+              ),
+            "bare",
+            "chevron",
+          ),
+        ),
+        row(
+          "sync",
+          "自动检查",
+          btn(
+            "每轮结束 30 秒后",
+            () => {
+              activityTab = "进行中";
+              go("activity");
+            },
+            "bare",
+            "chevron",
+          ),
+        ),
         sub("暂停自动检查不会中断当前轮次。"),
       ),
     );
@@ -576,16 +688,16 @@ function settings() {
     p.append(
       section(
         "账号",
-        row(
-          "device",
-          view.Username || "当前账号",
+        box(
+          "setting-row",
+          n("span", "avatar", (view.Username || "F").slice(0, 1).toUpperCase()),
+          n("strong", "grow", view.Username || "当前账号"),
           btn("管理登录", () => go("login")),
         ),
-        row("folder", "服务器", n("span", "value", view.Server)),
-        row("device", "设备", view.DeviceName || "此设备"),
         row(
-          "lock",
-          "会话",
+          "folder",
+          "服务器",
+          n("span", "setting-value", view.Server),
           btn(
             "退出账号",
             async () => {
@@ -601,34 +713,42 @@ function settings() {
             "link",
           ),
         ),
+        row(
+          "device",
+          "设备",
+          n("span", "setting-value", view.DeviceName || "此设备"),
+        ),
       ),
     );
   if (general || prefTab === "通知") {
     const notification = section("通知");
     p.append(notification);
-    void prefs.NotificationsAllowed().then((ok) => {
-      for (const [label, on, isIssues] of [
-        ["需要处理时通知我", !view.MuteIssues, true],
-        ["同步完成通知", view.NotifyDone, false],
-      ] as const)
-        notification.append(
-          row(
-            "bell",
-            label,
-            sw(label, on && ok, async (enable) => {
-              if (enable && !ok && !(await prefs.EnableNotifications())) {
-                tell("系统未允许通知，仍可在「需要处理」查看。");
-                return;
-              }
-              await api.NotificationPolicy(
-                isIssues ? enable : !view.MuteIssues,
-                isIssues ? view.NotifyDone : enable,
-              );
-              await update();
-            }),
-          ),
-        );
-    });
+    void prefs
+      .NotificationsAllowed()
+      .then((ok) => {
+        for (const [label, on, isIssues] of [
+          ["需要处理时通知我", !view.MuteIssues, true],
+          ["同步完成通知", view.NotifyDone, false],
+        ] as const)
+          notification.append(
+            row(
+              "bell",
+              label,
+              sw(label, on && ok, async (enable) => {
+                if (enable && !ok && !(await prefs.EnableNotifications())) {
+                  tell("系统未允许通知，仍可在「需要处理」查看。");
+                  return;
+                }
+                await api.NotificationPolicy(
+                  isIssues ? enable : !view.MuteIssues,
+                  isIssues ? view.NotifyDone : enable,
+                );
+                await update();
+              }),
+            ),
+          );
+      })
+      .catch((e) => notification.append(sub(errorText(e))));
   }
   if (general || prefTab === "诊断") {
     const l = libsSelected();
@@ -677,21 +797,47 @@ function settings() {
             tell("已复制诊断摘要（不含账号、路径或凭据）。");
           }),
         ),
-        row("info", "关于 Filecloud", view.Version),
         row(
-          "power",
-          "结束后台运行",
-          btn("退出应用", async () => {
-            if (
-              await dialog(
-                "退出 Filecloud？",
-                [sub("等待当前轮次完成后退出。仅关闭窗口可继续后台同步。")],
-                "退出应用",
-              )
-            )
-              await prefs.Quit();
-          }),
+          "info",
+          "关于 Filecloud",
+          btn(
+            "版本信息",
+            () =>
+              dialog(
+                "关于 Filecloud",
+                [
+                  line("桌面客户端版本", view.Version),
+                  sub("本机同步使用随包的同版本 filecloud-client。"),
+                ],
+                "",
+                { cancel: "关闭" },
+              ),
+            "bare",
+            "chevron",
+          ),
         ),
+        ...(!general
+          ? [
+              row(
+                "power",
+                "结束后台运行",
+                btn("退出应用", async () => {
+                  if (
+                    await dialog(
+                      "退出 Filecloud？",
+                      [
+                        sub(
+                          "等待当前轮次完成后退出。仅关闭窗口可继续后台同步。",
+                        ),
+                      ],
+                      "退出应用",
+                    )
+                  )
+                    await prefs.Quit();
+                }),
+              ),
+            ]
+          : []),
       ),
     );
   }
@@ -704,18 +850,22 @@ function choose() {
   const libs = libraries().filter((l) => l.Phase !== "bound"),
     chosen = libs.find((l) => l.ID === selected) || libs[0],
     list = box("choices");
-  for (const l of libs)
-    list.append(
-      btn(
-        nameOf(l),
-        () => {
-          selected = l.ID;
-          render();
-        },
-        chosen === l ? "choice selected" : "choice",
-        "folder",
-      ),
+  for (const l of libs) {
+    const b = btn(
+      nameOf(l),
+      () => {
+        selected = l.ID;
+        render();
+      },
+      chosen === l ? "choice selected" : "choice",
     );
+    b.setAttribute("aria-pressed", String(l === chosen));
+    b.replaceChildren(
+      icon("folder", "blue"),
+      box("grow", n("strong", "", nameOf(l)), summary(l)),
+    );
+    list.append(b);
+  }
   if (!libs.length) list.append(sub("还没有可连接的资料库。"));
   const next = btn(
     "继续",
@@ -753,6 +903,7 @@ function choose() {
       ),
     ),
   );
+  void fillSummaries(list, true);
 }
 let compactWindow: boolean | undefined;
 function render() {
@@ -801,13 +952,31 @@ function render() {
     return;
   }
   if (!view.SignedIn || page === "login") {
-    const first = !view.SignedIn;
+    const first = !view.SignedIn,
+      refreshBindings = libraries().filter(
+        (l) => l.Phase === "bound" && l.Problem === "auth_required",
+      );
     main.replaceChildren(
       login(
         view,
         async () => {
           page = first ? "choose" : "libraries";
+          let issue = "";
+          for (const l of refreshBindings) {
+            try {
+              await api.RetryBinding(l.ID);
+            } catch (e) {
+              selected = l.ID;
+              detailTab = "设置";
+              page = "detail";
+              issue =
+                errorText(e) +
+                " 原目录已保留。先保全本地修改，安全解绑后使用新的空文件夹恢复绑定。";
+              break;
+            }
+          }
           await update(true);
+          if (issue) tell(issue);
         },
         !first ? () => go("settings") : undefined,
       ),
@@ -819,24 +988,7 @@ function render() {
     return;
   }
   drawSidebar();
-  if (
-    !view.CatalogSession ||
-    libraries().some((l) => l.Problem === "auth_required")
-  ) {
-    const expired = box(
-      "session-warning",
-      icon("lock", "orange"),
-      box(
-        "grow",
-        n("strong", "", "需要重新登录，本地文件已保留。"),
-        sub(
-          "登录后请在资料库设置中刷新绑定凭据；若无法安全刷新，请保留原目录并选择新的空文件夹。",
-        ),
-      ),
-      btn("重新登录", () => go("login"), "primary"),
-    );
-    sidebar.after(expired);
-  }
+  updateSessionWarning();
   if (page === "conflicts") {
     const l = libsSelected(),
       pair = l?.Conflicts?.find((p) => p.Target === conflictTarget);
@@ -858,7 +1010,9 @@ function render() {
           l,
           detailTab,
           view,
-          (t) => openDetail(l, t),
+          (t) => {
+            detailTab = t;
+          },
           () => go("libraries"),
           async () => {
             page = "libraries";
@@ -880,7 +1034,7 @@ async function update(force = false) {
   if (
     !force &&
     !sessionChanged &&
-    (document.querySelector("dialog[open]") ||
+    (document.querySelector("dialog[open],details.row-menu[open]") ||
       document.activeElement?.matches("input,select"))
   )
     return;
@@ -911,14 +1065,21 @@ async function update(force = false) {
       );
       match?.focus({ preventScroll: true });
     }
-  } else if (!sidebar.hidden) drawSidebar();
+  } else if (!sidebar.hidden) {
+    drawSidebar();
+    updateSessionWarning();
+  }
   if (notice) tell(notice);
 }
 Events.On("quick-open", (e: { data: unknown }) => {
   if (document.querySelector("dialog[open]")) return;
   const target = e.data as { page: string; id: string };
   if (["libraries", "attention", "settings"].includes(target.page)) {
-    if (target.id) selected = target.id;
+    if (target.id) {
+      selected = target.id;
+      libTab = "全部";
+      term = "";
+    }
     go(target.page);
   }
 });

@@ -8,6 +8,7 @@ export interface Activity {
 }
 
 export interface BindingCheck {
+    "LocalItems": number;
     "Path": string;
     "Filesystem": string;
     "Empty": boolean;
@@ -18,6 +19,7 @@ export interface Commit {
     "CommitId": string;
     "CreatedAt": string;
     "Message": string;
+    "DeviceId": string;
     "Parents": string[] | null;
 }
 
@@ -60,6 +62,12 @@ export interface LibraryInfo {
     "HistoryDays": number;
 }
 
+export interface LibraryStats {
+    "Size": string;
+    "Items": string;
+    "Published": boolean;
+}
+
 export interface LibraryView {
     "ID": string;
     "Name": string;
@@ -69,6 +77,10 @@ export interface LibraryView {
     "Problem": string;
     "Paused": boolean;
     "Running": boolean;
+    "Scanned": boolean;
+    "CanReselect": boolean;
+    "Deleted": number;
+    "DeviceId": string;
     "LastSuccess": string;
     "Conflicts": Conflict[] | null;
 }
@@ -89,6 +101,8 @@ export interface Preview {
     "Media": string;
     "Content": string;
     "Notice": string;
+    "ModifiedAt": string;
+    "Size": number;
 }
 
 export interface RestoreImpact {

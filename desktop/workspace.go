@@ -58,7 +58,9 @@ type status struct {
 }
 type LibraryView struct {
 	ID, Name, Worktree, Phase, Pending, Problem string
-	Paused, Running                             bool
+	Paused, Running, Scanned, CanReselect       bool
+	Deleted                                     int64
+	DeviceId                                    string
 	LastSuccess                                 string
 	Conflicts                                   []Conflict
 }
@@ -92,11 +94,12 @@ type Workspace struct {
 	selectionID                               string
 	createID, createName                      string
 	defaultTrashDays, defaultHistoryDays      int
-	fresh                                     bool
+	fresh, scanDone, catalogExpired           bool
 	closed                                    atomic.Bool
 	pick                                      func() (string, error)
 	restoreReview                             *RestoreImpact
 	openWeb                                   func(string) error
+	reveal                                    func(string) error
 	saveFile                                  func(string) (string, error)
 	open                                      func(string) error
 	notify                                    func(string)
@@ -141,6 +144,7 @@ func (s *Workspace) loadProfile() error {
 	s.cursor = ""
 	s.defaultTrashDays, s.defaultHistoryDays = 0, 0
 	s.fresh = false
+	s.catalogExpired = false
 	s.createID = ""
 	s.running = ""
 	if s.active.UserID == "" {
@@ -227,7 +231,7 @@ func (s *Workspace) locked() bool {
 	return s.closed.Load() || s.active.LogoutPending || s.active.UserID == ""
 }
 func (s *Workspace) publish() {
-	v := &View{Version: version, Username: s.data.Username, DeviceName: s.data.DeviceName, NotifyDone: s.data.NotifyDone, MuteIssues: s.data.MuteIssues, DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "", LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
+	v := &View{Version: version, Username: s.data.Username, DeviceName: s.data.DeviceName, NotifyDone: s.data.NotifyDone, MuteIssues: s.data.MuteIssues, DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "" && !s.catalogExpired, LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
 	if prev := s.view.Load(); prev != nil {
 		v.Revision = prev.Revision + 1
 	}
@@ -253,7 +257,11 @@ func (s *Workspace) publish() {
 				b.Phase = "binding"
 				b.Worktree = c.Worktree
 			}
-			v.Libraries = append(v.Libraries, LibraryView{ID: id, Name: name, Worktree: b.Worktree, Phase: b.Phase, Pending: s.states[id].Pending, Problem: s.problems[id], Paused: s.data.Paused[id], Running: s.running == id, LastSuccess: s.data.LastSuccess[id], Conflicts: slices.Clone(s.data.Conflicts[id])})
+			var deleted int64
+			if d := s.states[id].Deletion; d != nil {
+				deleted = d.Deleted
+			}
+			v.Libraries = append(v.Libraries, LibraryView{CanReselect: s.bound[id].Phase == "", Scanned: s.running == id && s.scanDone, Deleted: deleted, DeviceId: b.DeviceId, ID: id, Name: name, Worktree: b.Worktree, Phase: b.Phase, Pending: s.states[id].Pending, Problem: s.problems[id], Paused: s.data.Paused[id], Running: s.running == id, LastSuccess: s.data.LastSuccess[id], Conflicts: slices.Clone(s.data.Conflicts[id])})
 		}
 		sort.Slice(v.Libraries, func(i, j int) bool {
 			a, b := v.Libraries[i], v.Libraries[j]
@@ -405,6 +413,9 @@ func (s *Workspace) catalog(more bool) error {
 		NextPageToken    string
 	}
 	if err := s.query(&r, s.token, args...); err != nil {
+		if errors.Is(err, commandError("auth_required")) {
+			s.catalogExpired = true
+		}
 		s.fresh = false
 		return err
 	}
@@ -421,6 +432,7 @@ func (s *Workspace) catalog(more bool) error {
 	s.defaultTrashDays, s.defaultHistoryDays = r.DefaultRetention.TrashDays, r.DefaultRetention.HistoryDays
 	s.cursor = r.NextPageToken
 	s.fresh = true
+	s.catalogExpired = false
 	return s.save()
 }
 func (s *Workspace) CreateLibrary(name string, trashDays, historyDays int) error {

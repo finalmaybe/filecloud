@@ -27,7 +27,9 @@ async function refresh() {
   if (!v || v.Revision === revision) return;
   revision = v.Revision;
   const libs = v.Libraries || [],
-    bound = libs.filter((l) => l.Phase === "bound"),
+    bound = libs
+      .filter((l) => l.Phase === "bound")
+      .sort((a, b) => Number(b.Running) - Number(a.Running)),
     paused = bound.length > 0 && bound.every((l) => l.Paused),
     issues = libs.filter(attention).length;
   const pause = btn(
@@ -60,7 +62,7 @@ async function refresh() {
     ),
     box(
       "quick-libs",
-      ...bound.slice(0, 2).map((l) => {
+      ...bound.map((l) => {
         const b = btn(
           l.Name,
           () => show("libraries", l.ID),

@@ -86,6 +86,7 @@ Authorization: Bearer <opaque-token>
 |---|---|
 | `GET /content` | `CommitId`、`Path` 固定已发布快照中的文件。返回验证过的文件字节作为附件，支持范围读取。 |
 | `POST /file-history/{CommitId}/restore` | `Path`、`AnchorCommitId` 固定文件与已核对的当前版本。返回 `Head`；内容与修改时间相同则不生成新版本。 |
+| `GET /restore-location` | `Path` 是拟恢复的资料库相对路径。只读检查返回 `Available`，与实际恢复使用相同的大小写折叠及沿途目录规则。结果只对应检查时的 Head，恢复时再次核对。 |
 | `GET /trash` | 可选 `Before`（上一页的 `Next`）。返回最多 100 条 `Entries`（`ID`、`Path`、`Kind`、`DeletedAt`、`ExpiresAt`）与 `Next`，0 表示末页。 |
 | `POST /trash/{id}/restore` | `Destination` 为可选的资料库相对路径；占用返回 `409/3008`，成功返回 `204`。`Version` 记录只放回版本列表。 |
 | `POST /retention` | JSON：`TrashDays`、`HistoryDays`，0 跟随默认，历史另支持 -1 永久。`Apply:false` 预览 `Count`、`RestoredRecords`、`Bytes` 和 `Token`。保存时发送相同天数、`Apply:true`、`Confirm`；服务端重算影响，确认不匹配返回 `412`。 |
@@ -202,7 +203,7 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 ## GetLibrarySize
 
-`GET /v1/libraries/{LibraryId}/size?CommitId=…` 返回 `RetCode`、`Message` 和 `Size`。`Size` 为该已发布快照根目录的逻辑字节总数（十进制字符串），包含全部子目录，每个文件路径分别计数，不叠加其他版本或回收站。网页先显示资料库列表，再按各行的 `HeadCommitId` 读取大小；没有 Head 的库直接显示 `0 B`。
+`GET /v1/libraries/{LibraryId}/size?CommitId=…` 返回 `RetCode`、`Message`、`Size` 与 `Items`。`Items` 是快照内文件和子目录的路径总数（十进制字符串，不含根目录）。`Size` 为该已发布快照根目录的逻辑字节总数（十进制字符串），包含全部子目录，每个文件路径分别计数，不叠加其他版本或回收站。网页先显示资料库列表，再按各行的 `HeadCommitId` 读取大小；没有 Head 的库直接显示 `0 B`。
 
 ## GetFileHistory
 

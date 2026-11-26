@@ -85,13 +85,13 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 	}
 	end := min(offset+50, len(d.Entries))
 	v.Entries = make([]SnapshotEntry, 0, end-offset)
-	sizes := make(map[string]*big.Int)
+	sizes := make(map[string]entryTotals)
 	for _, entry := range d.Entries[offset:end] {
-		size, err := c.entrySize(ctx, owner, lib, entry, sizes)
+		size, err := c.measureEntry(ctx, owner, lib, entry, sizes)
 		if err != nil {
 			return v, err
 		}
-		v.Entries = append(v.Entries, SnapshotEntry{Name: entry.Name, Type: entry.Type, ModifiedAt: entry.ModifiedAt, Size: size.String()})
+		v.Entries = append(v.Entries, SnapshotEntry{Name: entry.Name, Type: entry.Type, ModifiedAt: entry.ModifiedAt, Size: size.bytes.String()})
 	}
 	if end < len(d.Entries) {
 		v.Next = end
@@ -100,31 +100,34 @@ func (c *Catalog) Snapshot(ctx context.Context, owner, lib, commit, filePath str
 }
 
 // Shared objects need only one read per page, but contribute once for each path.
-func (c *Catalog) entrySize(ctx context.Context, owner, lib string, entry object.DirectoryEntry, sizes map[string]*big.Int) (*big.Int, error) {
+type entryTotals struct{ bytes, items *big.Int }
+
+func (c *Catalog) measureEntry(ctx context.Context, owner, lib string, entry object.DirectoryEntry, sizes map[string]entryTotals) (entryTotals, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return entryTotals{}, err
 	}
-	if size := sizes[entry.ID]; size != nil {
+	if size, ok := sizes[entry.ID]; ok {
 		return size, nil
 	}
-	size := new(big.Int)
+	size := entryTotals{new(big.Int), big.NewInt(1)}
 	if entry.Type == "File" {
 		file, err := c.openEntryFile(ctx, owner, lib, entry)
 		if err != nil {
-			return nil, err
+			return entryTotals{}, err
 		}
-		size.SetInt64(file.Size)
+		size.bytes.SetInt64(file.Size)
 	} else {
 		dir, err := c.directory(ctx, owner, lib, entry.ID)
 		if err != nil {
-			return nil, err
+			return entryTotals{}, err
 		}
 		for _, child := range dir.Entries {
-			childSize, err := c.entrySize(ctx, owner, lib, child, sizes)
+			childSize, err := c.measureEntry(ctx, owner, lib, child, sizes)
 			if err != nil {
-				return nil, err
+				return entryTotals{}, err
 			}
-			size.Add(size, childSize)
+			size.bytes.Add(size.bytes, childSize.bytes)
+			size.items.Add(size.items, childSize.items)
 		}
 	}
 	sizes[entry.ID] = size

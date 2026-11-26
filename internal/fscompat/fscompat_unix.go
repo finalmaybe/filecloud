@@ -40,6 +40,10 @@ const (
 	LOCK_UN             = unix.LOCK_UN
 )
 
+func CheckDirectoryWriteAccess(dir *os.File) error {
+	return unix.Faccessat(int(dir.Fd()), ".", unix.W_OK|unix.X_OK, 0)
+}
+
 func Open(path string, flags int, mode uint32) (int, error) { return unix.Open(path, flags, mode) }
 func Openat(dirfd int, path string, flags int, mode uint32) (int, error) {
 	return unix.Openat(dirfd, path, flags, mode)

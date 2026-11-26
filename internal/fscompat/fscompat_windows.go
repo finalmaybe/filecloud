@@ -65,6 +65,9 @@ type _fileBasicInfo struct {
 	FileAttributes                                          uint32
 }
 
+// Directory handles returned by Open already have GENERIC_READ and GENERIC_WRITE.
+func CheckDirectoryWriteAccess(*os.File) error { return nil }
+
 func Open(path string, flags int, mode uint32) (int, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {

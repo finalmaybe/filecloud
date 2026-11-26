@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/auth"
@@ -14,7 +15,7 @@ import (
 
 func (c *Catalog) registerDesktopOperations(mux *http.ServeMux) {
 	// These endpoints accept API sessions only; the console retains its cookie/form handlers.
-	for pattern, handle := range map[string]http.HandlerFunc{"GET /v1/libraries/{LibraryId}/content": c.snapshotContent, "POST /v1/libraries/{LibraryId}/file-history/{CommitId}/restore": c.restoreVersionAPI, "GET /v1/libraries/{LibraryId}/trash": c.trashPage, "POST /v1/libraries/{LibraryId}/trash/{id}/restore": c.restoreTrashAPI, "POST /v1/libraries/{LibraryId}/retention": c.retentionAPI} {
+	for pattern, handle := range map[string]http.HandlerFunc{"GET /v1/libraries/{LibraryId}/content": c.snapshotContent, "POST /v1/libraries/{LibraryId}/file-history/{CommitId}/restore": c.restoreVersionAPI, "GET /v1/libraries/{LibraryId}/trash": c.trashPage, "GET /v1/libraries/{LibraryId}/restore-location": c.restoreLocation, "POST /v1/libraries/{LibraryId}/trash/{id}/restore": c.restoreTrashAPI, "POST /v1/libraries/{LibraryId}/retention": c.retentionAPI} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if !validUUID(r.PathValue("LibraryId")) {
 				c.core.invalid(w)
@@ -98,6 +99,48 @@ func (c *Catalog) trashPage(w http.ResponseWriter, r *http.Request) {
 		page.Entries = append(page.Entries, item{v.ID, v.Path, v.Kind, v.DeletedAt, v.ExpiresAt})
 	}
 	c.core.writeJSON(w, 200, page)
+}
+
+func (c *Catalog) restoreLocation(w http.ResponseWriter, r *http.Request) {
+	dest := r.URL.Query().Get("Path")
+	if !object.ValidPath(dest) || dest == "." {
+		c.core.invalid(w)
+		return
+	}
+	owner, _ := auth.UserID(r.Context())
+	lib := r.PathValue("LibraryId")
+	ctx, release, err := c.admit(r.Context(), owner)
+	if err != nil {
+		c.core.writeBrowseError(w, err)
+		return
+	}
+	defer release()
+	done := c.core.store.UseLibrary(owner, lib)
+	defer done()
+	item, err := c.core.store.GetLibrary(ctx, owner, lib)
+	if err != nil {
+		c.core.writeBrowseError(w, err)
+		return
+	}
+	if item.HeadCommitID == nil {
+		c.core.writeBrowseError(w, storage.ErrLibraryNotFound)
+		return
+	}
+	commit, err := c.core.readHistoryCommitObject(ctx, owner, lib, *item.HeadCommitID)
+	if err != nil {
+		c.core.writeBrowseError(w, err)
+		return
+	}
+	_, err = c.placeTrashPath(ctx, owner, lib, commit.Root, strings.Split(dest, "/"), object.DirectoryEntry{}, c.core.now(), true)
+	if err != nil && !errors.Is(err, ErrRestoreOccupied) {
+		c.changeError(w, err)
+		return
+	}
+	c.core.writeJSON(w, 200, struct {
+		RetCode   int
+		Message   string
+		Available bool
+	}{0, "success", err == nil})
 }
 
 func (c *Catalog) restoreTrashAPI(w http.ResponseWriter, r *http.Request) {

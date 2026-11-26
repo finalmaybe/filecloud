@@ -50,7 +50,14 @@ type LibraryInfo struct {
 	HeadCommitId string
 	Policy
 }
-type Preview struct{ Media, Content, Notice string }
+type Preview struct {
+	Media, Content, Notice, ModifiedAt string
+	Size                               int64
+}
+type LibraryStats struct {
+	Size, Items string
+	Published   bool
+}
 
 var desktopHTTP = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
@@ -102,10 +109,24 @@ func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) 
 		}
 	}
 	switch res.StatusCode {
-	case 401, 403:
+	case 401:
+		s.mu.Lock()
+		if token == s.token && !s.catalogExpired {
+			s.catalogExpired = true
+			s.publish()
+		}
+		s.mu.Unlock()
 		return nil, commandError("auth_required")
+	case 403:
+		return nil, errors.New("此账号无权访问所选资料库。")
 	case 404, 405:
-		return nil, errors.New("此资料库、版本或服务端接口不可用。请刷新，或检查服务端版本。")
+		if endpoint == "restore-location" {
+			return nil, commandError("check_unavailable")
+		}
+		if res.StatusCode == 405 || !strings.Contains(res.Header.Get("Content-Type"), "application/json") {
+			return nil, errors.New("当前服务端未提供此接口。请更新 filecloud-server 并重启服务后重试。")
+		}
+		return nil, errors.New("找不到所选资料库、路径或版本，请刷新资料库后重试。")
 	case 409:
 		return nil, errors.New("恢复位置已有同名项目，请改名或取消。原有内容已保留。")
 	case 410:
@@ -145,17 +166,22 @@ func (s *Workspace) LibraryInfo(id string) (LibraryInfo, error) {
 	err := s.catalogJSON(id, "", nil, nil, &v)
 	return v.Library, err
 }
-func (s *Workspace) LibrarySize(id string) (string, error) {
+func (s *Workspace) LibraryStats(id string) (LibraryStats, error) {
 	info, err := s.LibraryInfo(id)
 	if err != nil {
-		return "", err
+		return LibraryStats{}, err
 	}
 	if info.HeadCommitId == "" {
-		return "0", nil
+		return LibraryStats{Size: "0", Items: "0"}, nil
 	}
-	var v struct{ Size string }
+	v := LibraryStats{Published: true}
 	err = s.catalogJSON(id, "size", url.Values{"CommitId": {info.HeadCommitId}}, nil, &v)
-	return v.Size, err
+	return v, err
+}
+func (s *Workspace) CheckRestoreLocation(id, destination string) (bool, error) {
+	var v struct{ Available bool }
+	err := s.catalogJSON(id, "restore-location", url.Values{"Path": {destination}}, nil, &v)
+	return v.Available, err
 }
 
 func (s *Workspace) FileVersions(id, commit, file, cursor string) (VersionsPage, error) {

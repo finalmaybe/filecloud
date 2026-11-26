@@ -6,9 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"time"
 )
 
+func (s *Workspace) CheckServer(server string) error {
+	return s.query(nil, "", "check-server", "--server", strings.TrimSpace(server))
+}
+
 type BindingCheck struct {
+	LocalItems       int
 	Path, Filesystem string
 	Empty, Published bool
 }
@@ -130,8 +137,59 @@ func localPreview(worktree, name string) (Preview, error) {
 		return Preview{}, err
 	}
 	defer f.Close()
-	return readPreview(f, name, info.Size())
+	v, err := readPreview(f, name, info.Size())
+	v.Size = info.Size()
+	v.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+	return v, err
 }
+
+// Resolve the actual target before handing it to a native application.
+func (s *Workspace) localTarget(id, name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b := s.bound[id]
+	if s.locked() || b.Phase != "bound" {
+		return "", errBinding
+	}
+	local, err := filepath.Localize(name)
+	if err != nil {
+		return "", errors.New("无效的文件位置。")
+	}
+	file, err := filepath.EvalSymlinks(filepath.Join(b.Worktree, local))
+	if err != nil {
+		return "", errors.New("此项目在本机不可用，请先同步或检查本地文件夹。")
+	}
+	rel, err := filepath.Rel(b.Worktree, file)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", errors.New("此项目不在工作目录内。")
+	}
+	return file, nil
+}
+func (s *Workspace) RevealLocal(id, name string) error {
+	file, err := s.localTarget(id, name)
+	if err != nil {
+		return err
+	}
+	return s.reveal(file)
+}
+func (s *Workspace) OpenLocalDocument(id, name string) error {
+	file, err := s.localTarget(id, name)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml", ".toml", ".ini", ".xml":
+		if info.Mode().IsRegular() && info.Mode().Perm()&0111 == 0 {
+			return s.open(file)
+		}
+	}
+	return errors.New("此类型请使用快速预览，或在文件管理器中显示。")
+}
+
 func (s *Workspace) DismissConflict(id string, pair Conflict) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

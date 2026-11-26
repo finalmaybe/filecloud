@@ -25,6 +25,14 @@ export function CheckDirectory(id: string): $CancellablePromise<$models.BindingC
     return $Call.ByName("main.Workspace.CheckDirectory", id);
 }
 
+export function CheckRestoreLocation(id: string, destination: string): $CancellablePromise<boolean> {
+    return $Call.ByName("main.Workspace.CheckRestoreLocation", id, destination);
+}
+
+export function CheckServer(server: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.CheckServer", server);
+}
+
 export function ConfirmDeletion(v: $models.Review): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.ConfirmDeletion", v);
 }
@@ -69,8 +77,8 @@ export function LibraryInfo(id: string): $CancellablePromise<$models.LibraryInfo
     return $Call.ByName("main.Workspace.LibraryInfo", id);
 }
 
-export function LibrarySize(id: string): $CancellablePromise<string> {
-    return $Call.ByName("main.Workspace.LibrarySize", id);
+export function LibraryStats(id: string): $CancellablePromise<$models.LibraryStats> {
+    return $Call.ByName("main.Workspace.LibraryStats", id);
 }
 
 export function LocalPreview(id: string, name: string): $CancellablePromise<$models.Preview> {
@@ -91,6 +99,10 @@ export function MergeSource(id: string, commit: string): $CancellablePromise<$mo
 
 export function NotificationPolicy(issues: boolean, done: boolean): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.NotificationPolicy", issues, done);
+}
+
+export function OpenLocalDocument(id: string, name: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.OpenLocalDocument", id, name);
 }
 
 export function OpenWorktree(id: string): $CancellablePromise<void> {
@@ -135,6 +147,10 @@ export function Retention(id: string, p: $models.Policy, apply: boolean, confirm
 
 export function RetryBinding(id: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.RetryBinding", id);
+}
+
+export function RevealLocal(id: string, name: string): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.RevealLocal", id, name);
 }
 
 export function ReviewDeletion(id: string): $CancellablePromise<$models.Review | null> {

@@ -862,10 +862,10 @@ dialog > .actions > button {
   overflow-wrap: anywhere;
 }
 .file-cols {
-  grid-template-columns: minmax(110px, 1.8fr) 1fr 0.65fr 0.8fr;
+  grid-template-columns: minmax(110px, 1.8fr) 1fr 0.65fr 0.8fr 28px;
 }
 .trash-cols {
-  grid-template-columns: minmax(110px, 1.4fr) 0.9fr 1fr 1fr;
+  grid-template-columns: minmax(110px, 1.4fr) 0.9fr 1fr 1fr 28px;
 }
 .file-row {
   min-height: 48px;
@@ -886,6 +886,17 @@ dialog > .actions > button {
   align-items: flex-start;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+.file-grid .file-row .row-menu {
+  align-self: flex-end;
+}
+.file-grid .file-row > .identity {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.file-grid .file-row > .identity > .icon {
+  width: 36px;
+  height: 36px;
 }
 .file-grid .file-row > span {
   font-size: 12px;
@@ -965,7 +976,7 @@ dialog > .actions > button {
   border-radius: 7px;
   margin: 1px 0;
 }
-.tree-row > .bare:first-child {
+.tree-row > .tree-name {
   justify-content: flex-start;
   flex: 1;
   text-align: left;
@@ -1073,6 +1084,308 @@ dialog.wide {
   border-radius: 10px;
   padding: 5px 8px 5px 14px;
   box-shadow: 0 4px 20px #30220316;
+}
+.detail-host {
+  height: 100%;
+}
+.detail-heading,
+.file-panel-head,
+.viewer-bar,
+.sync-controls,
+.version-line,
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.detail-heading {
+  margin-bottom: 15px;
+}
+.detail-heading .sub {
+  font-size: 14px;
+}
+.detail-heading > .bare,
+.file-panel-head > .row-menu {
+  margin-left: auto;
+}
+.detail-heading h1 > .icon {
+  width: 28px;
+  height: 28px;
+}
+.history-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-crumb > .icon {
+  width: 14px;
+}
+.red {
+  color: #cc3431;
+}
+.settings .section {
+  margin-top: 16px;
+}
+.settings .section > h3 {
+  margin-bottom: 3px;
+}
+.settings .setting-row {
+  padding: 4px 0;
+  min-height: 38px;
+}
+.settings .setting-row .bare > .icon {
+  order: 1;
+}
+.setting-value {
+  flex: 3;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.settings .pagehead {
+  margin-bottom: 8px;
+}
+.conflict-choice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  min-height: 50px;
+}
+.compare-note {
+  background: var(--canvas);
+  padding: 10px;
+  border-radius: 8px;
+}
+.row-state progress {
+  display: block;
+  height: 6px;
+  width: min(150px, 90%);
+  margin: 5px 0 0 23px;
+  accent-color: var(--blue);
+}
+.review-sheet::backdrop {
+  background: #191b2612;
+}
+@media (min-width: 1200px) {
+  body:has(.review-sheet[open]) #main {
+    margin-right: 440px;
+  }
+}
+.connection-status:empty {
+  display: none;
+}
+.connection-status {
+  font-size: 13px;
+  color: var(--sub);
+}
+.bind-checks .metadata {
+  font-size: 14px;
+}
+.choice > .grow {
+  text-align: left;
+}
+.sync-controls {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.actions > .row-menu > summary {
+  font: inherit;
+  border: 1px solid #cbcbd1;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+.row-state:has(> button) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.task.selected {
+  background: var(--selected);
+}
+.task .row-menu {
+  margin-left: auto;
+}
+.view-modes button.active,
+.trash-tools .segments button.active {
+  background: var(--selected);
+  color: var(--blue);
+}
+.view-modes .icon {
+  width: 16px;
+}
+.version-line {
+  display: flex;
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.version-line > .icon {
+  width: 16px;
+}
+.version-line.selected {
+  background: var(--selected);
+}
+.timeline .tag {
+  display: inline-block;
+  margin-left: 8px;
+}
+.timeline .sources {
+  padding: 4px 0;
+  color: var(--sub);
+}
+.tree-children {
+  margin-left: 14px;
+}
+.tree-row {
+  justify-content: flex-start;
+}
+.expander > .icon {
+  width: 14px;
+}
+.expander[aria-expanded="true"] > .icon {
+  transform: rotate(90deg);
+}
+.tree-name {
+  justify-content: flex-start;
+  text-align: left;
+}
+.tree-name:only-child {
+  margin-left: 30px;
+}
+.selection-mark {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border: 1px solid #aeb2ba;
+  border-radius: 4px;
+}
+.selected .selection-mark {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+.selected .selection-mark:after {
+  content: "✓";
+  font-size: 12px;
+}
+.record-action {
+  font-size: 12px;
+  min-height: 26px;
+  margin-left: 5px;
+}
+.review-sheet .group .line:last-child {
+  border-bottom: 0;
+}
+.quick-head .sub,
+.quick-libs .quick-item > .icon {
+  color: var(--blue);
+}
+.trash-tools {
+  justify-content: space-between;
+}
+.inspector > .field {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.inspector > h3 {
+  margin-top: 18px;
+}
+.inspector > h2 + .inspector-head {
+  margin-top: 14px;
+}
+.period select {
+  width: auto;
+}
+.period > .sub {
+  text-align: right;
+}
+.review-sheet {
+  position: fixed;
+  inset: 16px 16px 16px auto;
+  margin: auto 0;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+.review-sheet .dialog-body > .section + .section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.viewer {
+  width: min(900px, calc(100% - 32px));
+  padding: 0;
+}
+.viewer-bar {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 10px;
+}
+.viewer-bar strong {
+  overflow-wrap: anywhere;
+}
+.viewer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.viewer-stage {
+  padding: 10px;
+  overflow: auto;
+}
+.viewer-stage > .preview {
+  max-height: 62vh;
+  overflow: auto;
+}
+.viewer > p {
+  text-align: center;
+  padding: 4px 10px 10px;
+}
+.viewer .pdf-page canvas {
+  width: auto;
+  max-width: none;
+  margin: 0 auto;
+}
+.page-number {
+  width: 4em;
+}
+.numbered-text {
+  display: flex;
+  min-width: max-content;
+}
+.preview .numbered-text pre {
+  white-space: pre;
+  overflow-wrap: normal;
+  border-radius: 0;
+  line-height: 1.65;
+}
+.preview .line-numbers {
+  color: var(--sub);
+  border-right: 1px solid var(--line);
+  user-select: none;
+  text-align: right;
+}
+.preview .text-content {
+  flex: 1;
+}
+.conflict-list .choice {
+  text-align: left;
+}
+.compare .file-panel-head {
+  padding-block: 8px;
+}
+.compare .diff {
+  margin-top: 8px;
+}
+.compare ~ .actions > button:last-child {
+  margin-left: auto;
+}
+.settings .setting-row > .avatar {
+  margin-inline: 0;
 }
 @media (max-width: 1180px) {
   #sidebar {
@@ -1197,9 +1510,10 @@ dialog.wide {
   }
   .trash-cols,
   .file-cols {
-    grid-template-columns: 1.3fr 1fr;
+    grid-template-columns: minmax(90px, 1.3fr) minmax(65px, 1fr) 22px;
   }
-  .file-cols > :nth-child(n + 3),
+  .file-cols > :nth-child(3),
+  .file-cols > :nth-child(4),
   .trash-cols > :nth-child(2),
   .trash-cols > :nth-child(3) {
     display: none;
@@ -1248,6 +1562,65 @@ dialog.wide {
 }
 .compare > .section + section .changed {
   background: #fff0d5;
+}
+.wizard-dialog .wizard-grid {
+  max-height: calc(100dvh - 80px);
+}
+.wizard-dialog .wizard-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wizard-dialog .steps,
+.wizard-dialog .actions {
+  flex: none;
+}
+.wizard-dialog .wizard-fields {
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+.wizard-dialog .actions {
+  margin-top: 8px;
+}
+.wizard-dialog .section {
+  margin-top: 12px;
+}
+.wizard-dialog .metadata {
+  margin: 5px 0;
+}
+.first-run .wizard-fields {
+  overflow: auto;
+  min-height: 0;
+}
+.wizard-fields .feedback {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  body:has(.first-run) dialog.wizard-dialog {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    margin: 0;
+    border-radius: 0;
+  }
+  body:has(.first-run) .wizard-dialog .wizard {
+    border-radius: 0;
+    height: 100%;
+    box-shadow: none;
+  }
+  body:has(.first-run) .wizard-dialog .window-title {
+    display: none;
+  }
+  body:has(.first-run) .wizard-dialog .wizard-grid {
+    height: 100%;
+    max-height: 100%;
+  }
+  .wizard-dialog .wizard-body > .actions {
+    margin-top: auto;
+  }
 }
 dialog.wizard-dialog {
   width: min(830px, calc(100% - 32px));

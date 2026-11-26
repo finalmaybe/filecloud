@@ -13,12 +13,15 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/mingming-cn/filecloud/internal/fscompat"
 )
 
 // Machine mode returns either the complete normal response or a redacted error envelope.
 // Streaming sync has a separate JSONL contract; never buffer watch output.
 func runMachine(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, build BuildInfo) error {
-	valid := len(args) > 0 && slices.Contains([]string{"version", "login", "logout"}, args[0])
+	valid := len(args) > 0 && slices.Contains([]string{"version", "check-server", "login", "logout"}, args[0])
 	if len(args) >= 2 && args[0] == "library" {
 		valid = slices.Contains([]string{"list", "create", "bindings", "bind", "unbind", "status", "restore", "check-directory", "inspect"}, args[1]) || (len(args) >= 3 && args[1] == "history" && args[2] == "list")
 	}
@@ -37,6 +40,38 @@ func runMachine(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 	return err
 }
 
+// Probe without credentials before the user submits an account password.
+func checkServer(ctx context.Context, args []string, out, stderr io.Writer) error {
+	flags := newFlagSet("check-server", stderr)
+	raw := flags.String("server", "", "Filecloud server URL")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	base, err := validateServerURL(*raw)
+	if err != nil || flags.NArg() != 0 {
+		return errors.New("invalid server address")
+	}
+	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probe, http.MethodGet, base.JoinPath("healthz").String(), nil)
+	if err != nil {
+		return err
+	}
+	res, err := noRedirectClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	var reply struct {
+		RetCode *int
+		Message string
+	}
+	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&reply) != nil || reply.RetCode == nil || *reply.RetCode != 0 || reply.Message != "success" {
+		return errors.New("service not ready")
+	}
+	return json.NewEncoder(out).Encode(struct{}{})
+}
+
 func checkBindingDirectory(args []string, out, stderr io.Writer) error {
 	flags := newFlagSet("library check-directory", stderr)
 	path := flags.String("worktree", "", "Local worktree directory")
@@ -51,14 +86,21 @@ func checkBindingDirectory(args []string, out, stderr io.Writer) error {
 		return err
 	}
 	defer root.Close()
-	err = root.validateEmpty()
-	if err != nil && !errors.Is(err, errNonemptyWorktree) {
+	if err := root.validateIdentity(); err != nil {
+		return err
+	}
+	if err := fscompat.CheckDirectoryWriteAccess(root.directory); err != nil {
+		return err
+	}
+	names, err := readDirectoryNames(root.directory, -1)
+	if err != nil {
 		return err
 	}
 	return json.NewEncoder(out).Encode(struct {
 		Empty      bool
 		Filesystem string
-	}{err == nil, map[string]string{"linux": "ext4", "darwin": "APFS", "windows": "NTFS"}[runtime.GOOS]})
+		LocalItems int
+	}{len(names) == 0, map[string]string{"linux": "ext4", "darwin": "APFS", "windows": "NTFS"}[runtime.GOOS], len(names)})
 }
 
 type localBinding struct {
@@ -174,6 +216,8 @@ func syncErrorCode(err error) string {
 	var network net.Error
 	var transient *transientRemoteError
 	switch {
+	case errors.Is(err, os.ErrPermission):
+		return "permission_denied"
 	case errors.Is(err, errSyncBeforeRestore):
 		return "sync_first"
 	case errors.Is(err, errDAVEditing):

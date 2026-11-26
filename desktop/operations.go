@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"slices"
 	"time"
 )
@@ -165,12 +165,12 @@ func (s *Workspace) ConfirmDeletion(v Review) error {
 	defer s.mu.Unlock()
 	defer s.publish()
 	if s.locked() || s.review == nil || *s.review != v {
-		return errors.New("请重新核对删除影响。")
+		return commandError("stale_candidate")
 	}
 	current, err := s.reviewDeletion(v.ID)
 	s.review = nil
 	if err != nil || *current != v {
-		return errors.New("变更已更新，请重新核对。")
+		return commandError("stale_candidate")
 	}
 	return s.syncOne(v.ID, v.Candidate)
 }
@@ -196,39 +196,52 @@ func (s *Workspace) syncOne(id, prefix string) error {
 		return errors.New("此资料库需要先核对待办。")
 	}
 	s.running = id
+	s.scanDone = false
 	s.publish()
 	defer func() { s.running = ""; s.publish() }()
 	args := []string{"library", "sync", "--output=jsonl", "--conflict-paths", "--client-dir", s.clientDir(), "--worktree", b.Worktree}
 	if prefix != "" {
 		args = append(args, "--confirm-delete", prefix)
 	}
-	data, runErr := s.exec("", args...)
-	dec := json.NewDecoder(bytes.NewReader(data))
+	cmd := exec.Command(s.cli, args...)
+	hideConsole(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	runErr := cmd.Start()
 	var result, code string
 	var scanned, conflictAdded bool
-	for {
-		var msg struct{ Type, Outcome, Code, Source, Target string }
-		err := dec.Decode(&msg)
-		if err == io.EOF {
-			break
-		}
-		if err != nil || result != "" {
-			result = ""
-			break
-		}
-		switch msg.Type {
-		case "conflict_saved":
-			item := Conflict{msg.Source, msg.Target}
-			if !slices.Contains(s.data.Conflicts[id], item) {
-				s.data.Conflicts[id] = append(s.data.Conflicts[id], item)
-				conflictAdded = true
-				s.activity(id, "conflict_saved", time.Now())
+	if runErr == nil {
+		dec := json.NewDecoder(stdout)
+		for {
+			var msg struct{ Type, Outcome, Code, Source, Target string }
+			err := dec.Decode(&msg)
+			if err == io.EOF {
+				break
 			}
-		case "scan_completed":
-			scanned = true
-		case "result":
-			result, code = msg.Outcome, msg.Code
+			if err != nil || result != "" {
+				result = ""
+				break
+			}
+			switch msg.Type {
+			case "conflict_saved":
+				item := Conflict{msg.Source, msg.Target}
+				if !slices.Contains(s.data.Conflicts[id], item) {
+					s.data.Conflicts[id] = append(s.data.Conflicts[id], item)
+					conflictAdded = true
+					s.activity(id, "conflict_saved", time.Now())
+				}
+			case "scan_completed":
+				scanned = true
+				s.scanDone = true
+				s.publish()
+			case "result":
+				result, code = msg.Outcome, msg.Code
+			}
 		}
+		stdout.Close()
+		runErr = cmd.Wait()
 	}
 	switch {
 	case runErr == nil && (result == "ok" || result == "no_change"):
@@ -318,8 +331,8 @@ func (s *Workspace) tick(now time.Time) {
 }
 
 type Commit struct {
-	CommitId, CreatedAt, Message string
-	Parents                      []string
+	CommitId, CreatedAt, Message, DeviceId string
+	Parents                                []string
 }
 type HistoryPage struct {
 	Commits       []Commit

@@ -147,14 +147,16 @@ func (c *Catalog) RestoreTrash(ctx context.Context, owner, lib string, id int64,
 	if err != nil {
 		return err
 	}
-	root, err := c.insertTrashPath(ctx, owner, lib, commit.Root, strings.Split(destination, "/"), t.Entry, now)
+	root, err := c.placeTrashPath(ctx, owner, lib, commit.Root, strings.Split(destination, "/"), t.Entry, now, false)
 	if err != nil {
 		return err
 	}
 	_, err = c.publishWebRoot(ctx, owner, current, root, "从回收站恢复", storage.HeadChange{RestoreID: id, Destination: destination})
 	return err
 }
-func (c *Catalog) insertTrashPath(ctx context.Context, owner, lib, root string, parts []string, entry object.DirectoryEntry, now time.Time) (string, error) {
+
+// A preflight walks the same case-folded path as restore, without writing directory objects.
+func (c *Catalog) placeTrashPath(ctx context.Context, owner, lib, root string, parts []string, entry object.DirectoryEntry, now time.Time, checkOnly bool) (string, error) {
 	var dir object.Directory
 	var err error
 	if root != "" {
@@ -185,12 +187,15 @@ func (c *Catalog) insertTrashPath(ctx context.Context, owner, lib, root string, 
 				return "", ErrRestoreOccupied
 			}
 		}
-		child.ID, err = c.insertTrashPath(ctx, owner, lib, child.ID, parts[1:], entry, now)
+		child.ID, err = c.placeTrashPath(ctx, owner, lib, child.ID, parts[1:], entry, now, checkOnly)
 		if err != nil {
 			return "", err
 		}
 	} else if exists {
 		return "", ErrRestoreOccupied
+	}
+	if checkOnly {
+		return "", nil
 	}
 	if !exists {
 		dir.Entries = append(dir.Entries, object.DirectoryEntry{})

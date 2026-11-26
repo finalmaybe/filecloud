@@ -2,9 +2,11 @@
 
 三端共用 Wails v3.1.0、TypeScript 和同版本的 `filecloud-client` 子程序；无需开启服务端 Web 控制台。界面和交互以 [16 页桌面设计稿](../docs/design/desktop-mockups/filecloud-desktop-design.pdf) 为准；[首版 PRD](../docs/design/desktop-client-prd.md) 与[技术方案](../docs/design/desktop-client-architecture.md)记录原始基础。本目录独立于根 Go module，不影响服务器构建。当前是测试资料库用的开发预览：见[三端实测结果和 Linux 1B 发布阻塞](../docs/acceptance/desktop-preview.md)。
 
+[按设计稿逐页核对的差异、实测截图与验收范围](../docs/acceptance/desktop-design-parity.md)。
+
 ## 试用
 
-在「连接你的 Filecloud」登录 → 选择或新建资料库 → 选择本地文件夹，核对目录检查结果后连接。首次导入非空目录要另行勾选，远端已有版本时请选择空目录。只支持本机 ext4、APFS、固定 NTFS；不要让两套客户端状态管理同一个工作目录。
+在「连接你的 Filecloud」登录 → 选择或新建资料库 → 选择本地文件夹，核对文件系统、读写权限、目录内容和同步方向后连接。地址步骤只访问 `/healthz`，确认服务可用后才提交账号密码。首次导入非空目录要另行勾选，远端已有版本时请选择空目录。只支持本机 ext4、APFS、固定 NTFS；不要让两套客户端状态管理同一个工作目录。
 
 - 已绑定资料库可立即同步、暂停后续轮次、打开工作目录和浏览分页主线历史。默认每轮结束后等待 30 秒；关窗保持调度，再次从系统入口启动会唤回已有窗口。「退出应用」才停止调度。
 - 「需要处理 → 检查删除」列出工作目录、删除计数、占比和候选码。取消不会发布。遇到冲突时，可并排对照实际保留的两份内容，标记已整理不会删除文件。

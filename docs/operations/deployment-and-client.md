@@ -636,7 +636,7 @@ filecloud-client library restore \
 - `library status` 在等待确认时额外给出 `Confirmation.Kind`、`Confirmation.CandidatePrefix`。核对时应保存当时所见候选及计数，不能用刚刷新的前缀代替用户确认。
 - `library sync --output=jsonl` 保留既有目录及确认参数，每行一条 JSON。实际完成初始扫描时发 `scan_completed`；终态 `result` 携带 `outcome`（`ok`、`no_change`、`needs_confirmation`、`failed`）和可选 `code`。进程中断且没有终态时，应重新读 `status`。
 - `library history list --output=json` 返回主线响应（含 `Commits`、`NextPageToken`），不与 `--include-merged` 同用。`library unbind --if-idle` 只在取得锁且没有待处理状态时解绑。
-- `filecloud-client --machine` 前缀用于桌面的一次性查询/操作（`login`、`logout`、`version`，以及 `library` 的 `list/create/bindings/bind/unbind/status/history list`）。成功时保持子命令原响应，失败时 stdout 返回脱敏 `result` 错误对象并以非零状态退出；不能套用到 `watch`。登录成功的响应仍含敏感凭据，不应写进诊断日志。
+- `filecloud-client --machine` 前缀用于桌面的一次性查询/操作（`check-server`、`login`、`logout`、`version`，以及 `library` 的 `list/create/inspect/check-directory/bindings/bind/unbind/status/restore/history list`）。`check-server --server URL` 匿名检查 `/healthz`，不提交账号；`library check-directory --worktree PATH` 只读检查文件系统、目录读写权限和本层项目数，不建立绑定。成功时保持子命令原响应，失败时 stdout 返回脱敏 `result` 错误对象并以非零状态退出；不能套用到 `watch`。登录成功的响应仍含敏感凭据，不应写进诊断日志。
 
 ## 11. 解除绑定和注销
 

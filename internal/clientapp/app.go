@@ -40,7 +40,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	command := args[0]
 	switch command {
-	case "version", "login", "logout", "library":
+	case "version", "check-server", "login", "logout", "library":
 	default:
 		return serverapp.Run(ctx, "filecloud-client", args, stdin, stdout, stderr, serverBuildInfo(build))
 	}
@@ -64,6 +64,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			Commit    string
 			BuildDate string
 		}{Version: build.Version, Commit: build.Commit, BuildDate: build.BuildDate})
+	case "check-server":
+		return checkServer(ctx, args[1:], stdout, stderr)
 	case "login":
 		return runLogin(ctx, args[1:], stdin, stdout, stderr)
 	case "logout":

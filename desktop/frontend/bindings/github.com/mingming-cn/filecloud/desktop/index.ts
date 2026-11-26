@@ -18,6 +18,7 @@ export type {
     FileVersion,
     HistoryPage,
     LibraryInfo,
+    LibraryStats,
     LibraryView,
     Policy,
     PolicyImpact,

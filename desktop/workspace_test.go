@@ -57,6 +57,7 @@ func TestDesktopTwoDevices(t *testing.T) {
 	makeDevice := func(n string) *Workspace {
 		s, err := newWorkspace(filepath.Join(root, n), cli, build.Version, build.Commit)
 		must(t, err)
+		must(t, s.CheckServer("http://"+addr))
 		must(t, s.Login("http://"+addr, "desktop-test", pass, n))
 		return s
 	}
@@ -73,7 +74,15 @@ func TestDesktopTwoDevices(t *testing.T) {
 		s.pick = func() (string, error) { return path, nil }
 		p, err := s.PickDirectory(id)
 		must(t, err)
+		probe := filepath.Join(path, "check.txt")
+		must(t, os.WriteFile(probe, []byte("existing"), 0600))
 		check, err := s.CheckDirectory(id)
+		must(t, err)
+		if check.Empty || check.LocalItems != 1 || check.Published != (s == b) {
+			t.Fatal("directory import/download branch did not match actual state")
+		}
+		must(t, os.Remove(probe))
+		check, err = s.CheckDirectory(id)
 		must(t, err)
 		if check.Path != path || !check.Empty || check.Filesystem == "" {
 			t.Fatal("incorrect directory preflight")
@@ -141,6 +150,11 @@ func TestDesktopTwoDevices(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(pb, "0")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("confirmed deletion not received")
 	}
+	totals, err := a.LibraryStats(id)
+	must(t, err)
+	if !totals.Published || totals.Items != "9" {
+		t.Fatalf("incorrect published item count: %s", totals.Items)
+	}
 	h, err := a.History(id, "")
 	must(t, err)
 	if len(h.Commits) < 2 {
@@ -187,10 +201,22 @@ func TestDesktopTwoDevices(t *testing.T) {
 		t.Fatal("missing deleted file")
 	}
 	entry := bin.Entries[0]
+	for target, want := range map[string]bool{"0": false, "0/child": false, "new/child": true} {
+		got, err := a.CheckRestoreLocation(id, target)
+		must(t, err)
+		if got != want {
+			t.Fatal("incorrect restore preflight")
+		}
+	}
 	if err := a.RestoreTrash(id, entry.ID, "0"); err == nil {
 		t.Fatal("trash restore replaced existing file")
 	}
 	must(t, a.RestoreTrash(id, entry.ID, "renamed"))
+	free, err := a.CheckRestoreLocation(id, "RENAMED")
+	must(t, err)
+	if free {
+		t.Fatal("case-folded collision was marked available")
+	}
 	policy := Policy{TrashDays: 30, HistoryDays: 1}
 	change, err := a.Retention(id, policy, false, "")
 	must(t, err)
@@ -253,6 +279,29 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+func TestLocalDocumentAndReveal(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	must(t, err)
+	s := &Workspace{active: account{UserID: "owner"}, bound: map[string]library{"lib": {Phase: "bound", Worktree: dir}}}
+	var opened string
+	s.open = func(p string) error { opened = p; return nil }
+	s.reveal = s.open
+	for _, name := range []string{"note.md", "app.sh"} {
+		must(t, os.WriteFile(filepath.Join(dir, name), []byte("test"), 0600))
+	}
+	must(t, s.OpenLocalDocument("lib", "note.md"))
+	if opened != filepath.Join(dir, "note.md") {
+		t.Fatal("wrong document")
+	}
+	if s.OpenLocalDocument("lib", "app.sh") == nil || s.RevealLocal("lib", "../outside") == nil {
+		t.Fatal("accepted unsupported or external target")
+	}
+	must(t, s.RevealLocal("lib", "app.sh"))
+	if opened != filepath.Join(dir, "app.sh") {
+		t.Fatal("wrong reveal target")
+	}
+}
+
 func TestActivityRetention(t *testing.T) {
 	s := &Workspace{}
 	for i := range 240 {
