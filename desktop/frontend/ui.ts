@@ -138,9 +138,13 @@ const labels: Record<string, string> = {
   no_change: "本轮同步无变化",
   completed: "同步完成",
   scan_completed: "已完成本地扫描",
-  conflict_saved: "已保留冲突副本",
+  conflict_saved: "已保留冲突文件",
   import_required: "此目录已有文件。请核对首次导入，或选择空文件夹。",
-  no_common_base: "本地与远端没有共同基线。请选择新的空文件夹。",
+  no_common_base: "请选择「和已有文件夹同步」，或选择空文件夹。",
+  merge_name_collision:
+    "本地文件夹和资料库中有仅大小写不同的名称。请先改名，再同步。",
+  merge_history_unavailable:
+    "无法核对资料库的历史版本。请保留已有文件夹，选择新的空文件夹同步。",
   delete_confirmation: "等待删除确认",
   stale_candidate: "确认已失效，请重新核对。",
   permission_denied: "没有读写权限，请选择可读写的本机文件夹。",
@@ -179,12 +183,12 @@ export function state(l: LibraryView): [Icon, string, string] {
       describe(l.Pending.endsWith("-confirmation") ? l.Pending : l.Problem),
       "orange",
     ];
-  if (l.Phase === "binding") return ["issue", "绑定未完成", "orange"];
+  if (l.Phase === "binding") return ["issue", "同步设置未完成", "orange"];
   if (l.Phase !== "bound") return ["minus", "未连接", ""];
   if (l.Paused) return ["pause", "自动检查已暂停", ""];
   if (l.Pending && l.Pending !== "none")
     return ["sync", describe(l.Pending), "blue"];
-  if (l.Conflicts?.length) return ["shield", "已保留冲突副本", "blue"];
+  if (l.Conflicts?.length) return ["shield", "已保留冲突文件", "blue"];
   if (l.LastSuccess) return ["check", "上次同步成功", "green"];
   return ["folder", "已连接", "blue"];
 }

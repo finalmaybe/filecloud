@@ -14,7 +14,16 @@ func (s *Workspace) CheckServer(server string) error {
 	return s.query(nil, "", "check-server", "--server", strings.TrimSpace(server))
 }
 
+type FolderChanges struct {
+	Count int
+	Paths []string
+}
+type FolderMerge struct {
+	Identical                  bool
+	Upload, Download, Conflict FolderChanges
+}
 type BindingCheck struct {
+	Merge            *FolderMerge
 	LocalItems       int
 	Path, Filesystem string
 	Empty, Published bool
@@ -26,6 +35,7 @@ func (s *Workspace) CheckDirectory(id string) (BindingCheck, error) {
 	if s.locked() || s.token == "" || s.selectionID != id || s.selection.Worktree == "" {
 		return BindingCheck{}, errBinding
 	}
+	s.selection.MergeCandidate = ""
 	v := BindingCheck{Path: s.selection.Worktree}
 	if err := s.query(&v, "", "library", "check-directory", "--worktree", v.Path); err != nil {
 		return v, err
@@ -35,6 +45,17 @@ func (s *Workspace) CheckDirectory(id string) (BindingCheck, error) {
 		return v, err
 	}
 	v.Published = info.Library.HeadCommitId != ""
+	if v.Published && !v.Empty {
+		var preview struct {
+			FolderMerge
+			Candidate string
+		}
+		if err := s.query(&preview, s.token, append(s.bindArgs(id, v.Path, s.data.Device), "--preview-merge")...); err != nil {
+			return v, err
+		}
+		v.Merge = &preview.FolderMerge
+		s.selection.MergeCandidate = preview.Candidate
+	}
 	return v, nil
 }
 

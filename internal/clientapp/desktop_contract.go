@@ -228,6 +228,10 @@ func syncErrorCode(err error) string {
 		return "unsupported_fs"
 	case errors.Is(err, errNonemptyWorktree):
 		return "import_required"
+	case errors.Is(err, errMergeNameCollision):
+		return "merge_name_collision"
+	case errors.Is(err, errMergeBaseUnavailable):
+		return "merge_history_unavailable"
 	case errors.Is(err, errCannotImport):
 		return "no_common_base"
 	case errors.As(err, &del):

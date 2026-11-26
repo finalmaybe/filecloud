@@ -13,8 +13,8 @@ export function AppPasswords(id: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.AppPasswords", id);
 }
 
-export function Bind(id: string, path: string, allowImport: boolean): $CancellablePromise<void> {
-    return $Call.ByName("main.Workspace.Bind", id, path, allowImport);
+export function Bind(id: string, path: string, confirmLocal: boolean): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.Bind", id, path, confirmLocal);
 }
 
 export function CancelReview(): $CancellablePromise<void> {

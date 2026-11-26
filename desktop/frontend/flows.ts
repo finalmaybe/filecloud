@@ -206,16 +206,20 @@ export async function bindLibrary(l: LibraryView) {
   const state: { check?: BindingCheck } = {},
     location = n("span", "", "尚未选择"),
     checks = box("bind-checks"),
-    consent = toggle("导入现有本地文件", false);
+    consent = toggle("导入现有本地文件", false),
+    merge = toggle("和已有文件夹同步", false);
   const steps = ["选择资料库", "本机文件夹", "确认"];
   const valid = () =>
     !!state.check &&
-    (state.check.Empty || (!state.check.Published && consent.input.checked));
+    (state.check.Empty ||
+      (state.check.Merge
+        ? merge.input.checked
+        : !state.check.Published && consent.input.checked));
   const pick = btn(
     "选择本地文件夹",
     async () => {
       state.check = undefined;
-      consent.input.checked = false;
+      consent.input.checked = merge.input.checked = false;
       checks.replaceChildren();
       location.textContent = "尚未选择";
       refresh();
@@ -226,7 +230,6 @@ export async function bindLibrary(l: LibraryView) {
       try {
         const c = await api.CheckDirectory(l.ID);
         state.check = c;
-        const blocked = !c.Empty && c.Published;
         checks.replaceChildren(
           box(
             "metadata",
@@ -240,21 +243,47 @@ export async function bindLibrary(l: LibraryView) {
           ),
           box("metadata", icon("check", "green"), "具备读写权限"),
         );
-        if (blocked) {
+        if (c.Merge) {
+          const m = c.Merge;
           checks.append(
-            n("strong", "orange", "请选择一个空文件夹"),
             sub(
-              "本地已有文件，资料库已发布过版本，尚未建立同步基线。请使用新的空文件夹下载资料库，再整理本地内容。",
+              m.Identical
+                ? "本地文件夹和资料库一致，无需重新下载。"
+                : "本地文件夹和资料库中的文件将合并。两边内容不同时，远端文件保留原名，本地内容保留为冲突文件。",
             ),
           );
+          if (
+            !m.Identical &&
+            !m.Upload.Count &&
+            !m.Download.Count &&
+            !m.Conflict.Count
+          )
+            checks.append(sub("文件内容相同，将同步修改时间。"));
+          for (const [label, group] of [
+            ["上传", m.Upload],
+            ["下载", m.Download],
+            ["冲突文件", m.Conflict],
+          ] as const) {
+            if (!group.Count) continue;
+            const rows = n(
+              "details",
+              "",
+              n("summary", "", `${label} · ${group.Count} 项`),
+            );
+            for (const name of group.Paths || []) rows.append(sub(name));
+            if (group.Count > (group.Paths?.length || 0))
+              rows.append(sub("仅显示前 50 项。"));
+            checks.append(rows);
+          }
+          checks.append(merge.label);
           pick.textContent = "选择其他文件夹";
         } else {
           checks.append(
             section(
-              "连接结果",
+              "同步该资料库",
               sub(
                 c.Published
-                  ? "资料库文件 → 此文件夹。连接后将下载资料库中的文件。"
+                  ? "资料库中的文件将下载到此文件夹。"
                   : c.Empty
                     ? "双方均为空，将创建初始空版本。"
                     : "此文件夹 → 全新资料库。首次同步将导入本地内容。",
@@ -277,22 +306,11 @@ export async function bindLibrary(l: LibraryView) {
     const d = checks.closest("dialog");
     if (!d) return;
     d.querySelectorAll(".steps>div").forEach((s, i) =>
-      s.classList.toggle(
-        "current",
-        i ===
-          (state.check && (state.check.Empty || !state.check.Published)
-            ? 2
-            : 1),
-      ),
+      s.classList.toggle("current", i === (state.check ? 2 : 1)),
     );
-    const blocked = state.check?.Published && !state.check.Empty;
-    d.querySelector(".wizard-intro h2")!.textContent = blocked
-      ? "请选择一个空文件夹"
-      : "连接本机文件夹";
-    d.querySelector(".wizard-intro .icon")!.classList.toggle(
-      "orange",
-      !!blocked,
-    );
+    d.querySelector(".wizard-intro h2")!.textContent = state.check?.Merge
+      ? "和已有文件夹同步"
+      : "同步该资料库";
     pick.setAttribute("aria-label", pick.textContent || "选择本地文件夹");
     checks.dispatchEvent(new Event("input", { bubbles: true }));
   };
@@ -301,13 +319,13 @@ export async function bindLibrary(l: LibraryView) {
     line("本地文件夹", location, pick),
     checks,
   ];
-  const ok = await dialog("连接本机文件夹", body, "连接并同步", {
+  const ok = await dialog("同步该资料库", body, "同步", {
     cancel: "上一步",
     valid,
     frame: (actions) =>
       wizard(
-        "连接本机文件夹",
-        "将选定的资料库连接到本机的一个文件夹，用于存放并同步文件。",
+        "同步该资料库",
+        "选择用于同步该资料库的本地文件夹。",
         steps,
         1,
         body,
@@ -318,14 +336,15 @@ export async function bindLibrary(l: LibraryView) {
   await api.Bind(
     l.ID,
     state.check.Path,
-    !state.check.Empty && consent.input.checked,
+    !state.check.Empty &&
+      (state.check.Merge ? merge.input.checked : consent.input.checked),
   );
   return true;
 }
 export async function unbind(l: LibraryView) {
   if (
     await dialog(
-      "停止在此设备上同步？",
+      "解除同步？",
       [
         box(
           "inspector-head",
@@ -335,7 +354,7 @@ export async function unbind(l: LibraryView) {
         n("p", "", "本地文件和服务器中的资料库都会保留。"),
         sub("有未完成操作时，需要先完成当前任务。"),
       ],
-      "解除绑定",
+      "解除同步",
     )
   ) {
     await api.Unbind(l.ID);
@@ -522,7 +541,7 @@ export function compare(l: LibraryView, initial: Conflict, back: () => void) {
         box(
           "",
           n("h1", "", "已保留两个版本"),
-          sub("原文件与本地冲突副本都已保存，同步可继续。"),
+          sub("原文件与本地冲突文件都已保存，同步可继续。"),
         ),
       ),
       list,
@@ -565,7 +584,7 @@ export function compare(l: LibraryView, initial: Conflict, back: () => void) {
         body,
         name,
         panel: section(
-          side ? "你的冲突副本" : "资料库中的文件",
+          side ? "本地冲突文件" : "资料库中的文件",
           sub(side ? "保留的本地修改 · 本机内容" : "保留原文件名 · 本机内容"),
           box(
             "file-panel-head",
@@ -604,7 +623,7 @@ export function compare(l: LibraryView, initial: Conflict, back: () => void) {
         btn(
           (canOpenDocument(side ? pair.Target : pair.Source)
             ? "打开"
-            : "预览") + (side ? "冲突副本" : "原文件"),
+            : "预览") + (side ? "冲突文件" : "原文件"),
           async () => {
             const name = side ? pair.Target : pair.Source;
             if (canOpenDocument(name)) {

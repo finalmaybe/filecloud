@@ -266,6 +266,70 @@ func TestDesktopTwoDevices(t *testing.T) {
 	if _, err := b.RestoreVersion(id, past.CommitId, "1", info.HeadCommitId); err == nil {
 		t.Fatal("accepted stale file-version anchor")
 	}
+	// Removing a connection keeps the folder. Reusing an identical folder must not publish a version.
+	must(t, a.RequestSync(id))
+	a.pick = func() (string, error) { return pa, nil }
+	checkOriginal := func() *FolderMerge {
+		t.Helper()
+		p, err := a.PickDirectory(id)
+		must(t, err)
+		if p != pa {
+			t.Fatal("selected another directory")
+		}
+		check, err := a.CheckDirectory(id)
+		must(t, err)
+		if check.Merge == nil {
+			t.Fatal("no existing folder preview")
+		}
+		return check.Merge
+	}
+	must(t, a.Unbind(id))
+	if !checkOriginal().Identical {
+		t.Fatal("unchanged folder did not match")
+	}
+	if err := a.Bind(id, pa, false); err == nil {
+		t.Fatal("merged without consent")
+	}
+	must(t, a.Bind(id, pa, true))
+	unchanged, err := a.LibraryInfo(id)
+	must(t, err)
+	if unchanged.HeadCommitId != newHead {
+		t.Fatal("unchanged folder published a version")
+	}
+	must(t, a.Unbind(id))
+	must(t, b.RequestSync(id))
+	originalRemote, err := os.ReadFile(filepath.Join(pb, "1"))
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(pb, "remote-only"), []byte("from remote"), 0600))
+	must(t, b.RequestSync(id))
+	must(t, os.WriteFile(filepath.Join(pa, "1"), []byte("from local"), 0600))
+	must(t, os.WriteFile(filepath.Join(pa, "local-only"), []byte("new"), 0600))
+	if merge := checkOriginal(); merge.Upload.Count != 1 || merge.Download.Count != 1 || merge.Conflict.Count != 1 {
+		t.Fatalf("unexpected merge impact: %+v", merge)
+	}
+	must(t, os.WriteFile(filepath.Join(pa, "local-only"), []byte("revised"), 0600))
+	if err := a.Bind(id, pa, true); !errors.Is(err, commandError("stale_candidate")) {
+		t.Fatalf("accepted or misreported changed folder: %v", err)
+	}
+	if a.bound[id].Phase != "" {
+		t.Fatal("stale preview established a binding")
+	}
+	checkOriginal()
+	must(t, a.Bind(id, pa, true))
+	must(t, b.RequestSync(id))
+	pairs := a.Snapshot().Libraries[0].Conflicts
+	if len(pairs) != 1 || pairs[0].Source != "1" {
+		t.Fatalf("missing merge conflict: %+v", pairs)
+	}
+	for _, dir := range []string{pa, pb} {
+		for name, want := range map[string]string{"1": string(originalRemote), "local-only": "revised", "remote-only": "from remote", pairs[0].Target: "from local"} {
+			got, err := os.ReadFile(filepath.Join(dir, name))
+			must(t, err)
+			if string(got) != want {
+				t.Fatalf("wrong merged content at %s", name)
+			}
+		}
+	}
 	must(t, a.SetPaused(id, true))
 	must(t, a.Unbind(id))
 	must(t, a.Logout())

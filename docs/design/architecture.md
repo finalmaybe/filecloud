@@ -159,7 +159,7 @@ SQLite 每个连接必须启用 foreign keys；写事务配置有限 busy timeou
 - 本地为空、远端 Head 为空：客户端发布引用规范空 Directory 的初始 Commit，把它作为 Sync Base。空 Directory 的 ObjectId 固定；Commit 仍包含当前作者、设备和时间，因此不是全局固定 ID。
 - 本地非空、远端 Head 为空：只有显式 `library bind --import-local` 才允许继续；客户端先发布上述初始空 Commit，再以它为 parent 发布本地候选。
 - 本地为空、远端非空：checkout 远端 Head 后建立 Sync Base。
-- 本地和远端都非空且没有 Sync Base：第一阶段拒绝绑定，不猜测共同祖先；用户必须选择新的空目录或新的空资料库。
+- 本地和远端都非空且没有 Sync Base：默认拒绝。显式选择「和已有文件夹同步」时，先预览，再核对本地 Root 和远端 Head。相同快照直接以 Head 建立索引；不同快照取可验证的主线空快照为起点，用普通同步合并两边新增内容，保留冲突文件。不用旧目录路径推断删除意图；历史无法核对时保留原目录。
 - 已绑定资料库换目录：视为新的首次绑定；旧绑定必须先显式解除，不能悄悄复用索引。
 
 空 Directory 的测试向量属于协议。两个客户端并发初始化空 Head 时，失败方若发现胜出 Commit 也引用同一空 Root，直接采用胜出 Head，不创建空内容合并 Commit。一个工作目录的规范绝对路径只能有一个有效绑定。

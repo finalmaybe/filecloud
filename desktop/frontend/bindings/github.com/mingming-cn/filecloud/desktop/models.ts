@@ -8,6 +8,7 @@ export interface Activity {
 }
 
 export interface BindingCheck {
+    "Merge": FolderMerge | null;
     "LocalItems": number;
     "Path": string;
     "Filesystem": string;
@@ -49,6 +50,18 @@ export interface FileVersion {
     "ModifiedAt": string;
     "Change": string;
     "IsCurrent": boolean;
+}
+
+export interface FolderChanges {
+    "Count": number;
+    "Paths": string[] | null;
+}
+
+export interface FolderMerge {
+    "Identical": boolean;
+    "Upload": FolderChanges;
+    "Download": FolderChanges;
+    "Conflict": FolderChanges;
 }
 
 export interface HistoryPage {

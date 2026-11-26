@@ -123,7 +123,8 @@ type bindOptions struct {
 	worktreeRoot                                        *openedWorktree
 	cacheRoot                                           *os.File
 	fallbackOccupied                                    func(string) bool
-	importLocal                                         bool
+	importLocal, previewMerge                           bool
+	mergeCandidate                                      string
 	confirmDelete                                       string
 	confirmDeleteSet                                    bool
 	scanConfig                                          worktreeScanConfig
@@ -228,8 +229,13 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 	deviceID := flags.String("device-id", "", "Device ID")
 	tokenStdin := flags.Bool("token-stdin", false, "Read token from standard input")
 	importLocal := flags.Bool("import-local", false, "Import an existing local worktree into an empty library")
+	preview := flags.Bool("preview-merge", false, "Preview syncing a published library with an existing folder")
+	merge := flags.String("merge-existing", "", "Confirm the candidate returned by --preview-merge")
 	if err := flags.Parse(args); err != nil {
 		return bindOptions{}, err
+	}
+	if (*preview || *merge != "") && *importLocal || *merge != "" && (*preview || !object.ValidID(*merge)) {
+		return bindOptions{}, errors.New("choose one of --preview-merge, --merge-existing CANDIDATE or --import-local")
 	}
 	const usage = "usage: filecloud-client library bind --client-dir path --server url --library-id uuid --worktree path --device-id uuid --token-stdin"
 	if *clientDir == "" || *server == "" || *libraryID == "" || *worktree == "" || *deviceID == "" || !*tokenStdin || flags.NArg() != 0 {
@@ -268,7 +274,7 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 		clear(token)
 		return bindOptions{}, errors.Join(errors.New("client state directory must be outside the worktree"), worktreeRoot.Close())
 	}
-	if !*importLocal {
+	if !*importLocal && !*preview && *merge == "" {
 		if emptyErr := worktreeRoot.validateEmpty(); emptyErr != nil {
 			resumable, stateErr := resumableBindExists(ctx, canonicalClientDir, canonicalWorktree)
 			if stateErr != nil || !resumable {
@@ -276,14 +282,16 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 				return bindOptions{}, errors.Join(emptyErr, stateErr, worktreeRoot.Close())
 			}
 		}
-	} else if _, err := scanWorktreeWithConfig(worktreeRoot, worktreeScanConfig{fault: config.scanFault}); err != nil {
-		clear(token)
-		return bindOptions{}, errors.Join(err, worktreeRoot.Close())
+	} else if *importLocal {
+		if _, err := scanWorktreeWithConfig(worktreeRoot, worktreeScanConfig{fault: config.scanFault}); err != nil {
+			clear(token)
+			return bindOptions{}, errors.Join(err, worktreeRoot.Close())
+		}
 	}
 	base.Scheme = strings.ToLower(base.Scheme)
 	base.Host = strings.ToLower(base.Host)
 	return bindOptions{clientDir: canonicalClientDir, serverURL: strings.TrimSuffix(base.String(), "/"), libraryID: *libraryID,
-		worktree: canonicalWorktree, deviceID: *deviceID, base: base, token: token, worktreeRoot: worktreeRoot, importLocal: *importLocal,
+		worktree: canonicalWorktree, deviceID: *deviceID, base: base, token: token, worktreeRoot: worktreeRoot, importLocal: *importLocal, previewMerge: *preview, mergeCandidate: *merge,
 		scanConfig: worktreeScanConfig{fault: config.scanFault}}, nil
 }
 
@@ -317,13 +325,17 @@ func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, con
 	if err != nil {
 		return err
 	}
+	mergeExisting := options.previewMerge || options.mergeCandidate != ""
+	if mergeExisting && recoveringBind {
+		return errors.New("folder already has an active sync connection")
+	}
 	snapshot := worktreeSnapshot{root: emptyRoot}
 	if !recoveringBind {
 		snapshot, err = scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
 		if err != nil {
 			return fmt.Errorf("scan worktree: %w", err)
 		}
-		if !options.importLocal && snapshot.root != emptyRoot {
+		if !options.importLocal && !mergeExisting && snapshot.root != emptyRoot {
 			return errors.New("local worktree is non-empty; rerun with --import-local to confirm import")
 		}
 	}
@@ -334,6 +346,12 @@ func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, con
 	head, err = getRemoteHead(ctx, options.base, options.libraryID, options.token)
 	if err != nil {
 		return err
+	}
+	if mergeExisting {
+		if err := preflightClientState(ctx, options, owner, emptyRoot, head); err != nil {
+			return err
+		}
+		return bindExistingFolder(ctx, options, owner, head, snapshot, emptyRoot, stdout, config)
 	}
 	db, err := initializeClientDB(ctx, options.clientDir, config.syncDirectory)
 	if err != nil {
@@ -675,6 +693,19 @@ func preflightClientState(ctx context.Context, options bindOptions, owner, empty
 	existing, intent, err := inspectBinding(ctx, db, options.serverURL, options.libraryID, options.worktree)
 	if err != nil {
 		return err
+	}
+	if options.previewMerge || options.mergeCandidate != "" {
+		if existing != nil || intent != nil {
+			return errors.New("folder already has a sync connection or pending bind")
+		}
+		var pending int
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pending_checkouts WHERE worktree=? OR (server_url=? AND library_id=?))`, options.worktree, options.serverURL, options.libraryID).Scan(&pending); err != nil {
+			return err
+		}
+		if pending != 0 {
+			return errors.New("finish the pending checkout before syncing with an existing folder")
+		}
+		return nil
 	}
 	if existing != nil {
 		if existing.UserID != owner || existing.DeviceID != options.deviceID {

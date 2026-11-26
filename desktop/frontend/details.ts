@@ -139,7 +139,7 @@ function retention(
   const bound = l.Phase === "bound",
     idle = bound && !l.Running && l.Pending === "none";
   const binding = section(
-    "本机绑定",
+    "资料库同步",
     line("本机位置", l.Worktree || "尚未连接"),
   );
   const actions = box("actions");
@@ -151,7 +151,7 @@ function retention(
         tell("绑定凭据已刷新。");
       }),
     );
-    const remove = btn("解除绑定", async () => {
+    const remove = btn("解除同步", async () => {
       if (await unbind(l)) await changed();
     });
     remove.disabled = !idle;
@@ -160,14 +160,14 @@ function retention(
       actions,
       sub(
         idle
-          ? "解绑保留本地文件和远端资料库。"
-          : "有未完成操作，请先完成当前任务，再解除绑定。",
+          ? "解除同步后，本地文件和资料库都会保留。"
+          : "有未完成操作，请先完成当前任务，再解除同步。",
       ),
     );
   } else
     binding.append(
       btn(
-        l.Phase === "binding" ? "继续上次绑定" : "连接本地文件夹",
+        l.Phase === "binding" ? "继续同步" : "同步该资料库",
         async () => {
           if (l.Phase === "binding") {
             await api.RetryBinding(l.ID);

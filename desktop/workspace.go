@@ -36,8 +36,9 @@ func (a account) key() string {
 
 type Activity struct{ Time, LibraryID, Kind string }
 type choice struct {
-	Worktree string
-	Import   bool
+	Worktree       string
+	Import         bool
+	MergeCandidate string `json:",omitempty"`
 }
 type profile struct {
 	Device, Username, DeviceName string

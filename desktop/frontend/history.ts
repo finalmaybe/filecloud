@@ -24,8 +24,8 @@ export function history(
   if (l.Phase !== "bound") {
     host.replaceChildren(
       empty(
-        "连接文件夹后查看历史",
-        "主线历史与快照恢复使用此设备的绑定凭据。",
+        "同步该资料库后查看历史",
+        "请选择本地文件夹并同步该资料库，再查看或恢复历史版本。",
         "history",
       ),
     );

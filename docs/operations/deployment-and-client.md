@@ -453,7 +453,11 @@ printf '%s\n' "$TOKEN" |
     --import-local
 ```
 
-如果本地和远端同时非空且没有共同同步基线，绑定会拒绝继续。此时应改用新的空工作目录，不能让客户端猜测合并起点。
+### 和已有文件夹同步
+
+解除同步后，要使用原文件夹，或要将另一个非空目录和已有资料库合并：先在上述 `library bind` 命令中用 `--preview-merge` 替换 `--import-local`，核对返回的上传（`Upload`）、下载（`Download`）、冲突文件（`Conflict`）清单。每类最多展示 50 个路径，`Count` 是完整数量。这一步不建立绑定，也不改动文件或发布版本。
+
+确认后用 `--merge-existing CANDIDATE` 替换 `--preview-merge`（`CANDIDATE` 取自本次预览的 `Candidate`），再运行 `library sync`；桌面端会自动开始这轮同步。确认前本地文件或远端版本变化时要重新预览。两端快照完全一致时不重新传输文件，也不发布新版本。文件只在一边存在时保留；同路径内容不同时，服务端文件保留原名，本地内容保留为冲突文件。仅大小写不同的路径需先改名。差异合并使用正常同步的主线历史核对范围；找不到可验证的空快照时，仍可保留原目录并选择新的空目录下载。
 
 绑定成功后，后续 `sync` 和 `watch` 从 `client.db` 读取服务地址、设备 ID 和 token，不再要求输入 token。
 
@@ -797,7 +801,7 @@ filecloud-client logout --server URL --token-stdin
 filecloud-client library create --server URL --library-id UUID --name NAME --token-stdin
 filecloud-client library list --server URL --token-stdin
 filecloud-client library inspect --server URL --library-id UUID --token-stdin
-filecloud-client library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local]
+filecloud-client library bind --client-dir PATH --server URL --library-id UUID --worktree PATH --device-id UUID --token-stdin [--import-local | --preview-merge | --merge-existing CANDIDATE]
 filecloud-client library sync --client-dir PATH --worktree PATH [--confirm-delete 12_HEX]
 filecloud-client library watch --client-dir PATH --worktree PATH --interval DURATION
 filecloud-client library history list --client-dir PATH --worktree PATH [--page-size N] [--page-token TOKEN] [--include-merged]

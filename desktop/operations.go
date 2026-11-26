@@ -36,7 +36,7 @@ func (s *Workspace) PickDirectory(id string) (string, error) {
 	s.selection = choice{Worktree: path}
 	return path, nil
 }
-func (s *Workspace) Bind(id, path string, allowImport bool) error {
+func (s *Workspace) Bind(id, path string, confirmLocal bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer s.publish()
@@ -46,8 +46,12 @@ func (s *Workspace) Bind(id, path string, allowImport bool) error {
 	if id != s.selectionID || path != s.selection.Worktree || path == "" {
 		return errors.New("请重新选择工作目录。")
 	}
+	if s.selection.MergeCandidate != "" && !confirmLocal {
+		return errors.New("请先确认和已有文件夹同步。")
+	}
 	s.selectionID = ""
-	s.data.Intents[id] = choice{path, allowImport}
+	s.selection.Import = confirmLocal && s.selection.MergeCandidate == ""
+	s.data.Intents[id] = s.selection
 	if err := s.save(); err != nil {
 		return err
 	}
@@ -69,17 +73,29 @@ func (s *Workspace) RetryBinding(id string) error {
 	}
 	return s.bind(id, c, s.data.Device)
 }
+func (s *Workspace) bindArgs(id, path, device string) []string {
+	return []string{"library", "bind", "--server", s.active.Server, "--library-id", id, "--device-id", device, "--client-dir", s.clientDir(), "--worktree", path, "--token-stdin"}
+}
 func (s *Workspace) bind(id string, c choice, device string) error {
-	args := []string{"library", "bind", "--server", s.active.Server, "--library-id", id, "--device-id", device, "--client-dir", s.clientDir(), "--worktree", c.Worktree, "--token-stdin"}
+	args := s.bindArgs(id, c.Worktree, device)
+	if c.MergeCandidate != "" {
+		args = append(args, "--merge-existing", c.MergeCandidate)
+	}
 	if c.Import {
 		args = append(args, "--import-local")
 	}
 	if err := s.query(nil, s.token, args...); err != nil {
+		if c.MergeCandidate != "" {
+			delete(s.data.Intents, id)
+			if saveErr := s.save(); saveErr != nil {
+				return saveErr
+			}
+		}
 		_ = s.loadBindings()
 		if code, ok := err.(commandError); ok && code != "unknown" {
 			return err
 		}
-		return errors.New("绑定未完成。请检查目录和凭据；已有远端版本请选空目录。刷新凭据要求两端与同步基线一致。")
+		return errors.New("同步设置未完成。请检查文件夹和登录状态，然后重试。")
 	}
 	delete(s.data.Intents, id)
 	delete(s.problems, id)
@@ -87,7 +103,13 @@ func (s *Workspace) bind(id string, c choice, device string) error {
 	if err := s.loadBindings(); err != nil {
 		return err
 	}
-	return s.save()
+	if err := s.save(); err != nil {
+		return err
+	}
+	if c.MergeCandidate != "" {
+		return s.syncOne(id, "")
+	}
+	return nil
 }
 func (s *Workspace) OpenWorktree(id string) error {
 	s.mu.Lock()
@@ -113,7 +135,7 @@ func (s *Workspace) Unbind(id string) error {
 		return errBinding
 	}
 	if err := s.query(nil, "", "library", "unbind", "--if-idle", "--client-dir", s.clientDir(), "--worktree", b.Worktree); err != nil {
-		return errors.New("解绑未完成；有待办时请先处理。")
+		return errors.New("解除同步未完成；请先处理未完成的任务。")
 	}
 	delete(s.bound, id)
 	delete(s.states, id)

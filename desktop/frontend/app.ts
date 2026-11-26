@@ -273,12 +273,12 @@ function inspector(l: LibraryView) {
       : [
           l.Phase === "binding"
             ? btn(
-                "继续上次绑定",
+                "继续同步",
                 () => mutate(() => api.RetryBinding(l.ID)),
                 "primary",
                 "folder",
               )
-            : btn("连接文件夹", () => openBind(l), "primary", "folder"),
+            : btn("同步该资料库", () => openBind(l), "primary", "folder"),
         ]),
   );
   side.append(actions);
@@ -432,7 +432,7 @@ function libraryPage() {
           l.Deleted
             ? sub(`${l.Deleted} 项删除待确认`)
             : l.Conflicts?.length
-              ? sub(`${l.Conflicts.length} 份冲突副本待整理`)
+              ? sub(`${l.Conflicts.length} 个冲突文件待整理`)
               : summary(l),
         ),
       ),
@@ -446,7 +446,7 @@ function libraryPage() {
             ? [sub(date(l.LastSuccess))]
             : []),
         ...(l.Phase === ""
-          ? [btn("连接文件夹", () => openBind(l))]
+          ? [btn("同步该资料库", () => openBind(l))]
           : attention(l)
             ? [btn("查看", () => showIssue(l), "link")]
             : []),
@@ -529,8 +529,8 @@ function activities() {
         empty(
           issues ? "没有需要处理的事项" : "暂无本机任务",
           issues
-            ? "需要核对的删除、恢复与冲突副本会显示在这里。"
-            : "连接本地文件夹后，可在这里查看同步状态。",
+            ? "需要核对的删除、恢复与冲突文件会显示在这里。"
+            : "同步该资料库后，可在这里查看同步状态。",
           issues ? "check" : "sync",
         ),
       );
@@ -539,10 +539,10 @@ function activities() {
         actions = box("actions");
       if (l.Phase === "binding")
         actions.append(
-          btn("继续上次绑定", () => mutate(() => api.RetryBinding(l.ID))),
+          btn("继续同步", () => mutate(() => api.RetryBinding(l.ID))),
           ...(l.CanReselect
             ? [btn("选择其他文件夹", () => openBind(l))]
-            : [sub("请先完成已开始的绑定。")]),
+            : [sub("请先完成当前同步。")]),
         );
       else if (l.Problem === "auth_required")
         actions.append(btn("重新登录", () => go("login"), "primary"));
@@ -883,8 +883,8 @@ function choose() {
     box(
       "wizard-host",
       wizard(
-        "选择要连接的资料库",
-        "选择一个要连接并同步的资料库。你也可以新建一个资料库用于分类存放文件。",
+        "选择要同步的资料库",
+        "选择要同步到本地的资料库。你也可以新建一个资料库用于分类存放文件。",
         ["选择资料库", "本机文件夹", "确认"],
         0,
         [
@@ -971,7 +971,7 @@ function render() {
               page = "detail";
               issue =
                 errorText(e) +
-                " 原目录已保留。先保全本地修改，安全解绑后使用新的空文件夹恢复绑定。";
+                " 原目录已保留。请先保存本地修改，再解除同步，选择「和已有文件夹同步」或选择新的空文件夹。";
               break;
             }
           }

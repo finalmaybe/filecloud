@@ -16,6 +16,8 @@ export type {
     Directory,
     FileEntry,
     FileVersion,
+    FolderChanges,
+    FolderMerge,
     HistoryPage,
     LibraryInfo,
     LibraryStats,
