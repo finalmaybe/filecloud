@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -80,7 +81,8 @@ type handler struct {
 // Catalog serves the library API and supplies owner-scoped snapshot and history reads to the console.
 type Catalog struct {
 	http.Handler
-	core *handler
+	core              *handler
+	historySettingsMu sync.Mutex
 }
 
 // NewHandler constructs authenticated create, list, and get library endpoints.

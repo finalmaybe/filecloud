@@ -109,8 +109,8 @@ func TestInitCreatesLayoutAndSchemaIdempotently(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*), MAX(version) FROM schema_migrations").Scan(&count, &version); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if count != 10 || version != 10 {
-		t.Fatalf("migration rows = %d, version = %d; want 10, 10", count, version)
+	if count != 11 || version != 11 {
+		t.Fatalf("migration rows = %d, version = %d; want 11, 11", count, version)
 	}
 }
 

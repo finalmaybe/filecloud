@@ -41,6 +41,8 @@ func TestRunServerCommandContract(t *testing.T) {
 		{args: []string{"serve"}, want: "usage: filecloud-server serve"},
 		{args: []string{"serve", "--data-dir", ".", "--site-url="}, want: "--site-url: use http:// or https://"},
 		{args: []string{"serve", "--data-dir", ".", "--web-admin-user", "admin"}, want: "--web-admin-user requires --site-url"},
+		{args: []string{"serve", "--data-dir", ".", "--history-global-capacity", "0"}, want: "history limits must be positive"},
+		{args: []string{"serve", "--data-dir", ".", "--history-user-capacity", "-1"}, want: "history limits must be positive"},
 		{args: []string{"serve", "--public-origin", "https://cloud.example"}, want: "flag provided but not defined: -public-origin"},
 		{args: []string{"serve", "--web-origin", "https://cloud.example"}, want: "flag provided but not defined: -web-origin"},
 		{args: []string{"serve", "--dav-origin", "https://cloud.example"}, want: "flag provided but not defined: -dav-origin"},

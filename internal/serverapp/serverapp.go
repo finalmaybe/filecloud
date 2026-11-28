@@ -125,8 +125,8 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 	headMaxIntroducedCommits := flags.Int("head-max-introduced-commits", headDefaults.MaxIntroducedCommits, "Maximum commits introduced by a Head update")
 	headMaxValidatedObjects := flags.Int("head-max-validated-objects", headDefaults.MaxValidatedObjects, "Maximum deduplicated objects validated by a Head update")
 	historyDefaults := libraryapi.DefaultHistoryConfig()
-	historyGlobalCapacity := flags.Int("history-global-capacity", historyDefaults.GlobalConcurrency, "Global concurrent history traversal capacity")
-	historyUserCapacity := flags.Int("history-user-capacity", historyDefaults.UserConcurrency, "Concurrent history traversal capacity per user")
+	historyGlobalCapacity := flags.Int("history-global-capacity", historyDefaults.GlobalConcurrency, "Override saved global shared read capacity for this start")
+	historyUserCapacity := flags.Int("history-user-capacity", historyDefaults.UserConcurrency, "Override saved per-user shared read capacity for this start")
 	historyReadTimeout := flags.Duration("history-read-timeout", historyDefaults.RequestTimeout, "Maximum time for one history traversal")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -160,14 +160,18 @@ func runServe(ctx context.Context, program string, args []string, stdout, stderr
 		headConfig.MaxTraversalContexts < 1 || headConfig.MaxCommitDepth < 1 || headConfig.MaxIntroducedCommits < 1 || headConfig.MaxValidatedObjects < 1 {
 		return errors.New("head validation limits must be positive")
 	}
-	historyConfig := libraryapi.HistoryConfig{
-		GlobalConcurrency: *historyGlobalCapacity,
-		UserConcurrency:   *historyUserCapacity,
-		RequestTimeout:    *historyReadTimeout,
-	}
-	if historyConfig.GlobalConcurrency < 1 || historyConfig.UserConcurrency < 1 || historyConfig.RequestTimeout <= 0 {
+	if *historyGlobalCapacity < 1 || *historyUserCapacity < 1 || *historyReadTimeout <= 0 {
 		return errors.New("history limits must be positive")
 	}
+	historyConfig := libraryapi.HistoryConfig{RequestTimeout: *historyReadTimeout}
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "history-global-capacity":
+			historyConfig.GlobalConcurrency = *historyGlobalCapacity
+		case "history-user-capacity":
+			historyConfig.UserConcurrency = *historyUserCapacity
+		}
+	})
 	if len(admins) > 0 && rawOrigin == nil {
 		return errors.New("--web-admin-user requires --site-url")
 	}
@@ -420,6 +424,16 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 		if err := store.SetDefaults(ctx, defaults, time.Now()); err != nil {
 			return err
 		}
+	}
+	savedHistory, err := store.HistoryConcurrency(ctx)
+	if err != nil {
+		return fmt.Errorf("read saved history concurrency: %w", err)
+	}
+	if historyConfig.GlobalConcurrency == 0 {
+		historyConfig.GlobalConcurrency = savedHistory.Global
+	}
+	if historyConfig.UserConcurrency == 0 {
+		historyConfig.UserConcurrency = savedHistory.User
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {

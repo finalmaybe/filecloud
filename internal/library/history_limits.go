@@ -6,22 +6,24 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
 const (
-	_defaultHistoryGlobalConcurrency = 2
-	_defaultHistoryUserConcurrency   = 1
+	_defaultHistoryGlobalConcurrency = 50
+	_defaultHistoryUserConcurrency   = 20
 	_defaultHistoryTimeout           = 2 * time.Minute
 )
 
-// HistoryConfig bounds one mainline history traversal.
+// HistoryConfig bounds shared library reads.
 type HistoryConfig struct {
 	GlobalConcurrency int
 	UserConcurrency   int
 	RequestTimeout    time.Duration
 }
 
-// DefaultHistoryConfig returns the production history traversal limits.
+// DefaultHistoryConfig returns the production shared read limits.
 func DefaultHistoryConfig() HistoryConfig {
 	return HistoryConfig{
 		GlobalConcurrency: _defaultHistoryGlobalConcurrency,
@@ -48,24 +50,46 @@ func normalizeHistoryConfig(config HistoryConfig) (HistoryConfig, error) {
 }
 
 type historyLimiter struct {
-	mu          sync.Mutex
-	globalLimit int
-	userLimit   int
-	global      int
-	users       map[string]int
+	mu     sync.Mutex
+	limits storage.HistoryConcurrency
+	global int
+	users  map[string]int
 }
 
 func newHistoryLimiter(globalLimit, userLimit int) (*historyLimiter, error) {
 	if globalLimit < 1 || userLimit < 1 {
 		return nil, errors.New("history concurrency limits must be positive")
 	}
-	return &historyLimiter{globalLimit: globalLimit, userLimit: userLimit, users: make(map[string]int)}, nil
+	return &historyLimiter{limits: storage.HistoryConcurrency{Global: globalLimit, User: userLimit}, users: make(map[string]int)}, nil
+}
+
+// HistoryConcurrency returns the currently effective shared read limits.
+func (c *Catalog) HistoryConcurrency() storage.HistoryConcurrency {
+	l := c.core.historyLimiter
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.limits
+}
+
+// SetHistoryConcurrency saves both limits before updating admission without resetting active slots.
+func (c *Catalog) SetHistoryConcurrency(ctx context.Context, limits storage.HistoryConcurrency) error {
+	// Serialize saves and the corresponding live updates without holding up admission during database I/O.
+	c.historySettingsMu.Lock()
+	defer c.historySettingsMu.Unlock()
+	if err := c.core.store.SetHistoryConcurrency(ctx, limits); err != nil {
+		return err
+	}
+	l := c.core.historyLimiter
+	l.mu.Lock()
+	l.limits = limits
+	l.mu.Unlock()
+	return nil
 }
 
 func (l *historyLimiter) tryAcquire(userID string) (func(), bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.global >= l.globalLimit || l.users[userID] >= l.userLimit {
+	if l.global >= l.limits.Global || l.users[userID] >= l.limits.User {
 		return nil, false
 	}
 	l.global++

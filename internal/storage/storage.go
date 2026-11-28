@@ -116,6 +116,12 @@ func metadataMigrations() []migration {
 			)`,
 			`INSERT INTO server_settings(id) VALUES (1)`,
 		}},
+		{version: 11, statements: []string{
+			`ALTER TABLE server_settings ADD COLUMN history_global_capacity INTEGER NOT NULL DEFAULT 50
+				CHECK(typeof(history_global_capacity) = 'integer' AND history_global_capacity BETWEEN 1 AND 1000)`,
+			`ALTER TABLE server_settings ADD COLUMN history_user_capacity INTEGER NOT NULL DEFAULT 20
+				CHECK(typeof(history_user_capacity) = 'integer' AND history_user_capacity BETWEEN 1 AND 1000)`,
+		}},
 	}
 }
 

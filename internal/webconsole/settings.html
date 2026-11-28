@@ -8,11 +8,20 @@
       <strong id="dav-label">WebDAV 网络盘</strong>
       <p id="dav-description">允许用户通过应用密码将资料库挂载为网络盘。</p>
     </div>
-    <input type="hidden" name="enabled" value="{{if .Data}}false{{else}}true{{end}}">
-    <button type="submit" class="setting-switch" role="switch" aria-checked="{{.Data}}" aria-labelledby="dav-label" aria-describedby="dav-description">
-      {{if .Data}}已开启{{else}}已关闭{{end}}<span aria-hidden="true"></span>
+    <input type="hidden" name="enabled" value="{{if .Data.WebDAVEnabled}}false{{else}}true{{end}}">
+    <button type="submit" class="setting-switch" role="switch" aria-checked="{{.Data.WebDAVEnabled}}" aria-labelledby="dav-label" aria-describedby="dav-description">
+      {{if .Data.WebDAVEnabled}}已开启{{else}}已关闭{{end}}<span aria-hidden="true"></span>
     </button>
   </form>
   <p class="setting-hint">关闭后，网络盘将停止接受新请求。已有应用密码会保留，重新开启后仍可使用有效凭据。</p>
+  <h2 id="history-concurrency-heading">共享读取并发</h2>
+  <p id="history-concurrency-hint" class="setting-hint">历史查询、目录浏览和文件预览等操作共用这些名额。每个账号也受全局上限约束。保存后立即生效，已开始的请求不受影响。</p>
+  {{if .Data.HistorySaved}}<p role="status">并发设置已保存。</p>{{end}}
+  {{if .Message}}<p role="alert">{{.Message}}</p>{{end}}
+  <form class="fields" method="post" action="/settings/history-concurrency" aria-labelledby="history-concurrency-heading" aria-describedby="history-concurrency-hint">
+    <label>全局并发上限<input type="number" name="global" min="1" max="{{.Data.MaxHistoryConcurrency}}" step="1" required value="{{.Data.HistoryConcurrency.Global}}"></label>
+    <label>每账号并发上限<input type="number" name="user" min="1" max="{{.Data.MaxHistoryConcurrency}}" step="1" required value="{{.Data.HistoryConcurrency.User}}"></label>
+    <div><button type="submit" class="action">保存并发设置</button></div>
+  </form>
 </section>
 {{end}}
