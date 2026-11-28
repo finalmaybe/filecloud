@@ -13,6 +13,7 @@ import {
   errorText,
   errorCode,
   canOpenDocument,
+  fileType,
   revealLabel,
   copy,
   dialog,
@@ -570,11 +571,12 @@ export function compare(l: LibraryView, initial: Conflict, back: () => void) {
           "conflict-choice" + (p.Target === pair.Target ? " selected" : ""),
         );
         const parts = p.Source.split("/"),
-          name = parts.pop()!;
+          name = parts.pop()!,
+          kind = fileType(name);
         b.setAttribute("aria-pressed", String(p.Target === pair.Target));
         b.replaceChildren(
           n("span", "selection-mark"),
-          icon("file", "blue"),
+          icon(kind.icon, kind.color),
           box(
             "grow",
             n("strong", "", name),

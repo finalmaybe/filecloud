@@ -2,6 +2,10 @@ import { cp, mkdir } from "node:fs/promises";
 const dist = new URL("./dist/", import.meta.url);
 await mkdir(dist, { recursive: true });
 await cp(new URL("./public/", import.meta.url), dist, { recursive: true });
+await cp(
+  new URL("../../internal/webconsole/assets/file-icon.js", import.meta.url),
+  new URL("file-icon.js", dist),
+);
 const pdf = new URL("./node_modules/pdfjs-dist/", import.meta.url);
 await mkdir(new URL("pdfjs/", dist), { recursive: true });
 for (const name of ["pdf.min.mjs", "pdf.worker.min.mjs"]) {

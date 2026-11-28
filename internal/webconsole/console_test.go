@@ -110,6 +110,7 @@ func TestEmbeddedRoutes(t *testing.T) {
 		{"GET", "/assets/console.css", 200, "", []string{"text/css"}, ".skip"},
 		{"GET", "/assets/atlas.svg", 200, "", []string{"image/svg+xml"}, "<svg"},
 		{"GET", "/assets/libraries.js", 200, "", javascript, "loadLibraries"},
+		{"GET", "/assets/file-icon.js", 200, "", javascript, "export function fileIcon"},
 		{"GET", "/assets/local-time.js", 200, "", javascript, "setLocalTime"},
 		{"POST", "/login", 403, "", nil, ""},
 	} {

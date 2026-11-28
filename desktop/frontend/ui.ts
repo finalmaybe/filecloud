@@ -2,6 +2,7 @@ export * as api from "./bindings/github.com/mingming-cn/filecloud/desktop/worksp
 export * as prefs from "./bindings/github.com/mingming-cn/filecloud/desktop/preferences.js";
 export type * from "./bindings/github.com/mingming-cn/filecloud/desktop/models.js";
 import type { LibraryView } from "./bindings/github.com/mingming-cn/filecloud/desktop/models.js";
+import { fileExtension, fileIcon } from "/file-icon.js";
 import { Clipboard } from "/wails/runtime.js";
 const paths = {
   folder:
@@ -21,6 +22,13 @@ const paths = {
   image: "M3 3h18v18H3zM4 17l5-6 4 4 3-4 5 6M8 7h.1",
   archive: "M5 2h14v20H5zM10 3h3m-3 3h3m-3 3h3m-3 3h3m-3 2v4h3v-4z",
   pdf: "M5 2h9l5 5v15H5zM13 2v6h6M8 17c6-8 4-10 3-7s3 7 5 6-4-3-8 1z",
+  text: "M4 5h16M4 10h16M4 15h16M4 20h10",
+  document: "M5 2h9l5 5v15H5zM13 2v6h6M8 12h8m-4 0v6m-2 0h4",
+  spreadsheet: "M3 4h18v16H3zM3 9h18M3 14h18M9 9v11m6-11v11",
+  presentation: "M3 4h18v13H3zM12 17v4m-4 0h8M7 13l4-4 3 2 3-4",
+  code: "m7 6-6 6 6 6m10-12 6 6-6 6m-3-15-4 18",
+  audio: "M9 17V5l11-2v12M9 17a3 2 0 1 1-6 0 3 2 0 1 1 6 0Zm11-2a3 2 0 1 1-6 0 3 2 0 1 1 6 0Z",
+  video: "M3 5h18v14H3zM10 9l5 3-5 3z",
   home: "m2 11 10-9 10 9M5 10v11h5v-7h4v7h5V10",
   file: "M5 2h9l5 5v15H5V2Zm8 0v6h6M8 12h8m-8 4h6",
   history: "M3 4v6h6M3.5 9a9 9 0 1 1 .5 8M12 6v6l4 3",
@@ -101,25 +109,30 @@ export function date(s: string) {
     d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
   );
 }
+const fileTypes = {
+  pdf: { label: "PDF 文稿", color: "red" },
+  image: { label: "图像", color: "blue" },
+  text: { label: "文本", color: "" },
+  archive: { label: "归档", color: "" },
+  document: { label: "文档", color: "blue" },
+  spreadsheet: { label: "表格", color: "green" },
+  presentation: { label: "演示文稿", color: "orange" },
+  code: { label: "源代码", color: "" },
+  audio: { label: "音频", color: "" },
+  video: { label: "视频", color: "" },
+};
 export function fileType(
   name: string,
   type = "File",
 ): { label: string; icon: Icon; color: string } {
   if (type === "Directory")
     return { label: "文件夹", icon: "folder", color: "blue" };
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (ext === "pdf") return { label: "PDF 文稿", icon: "pdf", color: "red" };
-  if (/\.(png|jpe?g|gif|webp|bmp|tiff?|heic|avif)$/i.test(name))
-    return { label: "图像", icon: "image", color: "blue" };
-  if (/\.(md|txt|json|yaml|yml|log|csv|xml|ini|toml)$/i.test(name))
-    return { label: "文本", icon: "file", color: "" };
-  if (/\.(zip|tar|gz|7z|rar|bz2|xz)$/i.test(name))
-    return { label: "归档", icon: "archive", color: "" };
-  return {
-    label: name.includes(".") ? ext?.toUpperCase() + " 文件" : "文件",
-    icon: "file",
-    color: "",
-  };
+  const icon = fileIcon(name);
+  if (icon === "file") {
+    const ext = fileExtension(name);
+    return { label: ext ? ext.toUpperCase() + " 文件" : "文件", icon, color: "" };
+  }
+  return { ...fileTypes[icon], icon };
 }
 export function onDisk(l: LibraryView, name: string) {
   const sep = l.Worktree.includes("\\") ? "\\" : "/";

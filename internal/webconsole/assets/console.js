@@ -1,6 +1,11 @@
+import {fileIcon} from './file-icon.js';
 import {setLocalTime} from './local-time.js';
 
 for (const time of document.querySelectorAll('time[datetime]')) setLocalTime(time);
+for (const file of document.querySelectorAll('.trash-list [data-file-icon]')) {
+  const name = file.querySelector('.entry-name').textContent;
+  file.querySelector('use').setAttribute('href', `#i-${fileIcon(name)}`);
+}
 
 const navToggle = document.querySelector('#nav-toggle');
 if (navToggle) {

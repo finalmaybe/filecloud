@@ -13,7 +13,7 @@
     {{if eq .Kind "Directory"}}{{$icon = "folder"}}{{$kind = "目录"}}{{$action = "恢复整个目录"}}{{else if eq .Kind "Version"}}{{$icon = "history"}}{{$kind = "历史版本"}}{{$action = "放回版本列表"}}{{end}}
     <tr data-path="{{.Path}}">
       <td><div class="entry-cell">
-        <button type="button" class="entry-link {{if eq .Kind "Directory"}}folder{{end}}" commandfor="restore-{{.ID}}" command="show-modal" aria-haspopup="dialog">
+        <button type="button" class="entry-link {{if eq .Kind "Directory"}}folder{{end}}" {{if eq .Kind "File"}}data-file-icon{{end}} commandfor="restore-{{.ID}}" command="show-modal" aria-haspopup="dialog">
           {{template "icon" $icon}}<span><span class="entry-name">{{pathBase .Path}}</span>
           <small class="trash-origin">{{$kind}}{{if eq .Kind "Version"}} · <code>{{printf "%.12s" .Source}}</code>{{end}} · {{if eq (pathDir .Path) "."}}资料库根目录{{else}}{{pathDir .Path}}{{end}}</small></span>
         </button>

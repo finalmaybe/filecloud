@@ -1,4 +1,5 @@
 import {setByteSize} from './byte-size.js';
+import {fileIcon} from './file-icon.js';
 import {setLocalTime} from './local-time.js';
 
 const directoryPath = location.pathname;
@@ -103,6 +104,7 @@ function renderDirectory({CommitId, Path, Parent, Entries}) {
       deleteDialog.showModal();
     });
     if (!folder) {
+      row.querySelector('.entry-link use').setAttribute('href', `#i-${fileIcon(entry.Name)}`);
       const versions = row.querySelector('.open-versions');
       versions.href = `${directoryPath}/file-history${query}`;
       versions.setAttribute('aria-label', '查看 ' + entry.Name + ' 的历史版本');
