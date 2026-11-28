@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 	"github.com/zalando/go-keyring"
 )
 
@@ -148,6 +149,21 @@ func TestDesktopTwoDevices(t *testing.T) {
 	if err := a.Unbind(id); err == nil {
 		t.Fatal("unbound a protected deletion")
 	}
+	t.Run("recheck deletion after changing ignore rules without approval", func(t *testing.T) {
+		must(t, a.SetIgnoreRules(syncignore.Rules{Patterns: []string{"0"}}))
+		if err := a.RequestSync(id); err == nil || err.Error() != "stale_candidate" {
+			t.Fatalf("rechecking old deletion: %v", err)
+		}
+		if a.Snapshot().Libraries[0].Pending == "delete-confirmation" {
+			t.Fatal("stale deletion still needs approval")
+		}
+		must(t, a.SetIgnoreRules(syncignore.Rules{}))
+		if err := a.RequestSync(id); err == nil || err.Error() != "delete_confirmation" {
+			t.Fatalf("rechecking an actual deletion: %v", err)
+		}
+	})
+	review, err = a.ReviewDeletion(id)
+	must(t, err)
 	must(t, b.RequestSync(id))
 	_, err = os.Stat(filepath.Join(pb, "0"))
 	must(t, err)
@@ -347,7 +363,15 @@ func TestDesktopTwoDevices(t *testing.T) {
 		t.Fatal("unchanged folder published a version")
 	}
 	must(t, a.Unbind(id))
+	untouched := filepath.Join(pb, "2")
+	beforeRestore, err := os.Stat(untouched)
+	must(t, err)
 	must(t, b.RequestSync(id))
+	afterRestore, err := os.Stat(untouched)
+	must(t, err)
+	if !os.SameFile(beforeRestore, afterRestore) || !beforeRestore.ModTime().Equal(afterRestore.ModTime()) {
+		t.Fatal("restoring file 1 replaced or retimed the unrelated file 2")
+	}
 	originalRemote, err := os.ReadFile(filepath.Join(pb, "1"))
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(pb, "remote-only"), []byte("from remote"), 0600))
@@ -380,6 +404,54 @@ func TestDesktopTwoDevices(t *testing.T) {
 			}
 		}
 	}
+	t.Run("device-wide sync ignore rules", func(t *testing.T) {
+		write := func(dir, name, text string) {
+			t.Helper()
+			must(t, os.WriteFile(filepath.Join(dir, name), []byte(text), 0600))
+		}
+		check := func(dir, name, want string) {
+			t.Helper()
+			got, err := os.ReadFile(filepath.Join(dir, name))
+			must(t, err)
+			if string(got) != want {
+				t.Fatalf("%s = %q, want %q", name, got, want)
+			}
+		}
+		write(pb, "draft.tmp", "original")
+		must(t, b.RequestSync(id))
+		must(t, a.RequestSync(id))
+		check(pa, "draft.tmp", "original")
+
+		must(t, a.SetIgnoreRules(syncignore.Rules{SkipHidden: true, Patterns: []string{"*.tmp"}}))
+		a, err = newWorkspace(a.root, cli, build.Version, build.Commit)
+		must(t, err)
+		write(pa, "local.tmp", "only A")
+		write(pb, "draft.tmp", "updated on B")
+		write(pb, ".hidden", "only B")
+		write(pb, "visible", "from B")
+		must(t, b.RequestSync(id))
+		must(t, a.RequestSync(id))
+		check(pa, "draft.tmp", "original")
+		check(pa, "visible", "from B")
+		if _, err := os.Stat(filepath.Join(pa, ".hidden")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("downloaded ignored hidden file")
+		}
+		write(pa, "visible", "from A")
+		must(t, a.RequestSync(id))
+		must(t, b.RequestSync(id))
+		check(pb, "visible", "from A")
+		check(pb, "draft.tmp", "updated on B")
+		if _, err := os.Stat(filepath.Join(pb, "local.tmp")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("uploaded ignored local file")
+		}
+
+		must(t, a.SetIgnoreRules(syncignore.Rules{}))
+		must(t, a.RequestSync(id))
+		must(t, b.RequestSync(id))
+		check(pa, ".hidden", "only B")
+		check(pb, "local.tmp", "only A")
+		check(pb, "draft.tmp", "updated on B")
+	})
 	must(t, a.SetPaused(id, true))
 	must(t, a.Unbind(id))
 	must(t, a.Logout())

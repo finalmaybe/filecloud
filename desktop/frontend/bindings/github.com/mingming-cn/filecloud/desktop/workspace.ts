@@ -7,6 +7,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "/wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as syncignore$0 from "../internal/syncignore/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 export function AppPasswords(id: string): $CancellablePromise<void> {
@@ -45,6 +49,10 @@ export function CreateLibrary(name: string, trashDays: number, historyDays: numb
     return $Call.ByName("main.Workspace.CreateLibrary", name, trashDays, historyDays);
 }
 
+export function DeleteTrash(id: string, items: number[] | null): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.DeleteTrash", id, items);
+}
+
 export function DismissConflict(id: string, pair: $models.Conflict): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.DismissConflict", id, pair);
 }
@@ -71,6 +79,10 @@ export function ForgetUnavailableSession(): $CancellablePromise<void> {
 
 export function History(id: string, cursor: string): $CancellablePromise<$models.HistoryPage> {
     return $Call.ByName("main.Workspace.History", id, cursor);
+}
+
+export function IgnoreRules(): $CancellablePromise<syncignore$0.Rules> {
+    return $Call.ByName("main.Workspace.IgnoreRules");
 }
 
 export function LibraryInfo(id: string): $CancellablePromise<$models.LibraryInfo> {
@@ -159,6 +171,10 @@ export function RevealLocal(id: string, name: string): $CancellablePromise<void>
 
 export function ReviewDeletion(id: string): $CancellablePromise<$models.Review | null> {
     return $Call.ByName("main.Workspace.ReviewDeletion", id);
+}
+
+export function SetIgnoreRules(rules: syncignore$0.Rules): $CancellablePromise<void> {
+    return $Call.ByName("main.Workspace.SetIgnoreRules", rules);
 }
 
 export function SetPaused(id: string, paused: boolean): $CancellablePromise<void> {

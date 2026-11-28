@@ -147,8 +147,8 @@ func TestWindowsNTFSRejectsCaseSensitiveDescendant(t *testing.T) {
 	parent, _, _, err = openRollbackParent(root, "child/file")
 	assertRejected("rollback parent", parent, err)
 	parent, _, err = openRestorePromotionTargetParent(root, syncRecovery{
-		worktree: root.path, name: recoveryName, kind: "Directory", completed: true,
-	}, recoveryName+"/file")
+		worktree: root.path, path: "captured", name: recoveryName, kind: "Directory", completed: true,
+	}, recoveryName+"/file", nil)
 	assertRejected("restore promotion parent", parent, err)
 	file, err := root.openRelative("child/file")
 	assertRejected("relative reopen", file, err)

@@ -61,6 +61,18 @@ func TestRecoveryVisibleLeafPathBoundaries(t *testing.T) {
 			t.Fatalf("parent=%d name=%q path=%d err=%v", len(parent), name, len(parent)+1+len(name), err)
 		}
 	})
+	t.Run("truncated trailing space", func(t *testing.T) {
+		parent := strings.Repeat(strings.Repeat("p", 220)+"/", 4) + strings.Repeat("p", 129)
+		for _, test := range []struct {
+			counter int
+			want    string
+		}{{1, "Filecloud"}, {2, "Fileclou 2"}, {9999, "Filec 9999"}} {
+			name, err := recoveryVisibleLeaf(parent, actionID, test.counter)
+			if err != nil || name != test.want || !validRecoveryVisibleName(name) || len(parent)+1+len(name) > 1024 {
+				t.Fatalf("counter=%d name=%q want=%q err=%v", test.counter, name, test.want, err)
+			}
+		}
+	})
 	t.Run("over 1024", func(t *testing.T) {
 		if name, err := recoveryVisibleLeaf(strings.Repeat("p", 1024), actionID, 1); err == nil || name != "" {
 			t.Fatalf("name=%q err=%v", name, err)

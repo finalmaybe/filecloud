@@ -17,6 +17,7 @@ const paths = {
   play: "M12 2a10 10 0 1 1 0 20 10 10 0 1 1 0-20ZM10 8l6 4-6 4Z",
   search: "M10 3a7 7 0 1 1 0 14 7 7 0 1 1 0-14Zm5 12 6 6",
   plus: "M12 4v16M4 12h16",
+  minusLine: "M4 12h16",
   chevron: "m9 5 7 7-7 7",
   back: "m12 5-7 7 7 7M5 12h15",
   image: "M3 3h18v18H3zM4 17l5-6 4 4 3-4 5 6M8 7h.1",
@@ -159,6 +160,8 @@ const labels: Record<string, string> = {
     "本地文件夹和资料库中有仅大小写不同的名称。请先改名，再同步。",
   merge_history_unavailable:
     "无法核对资料库的历史版本。请保留已有文件夹，选择新的空文件夹同步。",
+  ignore_blocked: "本地与云端的内容冲突。请先移开或重命名本地的同名项，再同步。",
+  ignore_rules_changed: "当前规则忽略了上次同步待写入的冲突文件。请暂时移除匹配的规则，完成同步后再加回。",
   delete_confirmation: "等待删除确认",
   stale_candidate: "确认已失效，请重新核对。",
   permission_denied: "没有读写权限，请选择可读写的本机文件夹。",
@@ -210,11 +213,45 @@ export function status(l: LibraryView) {
   const [ic, text, cls] = state(l);
   return box("status", icon(ic, cls), n("span", "", text));
 }
+let noticeTimer: number | undefined;
+// Reset on close because browsers can keep a stale :hover after hiding.
+let noticeHovered = false;
 export function tell(msg: string) {
   const e = document.getElementById("notice")!;
+  const pause = () => window.clearTimeout(noticeTimer);
+  const resume = () => {
+    pause();
+    if (!e.hidden) noticeTimer = window.setTimeout(() => tell(""), 3000);
+  };
+
+  pause();
+  msg = msg.replace(/(?:。|(?<!\.)\.)\s*$/, "");
   e.hidden = !msg;
-  e.replaceChildren(n("span", "", msg));
-  if (msg) e.append(btn("关闭提示", () => tell(""), "bare", "close", true));
+  if (!msg) {
+    noticeHovered = false;
+    e.replaceChildren();
+    return;
+  }
+  const text = e.firstElementChild;
+  if (text) text.textContent = msg;
+  else {
+    const close = btn("关闭提示", () => tell(""), "bare", "close", true);
+    close.onfocus = pause;
+    close.onblur = () => {
+      if (!noticeHovered) resume();
+    };
+    e.append(n("span", "", msg), close);
+  }
+
+  e.onmouseenter = () => {
+    noticeHovered = true;
+    pause();
+  };
+  e.onmouseleave = () => {
+    noticeHovered = false;
+    if (!e.matches(":focus-within")) resume();
+  };
+  if (!noticeHovered && !e.matches(":focus-within")) resume();
 }
 export const errorCode = (e: unknown) =>
   e instanceof Error ? e.message : String(e);
@@ -346,6 +383,7 @@ export function dialog(
   opts: {
     danger?: boolean;
     valid?: () => boolean;
+    onAccept?: () => Promise<void>;
     wide?: boolean;
     sheet?: boolean;
     symbol?: Icon;
@@ -362,7 +400,19 @@ export function dialog(
     const no = btn(opts.cancel || "取消", () => d.close("no")),
       yes = btn(
         accept,
-        () => d.close("yes"),
+        async () => {
+          if (opts.onAccept) {
+            no.disabled = true;
+            d.oncancel = (e) => e.preventDefault();
+            try {
+              await opts.onAccept();
+            } finally {
+              no.disabled = false;
+              d.oncancel = null;
+            }
+          }
+          d.close("yes");
+        },
         opts.danger ? "danger" : "primary",
       );
     const check = () => {

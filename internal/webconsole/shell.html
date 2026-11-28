@@ -29,7 +29,7 @@
     </div>
     {{if $listView}}
     {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{else if eq .View "accounts"}}{{$label = "按用户名筛选"}}{{end}}
-    <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"></label>
+    <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"{{if eq .View "trash"}} value="{{.Data.Filter}}" maxlength="512"{{end}}></label>
     {{end}}
     <details class="account-menu">
       <summary aria-label="账号菜单" title="账号菜单">{{template "icon" "avatar"}}</summary>

@@ -5818,7 +5818,7 @@ func TestRegisterSyncRecoveryPlanPreservesEpochRootMtime(t *testing.T) {
 		ConflictPromotions: _emptyConflictPromotions}); err != nil {
 		t.Fatal(err)
 	}
-	if err := registerSyncRecoveryPlan(t.Context(), db, root, worktree, nil, libraryClientConfig{}); err != nil {
+	if err := registerSyncRecoveryPlan(t.Context(), db, root, worktree, nil, libraryClientConfig{}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	var state string

@@ -1312,7 +1312,8 @@ func TestPendingCheckoutV21InflightMigrationRejectedBeforeDDL(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer db.Close()
-				if _, err := db.Exec(`DROP TABLE sync_recovery_promotions;
+				if _, err := db.Exec(`DROP TABLE checkout_retained_directories; DROP TABLE checkout_ignore_plans;
+                    DROP TABLE sync_recovery_promotions;
 					DROP TABLE pending_publications;`+_clientV21PendingSQL+`;
 					ALTER TABLE pending_checkouts RENAME TO v22_pending_checkouts;`+_clientV21CheckoutSQL+`;
 					DROP TABLE v22_pending_checkouts;
@@ -1392,7 +1393,9 @@ func TestPendingCheckoutV21ToV22Migration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`DROP TABLE pending_publications;` + _clientV21PendingSQL + `;
+	if _, err := db.Exec(`DROP TABLE checkout_file_replacements;
+		DROP TABLE checkout_retained_directories; DROP TABLE checkout_ignore_plans;
+        DROP TABLE pending_publications;` + _clientV21PendingSQL + `;
 		ALTER TABLE pending_checkouts RENAME TO v22_pending_checkouts;` + _clientV21CheckoutSQL + `;
 		INSERT INTO pending_checkouts(server_url,library_id,worktree,user_id,device_id,target_commit,target_root,head_etag,apply_state)
 		SELECT server_url,library_id,worktree,user_id,device_id,target_commit,target_root,head_etag,apply_state FROM v22_pending_checkouts;

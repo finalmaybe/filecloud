@@ -86,7 +86,7 @@ export function login(
     true,
   );
   pass.label.append(eye);
-  const msg = sub("账号由管理员创建。");
+  const msg = n("p", "sub");
   const submit = n("button", "primary", "登录");
   submit.type = "submit";
   const form = n("form", "wizard-host");
@@ -110,6 +110,7 @@ export function login(
     host.input.focus();
   };
   const accountStep = () => {
+    msg.hidden = true;
     connection.replaceChildren(icon("check", "green"), "服务连接正常");
     submit.textContent = "登录";
     host.input.readOnly = true;
@@ -155,7 +156,9 @@ export function login(
     }
     const secret = pass.input.value;
     pass.input.value = "";
+    msg.className = "sub";
     msg.textContent = "正在连接服务器…";
+    msg.hidden = false;
     try {
       await api.Login(verified, user.input.value, secret, device.input.value);
       await done();
@@ -377,6 +380,11 @@ export async function reviewDelete(l: LibraryView) {
     if (!v) return;
     const code = field(`输入上方 ${v.Candidate.length} 位确认码`),
       checked = toggle("我已核对本次删除范围", false);
+    let recheck = false;
+    const checkAgain = btn("按当前规则重新检查", () => {
+      recheck = true;
+      checkAgain.closest("dialog")?.close();
+    });
     const ok = await dialog(
       "检测到大量删除",
       [
@@ -398,6 +406,8 @@ export async function reviewDelete(l: LibraryView) {
         section(
           "请先核对本地文件夹",
           btn("打开本地文件夹", () => api.OpenWorktree(l.ID), "", "folder"),
+          checkAgain,
+          sub("修改忽略规则后可重新检查，无需输入确认码。"),
         ),
         section(
           "确认本次候选",
@@ -416,6 +426,14 @@ export async function reviewDelete(l: LibraryView) {
     );
     if (!ok) {
       await api.CancelReview();
+      if (!recheck) return;
+      try {
+        await api.RequestSync(l.ID);
+      } catch (e) {
+        if (errorCode(e) === "delete_confirmation") continue;
+        if (errorCode(e) !== "stale_candidate") throw e;
+      }
+      tell("旧删除候选已撤销，未确认删除。");
       return;
     }
     try {

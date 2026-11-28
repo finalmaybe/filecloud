@@ -32,7 +32,7 @@ func (r _restorePublicationRound) upload(ctx context.Context, snapshot worktreeS
 }
 
 func (r _restorePublicationRound) publish(ctx context.Context, snapshot worktreeSnapshot, pending _restorePublicationState) (_publicationOutcome, error) {
-	current, err := headBeforePublication(ctx, r.options, r.config, pending._publicationCandidate)
+	current, err := headBeforePublication(ctx, r.options, r.config, pending._publicationCandidate, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, err
 	}

@@ -19,11 +19,14 @@ import {
   childPath,
   line,
   menu,
+  dialog,
   load,
   pickRow,
   type LibraryView,
   type TrashEntry,
 } from "./ui.js";
+
+const trashSelectionLimit = 100;
 
 export function trash(
   l: LibraryView,
@@ -34,18 +37,71 @@ export function trash(
   let type = "全部",
     term = "",
     next = 0,
-    selected: HTMLElement | undefined;
+    inspected: HTMLElement | undefined,
+    rows: TrashEntry[] = [];
   const table = box(""),
     tools = box("toolbar trash-tools"),
-    rows: TrashEntry[] = [];
+    selected = new Set<number>(),
+    checks = new Map<number, { row: HTMLElement; check: HTMLInputElement }>();
+  const batch = btn(
+    "永久删除所选",
+    () => {
+      updateSelection();
+      const ids = [...selected];
+      if (ids.length) return confirmDelete(ids, `已选择 ${ids.length} 个条目`);
+    },
+    "",
+    "trash",
+  );
+  batch.setAttribute("aria-haspopup", "dialog");
+  const count = n("span");
+  batch.append(count);
+  const updateSelection = () => {
+    for (const id of selected) {
+      const entry = checks.get(id);
+      if (!entry || entry.row.hidden) selected.delete(id);
+    }
+    const full = selected.size >= trashSelectionLimit;
+    for (const [id, { check }] of checks) {
+      check.checked = selected.has(id);
+      check.disabled = full && !check.checked;
+      check.title = check.disabled
+        ? `每次最多选择 ${trashSelectionLimit} 个条目`
+        : "";
+    }
+    batch.disabled = selected.size === 0;
+    count.textContent = `（${selected.size}）`;
+    batch.setAttribute("aria-label", `永久删除所选${count.textContent}`);
+  };
+  const confirmDelete = async (ids: number[], target: string) => {
+    const accepted = await dialog(
+      "永久删除回收站条目？",
+      [
+        n("strong", "crumb", target),
+        sub("删除后无法从回收站恢复，当前文件和快照不受影响。"),
+      ],
+      "确认永久删除",
+      {
+        danger: true,
+        symbol: "trash",
+        onAccept: () => api.DeleteTrash(l.ID, ids),
+      },
+    );
+    if (!accepted) return;
+    const deleted = new Set(ids);
+    rows = rows.filter((entry) => !deleted.has(entry.ID));
+    draw();
+    tell(`已永久删除 ${ids.length} 个回收站条目。`);
+  };
   const clear = () => {
     side.hidden = true;
     side.replaceChildren();
-    selected?.classList.remove("selected");
-    selected = undefined;
+    inspected?.classList.remove("selected");
+    inspected = undefined;
   };
   const draw = () => {
     clear();
+    checks.clear();
     tools.replaceChildren(
       tabs(
         ["全部", "文件", "文件夹", "历史版本"],
@@ -56,11 +112,13 @@ export function trash(
         },
         "segments",
       ),
-      search("筛选本页名称或路径", term, (v) => {
+      search("筛选已加载的名称或路径", term, (v) => {
         term = v;
         filterRows(table, v);
-        if (selected?.hidden) clear();
+        if (inspected?.hidden) clear();
+        updateSelection();
       }),
+      batch,
     );
     table.replaceChildren();
     for (const e of rows) {
@@ -86,11 +144,14 @@ export function trash(
         ),
         expires = n("span", "", days ? `剩余 ${days} 天` : "即将到期");
       expires.title = date(e.ExpiresAt);
+      const check = n("input", "trash-check");
+      check.type = "checkbox";
+      check.setAttribute("aria-label", `选择 ${e.Path}`);
       const row = box(
         "trash-cols file-row",
         box(
           "identity",
-          n("span", "selection-mark"),
+          check,
           icon(kind.icon, kind.color),
           box("", n("strong", "", leaf), ...(ver ? [sub("历史版本")] : [])),
         ),
@@ -99,9 +160,16 @@ export function trash(
         expires,
       );
       row.dataset.match = e.Path;
+      checks.set(e.ID, { row, check });
+      check.onchange = () => {
+        if (!check.checked) selected.delete(e.ID);
+        else if (!row.hidden && selected.size < trashSelectionLimit)
+          selected.add(e.ID);
+        updateSelection();
+      };
       const inspect = () => {
-        selected?.classList.remove("selected");
-        selected = row;
+        inspected?.classList.remove("selected");
+        inspected = row;
         row.classList.add("selected");
         side.hidden = false;
         const name = field("恢复后的名称", "text", leaf),
@@ -204,9 +272,17 @@ export function trash(
       };
       if (ver) expires.append(btn("放回版本列表", inspect, "record-action"));
       pickRow(row, inspect, e.Path);
+      const remove = btn(
+        "永久删除",
+        () => confirmDelete([e.ID], e.Path),
+        "menu-link trash-delete",
+        "trash",
+      );
+      remove.setAttribute("aria-haspopup", "dialog");
       row.append(
         menu(leaf + "的更多操作", [
           btn(action, inspect, "menu-link", "history"),
+          remove,
         ]),
       );
       table.append(row);
@@ -222,6 +298,7 @@ export function trash(
           "trash",
         ),
       );
+    updateSelection();
     host.replaceChildren(
       tools,
       box(
@@ -241,7 +318,7 @@ export function trash(
   };
   const page = async (before: number) => {
     const p = await api.Trash(l.ID, before);
-    if (!before) rows.length = 0;
+    if (!before) rows = [];
     rows.push(...(p.Entries || []));
     next = p.Next;
     draw();

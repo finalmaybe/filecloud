@@ -29,6 +29,8 @@ import {
 } from "./ui.js";
 import { previewBody, showPreview, type PreviewItem } from "./preview.js";
 
+const fileHistoryLabel = "历史版本";
+
 export function files(
   l: LibraryView,
   host: HTMLElement,
@@ -36,10 +38,27 @@ export function files(
   bar: HTMLElement,
   back: () => void,
 ) {
+  const listPane = host.closest<HTMLElement>(".pane")!,
+    detail = listPane.closest(".detail-host")!;
   let grid = false;
+  let pageObserver: IntersectionObserver | undefined;
+  // The file tab is cached; stop observing only when its detail page is discarded.
+  queueMicrotask(() => {
+    const parent = detail.parentElement;
+    if (!parent) return;
+    const lifetime = new MutationObserver(() => {
+      if (detail.parentElement === parent) return;
+      pageObserver?.disconnect();
+      lifetime.disconnect();
+    });
+    lifetime.observe(parent, { childList: true });
+  });
   const nav = (dir: string, commit: string) => {
+    pageObserver?.disconnect();
     const pane = box(""),
       results = box(""),
+      pageEnd = box("file-page-end", box("file-page-trigger")),
+      pageStatus = box(""),
       header = box(
         "file-cols table-head",
         ...["名称", "修改时间", "大小", "类型", ""].map((t) =>
@@ -49,7 +68,26 @@ export function files(
     const entries: FileEntry[] = [];
     let anchor = commit,
       term = "",
+      refreshing = false,
+      nextOffset = 0,
+      paging = false,
+      pageFailed = false,
+      pageRevision = 0,
       chosen: HTMLElement | undefined;
+    const isCurrentDirectory = () => pane.parentElement === host && detail.isConnected;
+    const trigger = pageEnd.firstElementChild!;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting && trigger.isConnected) void loadNextPage();
+    });
+    pageObserver = observer;
+    pageStatus.setAttribute("aria-live", "polite");
+    function observeNextPage() {
+      observer.takeRecords();
+      observer.disconnect();
+      // Filtering is limited to already loaded entries, not the whole directory.
+      if (isCurrentDirectory() && nextOffset && !term.trim() && !refreshing && !paging && !pageFailed)
+        observer.observe(trigger);
+    }
     const info = btn(
       "显示或隐藏检查器",
       () => {
@@ -62,17 +100,19 @@ export function files(
     );
     info.disabled = true;
     info.setAttribute("aria-pressed", "false");
+    const clearSelection = () => {
+      chosen?.classList.remove("selected");
+      chosen = undefined;
+      side.hidden = true;
+      side.replaceChildren();
+      info.disabled = true;
+      info.setAttribute("aria-pressed", "false");
+    };
     const filter = search("筛选已加载项目", "", (v) => {
       term = v;
       filterRows(results, v);
-      if (chosen?.hidden) {
-        chosen.classList.remove("selected");
-        chosen = undefined;
-        side.hidden = true;
-        side.replaceChildren();
-        info.disabled = true;
-        info.setAttribute("aria-pressed", "false");
-      }
+      if (chosen?.hidden) clearSelection();
+      observeNextPage();
     });
     const list = btn("列表视图", () => layout(false), "square", "list", true),
       tiles = btn("网格视图", () => layout(true), "square", "grid", true);
@@ -131,13 +171,88 @@ export function files(
       }));
       return showPreview(items, group.indexOf(e));
     };
-    const add = async (offset: number) => {
-      const d = await api.Files(l.ID, anchor, dir, offset);
-      anchor = d.CommitId;
-      if (!offset) pane.replaceChildren(header, results);
-      pane.querySelector(".more")?.remove();
+    async function loadNextPage() {
+      if (!isCurrentDirectory() || refreshing || paging || !nextOffset) return;
+      const revision = pageRevision;
+      paging = true;
+      observeNextPage();
+      try {
+        const d = await api.Files(l.ID, anchor, dir, nextOffset);
+        if (!isCurrentDirectory() || revision !== pageRevision) return;
+        appendEntries(d.Entries || [], d.NextOffset);
+        pageFailed = false;
+        pageStatus.replaceChildren();
+      } catch (e) {
+        if (!isCurrentDirectory() || revision !== pageRevision) return;
+        pageFailed = true;
+        pageStatus.replaceChildren(
+          box("actions", sub(errorText(e)), btn("重试", loadNextPage, "link")),
+        );
+      } finally {
+        paging = false;
+        observeNextPage();
+      }
+    }
+    async function refreshDirectory() {
+      if (refreshing || !isCurrentDirectory()) return;
+      refreshing = true;
+      pageRevision++;
+      observeNextPage();
+      try {
+        const first = await api.Files(l.ID, "", dir, 0);
+        if (!isCurrentDirectory() || first.CommitId === anchor) return;
+        const updated = [...(first.Entries || [])];
+        let next = first.NextOffset;
+        // Keep the old list visible until its loaded range is ready at the new head.
+        while (next && updated.length < entries.length) {
+          const page = await api.Files(l.ID, first.CommitId, dir, next);
+          if (!isCurrentDirectory()) return;
+          updated.push(...(page.Entries || []));
+          next = page.NextOffset;
+        }
+
+        // At narrow widths the workspace scrolls instead of the file pane.
+        const scroll =
+          listPane.scrollHeight > listPane.clientHeight
+            ? listPane
+            : listPane.closest("main") ?? listPane;
+        const scrollTop = scroll.scrollTop;
+        const viewportTop = scroll.getBoundingClientRect().top;
+        const topRow = scrollTop
+          ? Array.from(results.querySelectorAll<HTMLElement>(".file-row:not([hidden])"))
+              .find((row) => row.getBoundingClientRect().bottom > viewportTop)
+          : undefined;
+        const topName = topRow?.dataset.match;
+        const topOffset = topRow?.getBoundingClientRect().top;
+        const selectedName = chosen?.dataset.match;
+        const inspectorHidden = side.hidden;
+
+        clearSelection();
+        anchor = first.CommitId;
+        entries.length = 0;
+        results.replaceChildren();
+        appendEntries(updated, next, selectedName);
+        pageFailed = false;
+        pageStatus.replaceChildren();
+        if (inspectorHidden) {
+          side.hidden = true;
+          info.setAttribute("aria-pressed", "false");
+        }
+        const newTopRow = topName
+          ? results.querySelector<HTMLElement>(`.file-row[data-match="${CSS.escape(topName)}"]`)
+          : null;
+        scroll.scrollTop = newTopRow && topOffset !== undefined
+          ? scroll.scrollTop + newTopRow.getBoundingClientRect().top - topOffset
+          : scrollTop;
+      } finally {
+        refreshing = false;
+        observeNextPage();
+      }
+    }
+    function appendEntries(batch: FileEntry[], next: number, selectedName?: string) {
+      nextOffset = next;
       results.querySelector(".no-match")?.remove();
-      for (const e of d.Entries || []) {
+      for (const e of batch) {
         entries.push(e);
         const folder = e.Type === "Directory",
           path = childPath(dir, e.Name),
@@ -159,7 +274,7 @@ export function files(
           n("span", "", kind.label),
         );
         row.dataset.match = e.Name;
-        const inspect = () => {
+        const inspect = (showHistory = false) => {
           chosen?.classList.remove("selected");
           chosen = row;
           row.classList.add("selected");
@@ -179,15 +294,17 @@ export function files(
             sub(kind.label + " · " + bytes(e.Size)),
             box("metadata", icon("folder"), path.split("/").join(" / ")),
             box("metadata", icon("history"), "修改于 " + date(e.ModifiedAt)),
-            folder
-              ? btn("打开文件夹", open, "", "folder")
-              : box(
-                  "actions",
-                  btn("快速预览", open, "", "eye"),
-                  btn("下载文件", download, "", "download"),
-                ),
           );
-          if (folder) return;
+          if (folder) {
+            details.append(btn("打开文件夹", open, "", "folder"));
+            return;
+          }
+          const actions = box(
+            "actions",
+            btn("快速预览", open, "square", "eye", true),
+            btn("下载文件", download, "square", "download", true),
+          );
+          details.append(actions);
           if (
             Number(e.Size) <= 12 * 1024 * 1024 &&
             ["pdf", "image"].includes(kind.icon)
@@ -200,21 +317,26 @@ export function files(
               })
               .catch(() => {});
           if (l.Phase === "bound")
-            details.append(
+            actions.append(
               btn(
                 canOpenDocument(e.Name) ? "在本机打开" : "预览本机文件",
                 canOpenDocument(e.Name)
                   ? () => api.OpenLocalDocument(l.ID, path)
                   : local,
-                "link",
+                "square",
                 "device",
+                true,
               ),
             );
-          const versions = section("历史版本");
+          const versions = section(fileHistoryLabel);
           details.append(versions);
-          fileHistory(l, anchor, path, e.ModifiedAt, versions, () =>
-            nav(dir, ""),
-          );
+          fileHistory(l, anchor, path, e.ModifiedAt, versions, refreshDirectory);
+          if (showHistory) {
+            versions.tabIndex = -1;
+            versions.setAttribute("aria-label", fileHistoryLabel);
+            versions.focus({ preventScroll: true });
+            versions.scrollIntoView({ block: "start" });
+          }
         };
         const options = [
           btn(
@@ -225,7 +347,10 @@ export function files(
           ),
         ];
         if (!folder)
-          options.push(btn("下载文件", download, "menu-link", "download"));
+          options.push(
+            btn("下载文件", download, "menu-link", "download"),
+            btn(fileHistoryLabel, () => inspect(true), "menu-link", "history"),
+          );
         if (l.Phase === "bound") {
           if (!folder)
             options.push(btn("查看本机文件", local, "menu-link", "device"));
@@ -256,6 +381,7 @@ export function files(
             void Promise.resolve(open()).catch((e) => tell(errorText(e)));
         };
         results.append(row);
+        if (e.Name === selectedName) inspect();
       }
       if (!entries.length)
         results.replaceChildren(
@@ -268,10 +394,15 @@ export function files(
         results.append(noMatch());
         filterRows(results, term);
       }
-      if (d.NextOffset)
-        pane.append(btn("加载更多项目", () => add(d.NextOffset), "more"));
-    };
-    load(pane, () => add(0));
+    }
+    load(pane, async () => {
+      const d = await api.Files(l.ID, anchor, dir, 0);
+      if (!isCurrentDirectory()) return;
+      anchor = d.CommitId;
+      pane.replaceChildren(header, results, pageEnd, pageStatus);
+      appendEntries(d.Entries || [], d.NextOffset);
+      observeNextPage();
+    });
   };
   nav(".", "");
 }
@@ -282,7 +413,7 @@ function fileHistory(
   path: string,
   modified: string,
   section: HTMLElement,
-  reload: () => void,
+  reload: () => Promise<void>,
 ) {
   const rows = box("file-versions");
   section.append(rows);
@@ -337,7 +468,7 @@ function fileHistory(
                     "重新读取",
                   )
                 )
-                  reload();
+                  await reload();
                 return;
               }
               tell(
@@ -345,7 +476,7 @@ function fileHistory(
                   ? "内容和修改时间相同，未创建新版本。"
                   : "已恢复所选文件版本。",
               );
-              reload();
+              await reload();
             },
             "menu-link",
             "history",

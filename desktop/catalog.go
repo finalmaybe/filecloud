@@ -66,15 +66,12 @@ var desktopHTTP = &http.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*ht
 
 // Only named library operations reach this bridge. Credentials never enter the webview or browser URL.
 func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) (*http.Response, error) {
-	s.mu.Lock()
-	_, known := s.data.Names[id]
-	server, token := s.active.Server, s.token
-	allowed := !s.locked() && known && token != ""
-	s.mu.Unlock()
-	if !allowed {
+	p := s.catalogAccess(body != nil)
+	_, known := p.known[id]
+	if !known || p.token == "" || s.closed.Load() {
 		return nil, errSession
 	}
-	target, err := url.Parse(server)
+	target, err := url.Parse(p.view.Server)
 	if err != nil {
 		return nil, errSession
 	}
@@ -92,7 +89,7 @@ func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) 
 	if err != nil {
 		return nil, errSession
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+p.token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -113,12 +110,7 @@ func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) 
 	}
 	switch res.StatusCode {
 	case 401:
-		s.mu.Lock()
-		if token == s.token && !s.catalogExpired {
-			s.catalogExpired = true
-			s.publish()
-		}
-		s.mu.Unlock()
+		s.setCatalogAvailable(p.token, false)
 		return nil, commandError("auth_required")
 	case 403:
 		return nil, errors.New("此账号无权访问所选资料库。")
@@ -128,6 +120,9 @@ func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) 
 		}
 		if res.StatusCode == 405 || !strings.Contains(res.Header.Get("Content-Type"), "application/json") {
 			return nil, errors.New("当前服务端未提供此接口。请更新 filecloud-server 并重启服务后重试。")
+		}
+		if endpoint == "trash/delete" {
+			return nil, errors.New("找不到所选资料库或部分回收站条目；本次未删除任何条目，请重新打开回收站。")
 		}
 		return nil, errors.New("找不到所选资料库、路径或版本，请刷新资料库后重试。")
 	case 409:
@@ -141,6 +136,17 @@ func (s *Workspace) catalogRequest(id, endpoint string, q url.Values, body any) 
 	}
 	return nil, errors.New("请求未完成，请检查所选路径和版本。")
 }
+
+// Mutations still wait for the current workspace operation; browsing uses the
+// credentials and allowed library IDs published with the last view.
+func (s *Workspace) catalogAccess(mutation bool) workspaceSnapshot {
+	if mutation {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	return s.readSnapshot()
+}
+
 func (s *Workspace) catalogJSON(id, endpoint string, q url.Values, body, dst any) error {
 	res, err := s.catalogRequest(id, endpoint, q, body)
 	if err != nil {
@@ -216,6 +222,9 @@ func (s *Workspace) Trash(id string, before int64) (TrashPage, error) {
 }
 func (s *Workspace) RestoreTrash(id string, item int64, dest string) error {
 	return s.catalogJSON(id, fmt.Sprintf("trash/%d/restore", item), url.Values{"Destination": {dest}}, struct{}{}, nil)
+}
+func (s *Workspace) DeleteTrash(id string, items []int64) error {
+	return s.catalogJSON(id, "trash/delete", nil, struct{ IDs []int64 }{items}, nil)
 }
 func (s *Workspace) Retention(id string, p Policy, apply bool, confirm string) (PolicyImpact, error) {
 	var v PolicyImpact

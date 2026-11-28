@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/acceptance"
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 )
 
 const (
@@ -139,6 +140,30 @@ func TestBuiltBinaryEndToEndAcceptance(t *testing.T) {
 	if bindingA.SyncBase != bindingB.SyncBase || bindingA.SyncBaseRoot != bindingB.SyncBaseRoot {
 		t.Fatalf("real binary clients differ: A=%+v B=%+v", bindingA, bindingB)
 	}
+
+	rules := filepath.Join(testRoot, "sync-ignore.json")
+	writeLibraryIgnoreFile(t, rules, `{"SkipHidden":true,"Patterns":["*.tmp"]}`)
+	t.Setenv(syncignore.Env, rules)
+	writeLibraryIgnoreFile(t, filepath.Join(worktreeA, "nested", "local.tmp"), "ignored on A")
+	writeLibraryIgnoreFile(t, filepath.Join(worktreeA, "visible.txt"), "visible")
+	runBlackBoxCLI(t, binary, nil, "library", "sync", "--client-dir", clientA, "--worktree", worktreeA)
+	t.Setenv(syncignore.Env, "")
+	runBlackBoxCLI(t, binary, nil, "library", "sync", "--client-dir", clientB, "--worktree", worktreeB)
+	checkLibraryIgnoreFile(t, filepath.Join(worktreeB, "visible.txt"), "visible")
+	if _, err := os.Stat(filepath.Join(worktreeB, "nested", "local.tmp")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ignored path uploaded: %v", err)
+	}
+	writeLibraryIgnoreFile(t, filepath.Join(worktreeB, ".hidden"), "remote only")
+	runBlackBoxCLI(t, binary, nil, "library", "sync", "--client-dir", clientB, "--worktree", worktreeB)
+	t.Setenv(syncignore.Env, rules)
+	runBlackBoxCLI(t, binary, nil, "library", "sync", "--client-dir", clientA, "--worktree", worktreeA)
+	if _, err := os.Stat(filepath.Join(worktreeA, ".hidden")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ignored path downloaded: %v", err)
+	}
+	checkLibraryIgnoreFile(t, filepath.Join(worktreeA, "nested", "local.tmp"), "ignored on A")
+	t.Setenv(syncignore.Env, "")
+	runBlackBoxCLI(t, binary, nil, "library", "sync", "--client-dir", clientA, "--worktree", worktreeA)
+	checkLibraryIgnoreFile(t, filepath.Join(worktreeA, ".hidden"), "remote only")
 
 	runBlackBoxCLI(t, binary, tokenInput, "logout", "--server", serverURL, "--token-stdin")
 	server.stop(t)

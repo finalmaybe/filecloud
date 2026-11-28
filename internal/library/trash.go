@@ -111,6 +111,10 @@ func (c *Catalog) ListTrash(ctx context.Context, owner, lib string, before int64
 	return c.core.store.Trash(ctx, owner, lib, c.core.now(), before)
 }
 
+func (c *Catalog) DeleteTrash(ctx context.Context, owner, lib string, ids []int64) error {
+	return c.core.store.DeleteTrash(ctx, owner, lib, ids, c.core.now())
+}
+
 func (c *Catalog) RestoreTrash(ctx context.Context, owner, lib string, id int64, destination string) error {
 	done := c.core.store.UseLibrary(owner, lib)
 	defer done()

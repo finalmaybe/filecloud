@@ -760,7 +760,12 @@ main {
   margin: 10px 0;
   position: relative;
 }
+.field > textarea {
+  resize: vertical;
+  font: inherit;
+}
 .field > input,
+.field > textarea,
 select {
   background: white;
   border: 1px solid #c9cbd1;
@@ -873,6 +878,18 @@ dialog > .actions > button {
 .file-row .icon {
   width: 25px;
   height: 25px;
+}
+.file-page-end {
+  position: relative;
+}
+/* Let either scroll container clip the same trigger area above the list end. */
+.file-page-trigger {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  width: 1px;
+  height: 240px;
+  pointer-events: none;
 }
 .file-grid {
   display: grid;
@@ -1309,6 +1326,17 @@ dialog.wide {
 .trash-tools {
   justify-content: space-between;
 }
+.trash-check {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+.trash-delete,
+.trash-delete > .icon:first-child {
+  color: #b72a26;
+}
 .inspector > .field {
   grid-template-columns: 1fr;
   gap: 4px;
@@ -1354,6 +1382,9 @@ dialog.wide {
   flex-wrap: wrap;
   margin-left: auto;
 }
+.viewer-prev > .icon {
+  transform: scaleX(-1);
+}
 .viewer-stage {
   padding: 10px;
   overflow: auto;
@@ -1361,6 +1392,26 @@ dialog.wide {
 .viewer-stage > .preview {
   max-height: 62vh;
   overflow: auto;
+}
+.viewer-stage > .viewer-image {
+  position: relative;
+  height: 54vh;
+  overflow: hidden;
+}
+.viewer-image > img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: auto;
+  max-height: none;
+  touch-action: none;
+  user-select: none;
+}
+.viewer-image.pannable > img {
+  cursor: grab;
+}
+.viewer-image.panning > img {
+  cursor: grabbing;
 }
 .viewer > p {
   text-align: center;

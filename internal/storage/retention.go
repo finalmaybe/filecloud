@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -122,6 +123,10 @@ func trashRoots(ctx context.Context, db *sql.DB, now time.Time, scope *gcScope) 
 	return out, rows.Err()
 }
 
+const TrashPageSize = 100
+
+var ErrInvalidTrashIDs = errors.New("invalid trash record IDs")
+
 type TrashEntry struct {
 	ID                   int64
 	Path, Kind, Source   string
@@ -189,7 +194,7 @@ func scanTrash(row libraryScanner) (TrashEntry, error) {
 	return t, err
 }
 func (s *Store) Trash(ctx context.Context, owner, lib string, now time.Time, before int64) ([]TrashEntry, error) {
-	rows, err := s.db.QueryContext(ctx, trashSelect+`AND (?=0 OR id<?) ORDER BY id DESC LIMIT 101`, owner, lib, now.Unix(), before, before)
+	rows, err := s.db.QueryContext(ctx, trashSelect+`AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`, owner, lib, now.Unix(), before, before, TrashPageSize+1)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +211,44 @@ func (s *Store) Trash(ctx context.Context, owner, lib string, now time.Time, bef
 }
 func (s *Store) TrashItem(ctx context.Context, owner, lib string, id int64, now time.Time) (TrashEntry, error) {
 	return scanTrash(s.db.QueryRowContext(ctx, trashSelect+`AND id=?`, owner, lib, now.Unix(), id))
+}
+
+// DeleteTrash removes active bin records and their archives, but not the
+// deleted_file_versions markers that keep individually deleted versions hidden.
+func (s *Store) DeleteTrash(ctx context.Context, owner, lib string, ids []int64, now time.Time) error {
+	if len(ids) == 0 || len(ids) > TrashPageSize {
+		return ErrInvalidTrashIDs
+	}
+	seen := make(map[int64]bool, len(ids))
+	args := []any{owner, lib, now.Unix()}
+	for _, id := range ids {
+		if id < 1 || seen[id] {
+			return ErrInvalidTrashIDs
+		}
+		seen[id] = true
+		args = append(args, id)
+	}
+	done := s.UseLibrary(owner, lib)
+	defer done()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// The foreign key cascades to trash_versions in the same transaction.
+	res, err := tx.ExecContext(ctx, `DELETE FROM trash_entries
+		WHERE owner=? AND library=? AND restored=0 AND expires_at>? AND id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != int64(len(ids)) {
+		return ErrLibraryNotFound
+	}
+	return tx.Commit()
 }
 
 const restoreEntrySQL = `UPDATE trash_entries SET restored=? WHERE owner=? AND library=? AND id=? AND restored=0 AND expires_at>?`

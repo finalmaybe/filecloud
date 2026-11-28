@@ -89,7 +89,10 @@ Authorization: Bearer <opaque-token>
 | `GET /restore-location` | `Path` 是拟恢复的资料库相对路径。只读检查返回 `Available`，与实际恢复使用相同的大小写折叠及沿途目录规则。结果只对应检查时的 Head，恢复时再次核对。 |
 | `GET /trash` | 可选 `Before`（上一页的 `Next`）。返回最多 100 条 `Entries`（`ID`、`Path`、`Kind`、`DeletedAt`、`ExpiresAt`）与 `Next`，0 表示末页。 |
 | `POST /trash/{id}/restore` | `Destination` 为可选的资料库相对路径；占用返回 `409/3008`，成功返回 `204`。`Version` 记录只放回版本列表。 |
+| `POST /trash/delete` | JSON `{"IDs":[123,124]}`，发送 1–100 个互不重复的正整数回收站记录 `ID`，单项也用该接口。成功返回 `204`，无响应体；非法参数返回 `400/1000`；任一记录不存在、不属于当前所有者和资料库、已恢复或已到期，整批不删除并返回 `404/2000`。 |
 | `POST /retention` | JSON：`TrashDays`、`HistoryDays`，0 跟随默认，历史另支持 -1 永久。`Apply:false` 预览 `Count`、`RestoredRecords`、`Bytes` 和 `Token`。保存时发送相同天数、`Apply:true`、`Confirm`；服务端重算影响，确认不匹配返回 `412`。 |
+
+回收站永久删除支持 `File`、`Directory` 与 `Version`。它只移除回收站记录及随附归档关联，不更新 Head、不修改快照，已隐藏的单文件版本仍保持隐藏；内容对象由既有 GC 规则处理。响应丢失时先重新读取回收站核对，不自动重试。Web 控制台使用同源 `POST /libraries/{library}/trash/delete` 表单，通过重复的 `id` 字段提交所选记录，使用相同的整批语义。
 
 ## CreateSession
 

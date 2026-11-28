@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 	"github.com/zalando/go-keyring"
 )
 
@@ -79,9 +81,18 @@ type Review struct {
 	ID, Worktree, Candidate string
 	Deleted, Tracked        int64
 }
+
+// Only View crosses the webview boundary. Published views and maps are immutable.
+type workspaceSnapshot struct {
+	view             *View
+	token, clientDir string
+	known            map[string]string
+}
+
 type Workspace struct {
 	mu                                        sync.Mutex
-	view                                      atomic.Pointer[View]
+	readMu                                    sync.Mutex
+	published                                 workspaceSnapshot
 	root, cli, token, notice, cursor, running string
 	active                                    account
 	data                                      profile
@@ -96,7 +107,7 @@ type Workspace struct {
 	selectionID                               string
 	createID, createName                      string
 	defaultTrashDays, defaultHistoryDays      int
-	fresh, scanDone, catalogExpired           bool
+	fresh, scanDone                           bool
 	closed                                    atomic.Bool
 	pick                                      func() (string, error)
 	restoreReview                             *RestoreImpact
@@ -147,7 +158,6 @@ func (s *Workspace) loadProfile() error {
 	s.cursor = ""
 	s.defaultTrashDays, s.defaultHistoryDays = 0, 0
 	s.fresh = false
-	s.catalogExpired = false
 	s.createID = ""
 	s.running = ""
 	if s.active.UserID == "" {
@@ -200,9 +210,31 @@ func newUUID() string {
 	b[8] = b[8]&63 | 128
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
-func (s *Workspace) exec(secret string, args ...string) ([]byte, error) {
+func (s *Workspace) ignoreFile() string { return filepath.Join(s.root, "sync-ignore.json") }
+
+func (s *Workspace) IgnoreRules() (syncignore.Rules, error) {
+	return syncignore.Load(s.ignoreFile())
+}
+
+func (s *Workspace) SetIgnoreRules(rules syncignore.Rules) error {
+	if err := rules.Validate(); err != nil {
+		return err
+	}
+	if err := saveJSON(s.ignoreFile(), rules); err != nil {
+		return errors.New("无法保存同步忽略规则，请检查桌面配置目录的写入权限。")
+	}
+	return nil
+}
+
+func (s *Workspace) cliCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command(s.cli, args...)
+	cmd.Env = append(cmd.Environ(), syncignore.Env+"="+s.ignoreFile())
 	hideConsole(cmd)
+	return cmd
+}
+
+func (s *Workspace) exec(secret string, args ...string) ([]byte, error) {
+	cmd := s.cliCommand(args...)
 	if secret != "" {
 		cmd.Stdin = strings.NewReader(secret + "\n")
 	}
@@ -234,11 +266,11 @@ func (s *Workspace) locked() bool {
 	return s.closed.Load() || s.active.LogoutPending || s.active.UserID == ""
 }
 func (s *Workspace) publish() {
-	v := &View{Version: version, Username: s.data.Username, DeviceName: s.data.DeviceName, NotifyDone: s.data.NotifyDone, MuteIssues: s.data.MuteIssues, DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, CatalogSession: s.token != "" && !s.catalogExpired, LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
-	if prev := s.view.Load(); prev != nil {
-		v.Revision = prev.Revision + 1
-	}
+	v := &View{Version: version, Username: s.data.Username, DeviceName: s.data.DeviceName, NotifyDone: s.data.NotifyDone, MuteIssues: s.data.MuteIssues, DefaultTrashDays: s.defaultTrashDays, DefaultHistoryDays: s.defaultHistoryDays, Server: s.active.Server, SignedIn: s.active.UserID != "" && !s.active.LogoutPending, LogoutPending: s.active.LogoutPending, CatalogFresh: s.fresh, More: s.cursor != "", Notice: s.notice, Libraries: []LibraryView{}, Activity: []Activity{}}
+	next := workspaceSnapshot{view: v}
 	if v.SignedIn {
+		next.token, next.clientDir = s.token, s.clientDir()
+		next.known = maps.Clone(s.data.Names)
 		v.Activity = slices.Clone(s.data.Activity)
 		ids := map[string]bool{}
 		for id := range s.data.Names {
@@ -274,9 +306,38 @@ func (s *Workspace) publish() {
 			return a.Name < b.Name
 		})
 	}
-	s.view.Store(v)
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	v.CatalogSession = next.token != ""
+	if prev := s.published; prev.view != nil {
+		v.Revision = prev.view.Revision + 1
+		if next.token == prev.token {
+			v.CatalogSession = prev.view.CatalogSession
+		}
+	}
+	s.published = next
 }
-func (s *Workspace) Snapshot() *View { return s.view.Load() }
+
+func (s *Workspace) readSnapshot() workspaceSnapshot {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	return s.published
+}
+
+func (s *Workspace) Snapshot() *View { return s.readSnapshot().view }
+
+func (s *Workspace) setCatalogAvailable(token string, available bool) {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	p := &s.published
+	if token == "" || p.token != token || p.view.CatalogSession == available {
+		return
+	}
+	v := *p.view
+	v.CatalogSession = available
+	v.Revision++
+	p.view = &v
+}
 func (s *Workspace) loadBindings() error {
 	var list []library
 	if err := s.query(&list, "", "library", "bindings", "--client-dir", s.clientDir(), "--server", s.active.Server, "--user-id", s.active.UserID); err != nil {
@@ -347,6 +408,7 @@ func (s *Workspace) Login(server, username, password, device string) error {
 	if err := s.loadBindings(); err != nil {
 		return err
 	}
+	s.publish()
 	return s.catalog(false)
 }
 func (s *Workspace) Logout() error {
@@ -357,6 +419,7 @@ func (s *Workspace) Logout() error {
 		return nil
 	}
 	s.active.LogoutPending = true
+	s.publish() // Revoke local access before waiting for the remote logout.
 	if err := saveJSON(filepath.Join(s.root, "account.json"), s.active); err != nil {
 		return err
 	}
@@ -400,16 +463,13 @@ func (s *Workspace) Refresh(more bool) error {
 	return s.catalog(more)
 }
 func (s *Workspace) RetentionDefaults() (Policy, error) {
-	s.mu.Lock()
-	server, token := s.active.Server, s.token
-	allowed := !s.locked() && !s.catalogExpired && token != ""
-	s.mu.Unlock()
-	if !allowed {
+	p := s.readSnapshot()
+	if s.closed.Load() || p.token == "" || !p.view.CatalogSession {
 		return Policy{}, errSession
 	}
 	// Settings only need the defaults, not a refresh of the local catalog.
 	var r struct{ DefaultRetention Policy }
-	err := s.query(&r, token, "library", "list", "--server", server, "--page-size", "1", "--token-stdin")
+	err := s.query(&r, p.token, "library", "list", "--server", p.view.Server, "--page-size", "1", "--token-stdin")
 	return r.DefaultRetention, err
 }
 func (s *Workspace) catalog(more bool) error {
@@ -430,7 +490,7 @@ func (s *Workspace) catalog(more bool) error {
 	}
 	if err := s.query(&r, s.token, args...); err != nil {
 		if errors.Is(err, commandError("auth_required")) {
-			s.catalogExpired = true
+			s.setCatalogAvailable(s.token, false)
 		}
 		s.fresh = false
 		return err
@@ -448,7 +508,7 @@ func (s *Workspace) catalog(more bool) error {
 	s.defaultTrashDays, s.defaultHistoryDays = r.DefaultRetention.TrashDays, r.DefaultRetention.HistoryDays
 	s.cursor = r.NextPageToken
 	s.fresh = true
-	s.catalogExpired = false
+	s.setCatalogAvailable(s.token, true)
 	return s.save()
 }
 func (s *Workspace) CreateLibrary(name string, trashDays, historyDays int) error {

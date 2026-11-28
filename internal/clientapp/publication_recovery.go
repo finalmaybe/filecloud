@@ -14,7 +14,7 @@ func (r _syncPublicationRound) settlePublished(ctx context.Context, snapshot wor
 		r.recordBaseline(pending.CapturedCommit, pending.CapturedRoot, head.ETag)
 		return _publicationOutcome{kind: _publicationOutcomeRerunSync}, errors.New("published candidate recovered as Sync Base while preserving local changes; rerun sync")
 	}
-	if *head.CommitID == pending.CandidateCommit && pending.CandidateRoot == pending.CapturedRoot {
+	if *head.CommitID == pending.CandidateCommit && pending.CandidateRoot == pending.CapturedRoot && !snapshot.needsCheckout {
 		if err := r.finalize(ctx, snapshot, head.ETag, pending); err != nil {
 			return _publicationOutcome{}, err
 		}
@@ -76,11 +76,29 @@ func (r _syncPublicationRound) recoverCapturedBaseline(ctx context.Context, etag
 	if _, err := tx.ExecContext(ctx, "DELETE FROM path_index WHERE worktree = ?", binding.Worktree); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
-	for _, path := range paths {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO path_index(worktree, path, type, object_id, canonical_mtime, actual_mtime, size)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, binding.Worktree, path.path, path.kind, path.id, path.mtime, path.mtime, path.size); err != nil {
-			return errors.Join(err, tx.Rollback())
+	priorOmissions := make(map[string]checkoutPath, len(options.scanConfig.ignoreIndex))
+	for path, prior := range options.scanConfig.ignoreIndex {
+		if prior.unmaterialized || ignoreSyncPath(options.scanConfig.ignore, path) {
+			prior.unmaterialized = true
+			priorOmissions[path] = prior
 		}
+	}
+	for i, path := range paths {
+		if prior, ok := priorOmissions[path.path]; ok {
+			paths[i] = prior
+			delete(priorOmissions, path.path)
+		} else if ignoreSyncPath(options.scanConfig.ignore, path.path) {
+			paths[i].unmaterialized = true
+			paths[i].mtime = ""
+		}
+	}
+	// The captured tree cannot tell us whether an omitted local copy of a
+	// remotely deleted entry still exists. Keep its last observed local object.
+	for _, prior := range priorOmissions {
+		paths = append(paths, prior)
+	}
+	if err := insertPathIndex(ctx, tx, binding.Worktree, paths); err != nil {
+		return errors.Join(err, tx.Rollback())
 	}
 	if err := _deletePendingPublication(ctx, tx, binding.Worktree, pending,
 		"published candidate recovery did not clear the expected pending publication"); err != nil {
@@ -128,7 +146,7 @@ func (r _syncPublicationRound) handoffToCheckout(ctx context.Context, snapshot w
 	if err != nil {
 		return err
 	}
-	if err := updateBindingAndIndex(ctx, tx, binding, pending.CapturedCommit, pending.CapturedRoot, checkout.HeadETag, snapshot.paths); err != nil {
+	if err := updateBindingAndIndex(ctx, tx, binding, pending.CapturedCommit, pending.CapturedRoot, checkout.HeadETag, snapshot.indexPaths()); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
 	if err := handoffPendingPublication(ctx, tx, *checkout, pending,

@@ -91,6 +91,8 @@ main.explorer { padding: 0 0 32px; }
 .trash-list .entry-link > span { min-width: 0; }
 .trash-origin { display: block; color: var(--quiet); font-size: 13px; font-weight: 400; }
 .trash-list .action-list { width: 10rem; }
+.trash-select { flex: none; width: 1rem; height: 1rem; }
+.trash-list .destructive { color: var(--orange); }
 .entry-table tbody tr:hover, .entry-table tbody tr:focus-within { background: #f1f8fb; }
 .entry-link { gap: 14px; min-height: 44px; font-weight: 550; }
 :is(a, button).entry-link:hover .entry-name { text-decoration: underline; }
@@ -215,7 +217,7 @@ button.version-menu-toggle { display: grid; place-items: center; width: 44px; ma
 #version-confirm-target { margin-block: 12px; padding: 10px 12px; border-radius: 8px; background: var(--wash); }
 #version-confirm-target strong { color: var(--ink); }
 #version-confirm .dialog-actions { margin-top: 20px; }
-:is(#version-confirm, #delete-dialog) .destructive { background: var(--orange); }
+:is(#version-confirm, #delete-dialog, #trash-delete-dialog) .destructive { background: var(--orange); }
 #version-confirm [role="alert"]:not(:empty) { margin-top: 12px; }
 #version-notice { position: fixed; z-index: 3; right: 16px; bottom: 16px; pointer-events: none; }
 #version-notice:not(:empty) { padding: 8px 16px; border-radius: 8px; background: var(--ink); color: white; }

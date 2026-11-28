@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"time"
 )
@@ -214,7 +213,7 @@ func (s *Workspace) syncOne(id, prefix string) error {
 		s.publish()
 		return err
 	}
-	if prefix == "" && (st.Pending == "delete-confirmation" || st.Pending == "restore-confirmation") {
+	if prefix == "" && st.Pending == "restore-confirmation" {
 		s.publish()
 		return errors.New("此资料库需要先核对待办。")
 	}
@@ -231,8 +230,7 @@ func (s *Workspace) syncOne(id, prefix string) error {
 	if prefix != "" {
 		args = append(args, "--confirm-delete", prefix)
 	}
-	cmd := exec.Command(s.cli, args...)
-	hideConsole(cmd)
+	cmd := s.cliCommand(args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -364,13 +362,16 @@ type HistoryPage struct {
 }
 
 func (s *Workspace) History(id, cursor string) (HistoryPage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	b := s.bound[id]
-	if s.locked() || b.Phase != "bound" {
+	p := s.readSnapshot()
+	if s.closed.Load() || p.clientDir == "" {
 		return HistoryPage{}, errBinding
 	}
-	var page HistoryPage
-	err := s.query(&page, "", "library", "history", "list", "--client-dir", s.clientDir(), "--worktree", b.Worktree, "--output=json", "--page-size", "30", "--page-token", cursor)
-	return page, err
+	for _, b := range p.view.Libraries {
+		if b.ID == id && b.Phase == "bound" {
+			var page HistoryPage
+			err := s.query(&page, "", "library", "history", "list", "--client-dir", p.clientDir, "--worktree", b.Worktree, "--output=json", "--page-size", "30", "--page-token", cursor)
+			return page, err
+		}
+	}
+	return HistoryPage{}, errBinding
 }

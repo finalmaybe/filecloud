@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"sync"
+
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 )
 
 var (
@@ -348,37 +350,51 @@ func (s *_lockedBoundWorktreeSession) Close() error {
 func (s *_lockedBoundWorktreeSession) bindOptions() bindOptions {
 	return bindOptions{clientDir: s.clientDir, serverURL: s.binding.ServerURL, libraryID: s.binding.LibraryID,
 		worktree: s.binding.Worktree, deviceID: s.binding.DeviceID, base: s.base, token: s.token,
-		worktreeRoot: s.root, fallbackOccupied: s.config.fallbackOccupied}
+		worktreeRoot: s.root, fallbackOccupied: s.config.fallbackOccupied, scanConfig: worktreeScanConfig{ignore: s.config.ignoreRules}}
 }
 
 func (s *_lockedBoundWorktreeSession) loadScanConfig(ctx context.Context, warning io.Writer) (worktreeScanConfig, error) {
+	return s.scanConfigWithRules(ctx, warning, s.config.ignoreRules)
+}
+
+func (s *_lockedBoundWorktreeSession) scanConfigWithRules(ctx context.Context, warning io.Writer, rules syncignore.Rules) (worktreeScanConfig, error) {
 	tracked, err := loadTrackedPaths(ctx, s.db, s.binding.Worktree)
 	if err != nil {
 		return worktreeScanConfig{}, err
 	}
-	if len(tracked) == 0 {
+	omitted, err := loadIgnorePathIndex(ctx, s.db, s.binding.Worktree, rules)
+	if err != nil {
+		return worktreeScanConfig{}, err
+	}
+	for path, value := range omitted {
+		if value.unmaterialized {
+			delete(tracked, path)
+		}
+	}
+	if len(tracked) == 0 && len(omitted) == 0 {
 		tracked, err = loadRemoteTrackedPaths(ctx, s.bindOptions(), s.binding)
 		if err != nil {
 			return worktreeScanConfig{}, err
 		}
 	}
-	return worktreeScanConfig{trackedPaths: tracked, warning: warning, fault: s.config.scanFault, ignoreUntrackedUnsupported: true}, nil
+	return worktreeScanConfig{ignore: rules, ignoreIndex: omitted, trackedPaths: tracked, warning: warning, fault: s.config.scanFault, ignoreUntrackedUnsupported: true}, nil
 }
 
 func clonePublicationScanConfig(config worktreeScanConfig) worktreeScanConfig {
 	config.trackedPaths = maps.Clone(config.trackedPaths)
+	config.ignoreIndex = maps.Clone(config.ignoreIndex)
 	config.ignoredRootNames = maps.Clone(config.ignoredRootNames)
 	config.ignoredPaths = maps.Clone(config.ignoredPaths)
 	return config
 }
 
-func headBeforePublication(ctx context.Context, options bindOptions, config libraryClientConfig, candidate _publicationCandidate) (remoteHead, error) {
+func headBeforePublication(ctx context.Context, options bindOptions, config libraryClientConfig, candidate _publicationCandidate, baseRoot string) (remoteHead, error) {
 	if config.beforeHeadCAS != nil {
 		if err := config.beforeHeadCAS(); err != nil {
 			return remoteHead{}, fmt.Errorf("prepare Head publication: %w", err)
 		}
 	}
-	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	verified, err := scanSyncSnapshot(ctx, options, baseRoot)
 	if err != nil || verified.root != candidate.CapturedRoot {
 		return remoteHead{}, errors.New("worktree changed before Head publication")
 	}
@@ -392,12 +408,12 @@ func headBeforePublication(ctx context.Context, options bindOptions, config libr
 	return current, nil
 }
 
-func headAfterPublication(ctx context.Context, options bindOptions, publishErr error) (remoteHead, worktreeSnapshot, error) {
+func headAfterPublication(ctx context.Context, options bindOptions, publishErr error, baseRoot string) (remoteHead, worktreeSnapshot, error) {
 	head, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
 	if err != nil {
 		return remoteHead{}, worktreeSnapshot{}, errors.Join(publishErr, fmt.Errorf("resolve library Head after publish: %w", err))
 	}
-	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, options, baseRoot)
 	if err != nil {
 		return remoteHead{}, worktreeSnapshot{}, errors.Join(publishErr, fmt.Errorf("rescan worktree after publish: %w", err))
 	}

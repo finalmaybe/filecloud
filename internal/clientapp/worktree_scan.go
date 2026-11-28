@@ -14,6 +14,7 @@ import (
 
 	fscompat "github.com/mingming-cn/filecloud/internal/fscompat"
 	"github.com/mingming-cn/filecloud/internal/object"
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 )
 
 type scannedObject struct {
@@ -27,10 +28,30 @@ type blockSource struct {
 }
 
 type worktreeSnapshot struct {
-	root    string
-	objects []scannedObject
-	blocks  map[string]blockSource
-	paths   []checkoutPath
+	root          string
+	objects       []scannedObject
+	blocks        map[string]blockSource
+	paths         []checkoutPath
+	omitted       []checkoutPath
+	ignored       map[string]bool
+	needsCheckout bool
+}
+
+func (s worktreeSnapshot) indexPaths() []checkoutPath {
+	if len(s.omitted) == 0 {
+		return s.paths
+	}
+	paths := make([]checkoutPath, 0, len(s.paths)+len(s.omitted))
+	omitted := make(map[string]bool, len(s.omitted))
+	for _, path := range s.omitted {
+		omitted[path.path] = true
+	}
+	for _, path := range s.paths {
+		if !omitted[path.path] {
+			paths = append(paths, path)
+		}
+	}
+	return append(paths, s.omitted...)
 }
 
 type scanEntry struct {
@@ -43,6 +64,8 @@ type scanFault struct {
 }
 
 type worktreeScanConfig struct {
+	ignore                     syncignore.Rules
+	ignoreIndex                map[string]checkoutPath
 	ignoredRootNames           map[string]bool
 	ignoredPaths               map[string]bool
 	trackedPaths               map[string]bool
@@ -234,6 +257,13 @@ func (session *scanSession) enumerateDirectory(directory *os.File, relative stri
 		}
 		path := joinScanPath(relative, name)
 		if session.config.ignoredPaths[path] {
+			continue
+		}
+		if ignoreSyncName(session.config.ignore, name) {
+			if session.snapshot.ignored == nil {
+				session.snapshot.ignored = make(map[string]bool)
+			}
+			session.snapshot.ignored[path] = true
 			continue
 		}
 		if !utf8.ValidString(name) || len(path) > 1024 {

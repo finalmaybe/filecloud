@@ -106,6 +106,15 @@ func validateFSRelativeParent(value string) bool {
 	return true
 }
 
+func containsSyncRecoveryName(path string) bool {
+	for _, part := range strings.Split(path, "/") {
+		if strings.HasPrefix(part, syncRecoveryPrefix) && validFSActionID(strings.TrimPrefix(part, syncRecoveryPrefix)) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateFSLeaf(value, internalName string, optional bool) bool {
 	if value == "" {
 		return optional && internalName == ""
@@ -156,7 +165,7 @@ func recoveryVisibleLeaf(parent, actionID string, counter int) (string, error) {
 		if counter > 1 {
 			suffix = " " + strconv.Itoa(counter)
 		}
-		candidate := truncateUTF8(stem, available-len(suffix)) + suffix
+		candidate := strings.TrimRight(truncateUTF8(stem, available-len(suffix))+suffix, " ")
 		if validRecoveryVisibleName(candidate) {
 			return candidate, nil
 		}
@@ -295,10 +304,7 @@ func validateFSAction(value fsAction) error {
 			}
 		}
 	} else if restorePromotion {
-		components := strings.Split(value.Target, "/")
-		if !validateFSRelativeParent(value.Target) || len(components) == 0 ||
-			!strings.HasPrefix(components[0], syncRecoveryPrefix) ||
-			!validFSActionID(strings.TrimPrefix(components[0], syncRecoveryPrefix)) || value.InternalTarget != "" {
+		if !validateFSRelativeParent(value.Target) || !containsSyncRecoveryName(value.Target) || value.InternalTarget != "" {
 			return errors.New("filesystem restore promotion action contains invalid hidden target path")
 		}
 	} else if fallbackRootCreate {
@@ -751,6 +757,8 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 	changed := false
 	switch value.Op {
 	case fsOpCreateFile, fsOpCreateDirectory:
+		var createdFile *os.File
+		var createdFileStat fscompat.Stat_t
 		_, fallbackRootCreate := fallbackRootCreateOwner(value)
 		if fallbackRootCreate && sourceExists && !sourceMatches {
 			return completeFallbackRootCollision(ctx, db, value, fault)
@@ -798,7 +806,9 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 				var fd int
 				fd, err = fscompat.Openat(int(parent.Fd()), value.Source, fscompat.O_WRONLY|fscompat.O_CREAT|fscompat.O_EXCL|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0o600)
 				if err == nil {
-					err = fscompat.Close(fd)
+					createdFile = os.NewFile(uintptr(fd), value.Source)
+					defer createdFile.Close()
+					err = fscompat.Fstat(fd, &createdFileStat)
 				}
 			}
 			if err != nil {
@@ -814,6 +824,9 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 		var createdStat fscompat.Stat_t
 		if err := fscompat.Fstatat(int(parent.Fd()), value.Source, &createdStat, fscompat.AT_SYMLINK_NOFOLLOW); err != nil {
 			return err
+		}
+		if createdFile != nil && !statMatchesCheckoutTarget(createdStat, "File", uint64(createdFileStat.Dev), createdFileStat.Ino) {
+			return errors.New("journaled file creation path changed before identity was recorded")
 		}
 		if value.ExpectedDevice == 0 && value.ExpectedInode == 0 {
 			result, err := db.ExecContext(ctx, `UPDATE fs_actions SET expected_device = ?, expected_inode = ?
@@ -836,6 +849,22 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 			value.ExpectedDevice, value.ExpectedInode = uint64(createdStat.Dev), createdStat.Ino
 		}
 	case fsOpRename:
+		var replacement string
+		if isFileReplacementSaveAction(value) {
+			replacement, err = loadCheckoutFileReplacement(ctx, db, value.Worktree)
+			if err != nil {
+				return err
+			}
+		}
+		if replacement != "" {
+			cancelled, moved, err := reconcileFileReplacementSaveAction(ctx, db, parent, replacement, value, journal, sourceMatches, targetExists, targetMatches)
+			if err != nil || cancelled {
+				return err
+			}
+			if moved {
+				break
+			}
+		}
 		switch {
 		case sourceExists && sourceMatches && targetExists && value.Outcome == "preserve_unknown":
 			return advancePreserveUnknownCollision(ctx, db, root, value, fault)
@@ -843,6 +872,11 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 			if fault != nil {
 				if err := fault("before_action", value); err != nil {
 					return err
+				}
+			}
+			if replacement != "" {
+				if _, matches, err := actionPathState(parent, value.Source, value); err != nil || !matches {
+					return errors.Join(errors.New("concurrent checkout save changed before rename"), err)
 				}
 			}
 			if err := renameNoReplace(int(parent.Fd()), value.Source, int(parent.Fd()), value.Target); err != nil {
@@ -862,13 +896,16 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 			if !sourceMatches {
 				return errors.New("filesystem removal action source identity changed")
 			}
-			if err := verifyFSRemovalObject(parent, value); err != nil {
-				return err
-			}
 			if fault != nil {
 				if err := fault("before_action", value); err != nil {
 					return err
 				}
+			}
+			if err := verifyFSRemovalObject(parent, value); err != nil {
+				return err
+			}
+			if _, matches, err := actionPathState(parent, value.Source, value); err != nil || !matches {
+				return errors.Join(errors.New("filesystem removal action source changed before removal"), err)
 			}
 			flags := 0
 			if value.Op == fsOpRmdir {
@@ -911,6 +948,10 @@ func completeFSAction(ctx context.Context, db *sql.DB, root *openedWorktree, val
 			}
 		}
 		file := os.NewFile(uintptr(fd), value.Source)
+		stat, err := statOfOpenFile(file)
+		if err != nil || !statMatchesCheckoutTarget(stat, value.ExpectedKind, value.ExpectedDevice, value.ExpectedInode) {
+			return errors.Join(errors.New("filesystem mtime action opened a different source identity"), err, file.Close())
+		}
 		err = setOpenFileMtime(file, value.ExpectedMtime)
 		if err == nil {
 			err = file.Sync()
@@ -1193,6 +1234,20 @@ func recoverFSActions(ctx context.Context, db *sql.DB, worktree string, root *op
 		return byID[leftRoot].Order < byID[rightRoot].Order
 	})
 	for _, value := range intents {
+		cancelled, err := cancelChangedFileReplacementCapture(ctx, db, root, value)
+		if err != nil {
+			return err
+		}
+		if cancelled {
+			continue
+		}
+		obsolete, err := completeObsoleteFileReplacementMtime(ctx, db, root, value)
+		if err != nil {
+			return err
+		}
+		if obsolete {
+			continue
+		}
 		if err := completeFSAction(ctx, db, root, value, fault); err != nil {
 			return err
 		}
@@ -1200,20 +1255,12 @@ func recoverFSActions(ctx context.Context, db *sql.DB, worktree string, root *op
 	return nil
 }
 
-func journalCreate(ctx context.Context, db *sql.DB, root *openedWorktree, worktree, checkoutPath, parentPath, name, kind string, fault fsActionFault) error {
+func journalCreateAt(ctx context.Context, db *sql.DB, root *openedWorktree, parent *os.File, worktree, checkoutPath, parentPath, name, kind string, fault fsActionFault) error {
 	if err := bindFSJournalRoot(ctx, db, worktree, root); err != nil {
-		return err
-	}
-	parent, err := openFSActionParent(root, parentPath, 0, 0)
-	if err != nil {
 		return err
 	}
 	var parentStat fscompat.Stat_t
 	if err := fscompat.Fstat(int(parent.Fd()), &parentStat); err != nil {
-		parent.Close()
-		return err
-	}
-	if err := parent.Close(); err != nil {
 		return err
 	}
 	op := fsOpCreateFile
@@ -1355,12 +1402,15 @@ func journalRemove(ctx context.Context, db *sql.DB, root *openedWorktree, worktr
 	if err != nil {
 		return err
 	}
+	defer parent.Close()
+	return journalRemoveAt(ctx, db, root, parent, worktree, phase, parentPath, name, kind, internalSource,
+		expectedObject, expectedMtime, expectedSize, device, inode, fault)
+}
+
+func journalRemoveAt(ctx context.Context, db *sql.DB, root *openedWorktree, parent *os.File, worktree, phase, parentPath,
+	name, kind, internalSource, expectedObject, expectedMtime string, expectedSize int64, device, inode uint64, fault fsActionFault) error {
 	var parentStat fscompat.Stat_t
 	if err := fscompat.Fstat(int(parent.Fd()), &parentStat); err != nil {
-		parent.Close()
-		return err
-	}
-	if err := parent.Close(); err != nil {
 		return err
 	}
 	id, err := newFSActionID()
@@ -1395,12 +1445,14 @@ func journalRename(ctx context.Context, db *sql.DB, root *openedWorktree, worktr
 	if err != nil {
 		return err
 	}
+	defer parent.Close()
+	return journalRenameAt(ctx, db, root, parent, worktree, phase, parentPath, source, target, kind, internalSource, internalTarget, device, inode, fault)
+}
+
+func journalRenameAt(ctx context.Context, db *sql.DB, root *openedWorktree, parent *os.File, worktree, phase, parentPath,
+	source, target, kind, internalSource, internalTarget string, device, inode uint64, fault fsActionFault) error {
 	var parentStat fscompat.Stat_t
 	if err := fscompat.Fstat(int(parent.Fd()), &parentStat); err != nil {
-		parent.Close()
-		return err
-	}
-	if err := parent.Close(); err != nil {
 		return err
 	}
 	id, err := newFSActionID()
@@ -1886,33 +1938,43 @@ func promotionTargetParent(ctx context.Context, db *sql.DB, root *openedWorktree
 	return parent, leaf, err
 }
 
-func openRestorePromotionTargetParent(root *openedWorktree, recovery syncRecovery, target string) (*os.File, string, error) {
+func openRestorePromotionTargetParent(root *openedWorktree, recovery syncRecovery, target string, retained map[string]retainedCheckoutDirectory) (*os.File, string, error) {
+	stored := recoveryStoredPath(recovery, recovery.name)
 	if recovery.worktree == "" || !recovery.completed ||
-		!strings.HasPrefix(recovery.name, syncRecoveryPrefix) || target != recovery.name && !strings.HasPrefix(target, recovery.name+"/") {
+		!strings.HasPrefix(recovery.name, syncRecoveryPrefix) || target != stored && !strings.HasPrefix(target, stored+"/") {
 		return nil, "", errors.New("filesystem restore promotion has no exact hidden recovery target")
 	}
-	components := strings.Split(target, "/")
-	if len(components) == 1 {
-		if recovery.kind != "File" || target != recovery.name {
-			return nil, "", errors.New("filesystem restore promotion target does not match its recovery type")
-		}
-		parent, err := openFSActionParent(root, "", root.device, root.inode)
-		return parent, components[0], err
-	}
-	if recovery.kind != "Directory" || components[0] != recovery.name {
-		return nil, "", errors.New("filesystem restore promotion descendant has no directory recovery owner")
-	}
-	fd, err := openWorktreeDirectoryAt(int(root.directory.Fd()), recovery.name)
+	parent, _, _, err := openSyncRecoveryParentAt(root, retained, recovery)
 	if err != nil {
 		return nil, "", err
 	}
+	if target == stored {
+		if recovery.kind != "File" {
+			parent.Close()
+			return nil, "", errors.New("filesystem restore promotion target does not match its recovery type")
+		}
+		return parent, recovery.name, nil
+	}
+	if recovery.kind != "Directory" {
+		parent.Close()
+		return nil, "", errors.New("filesystem restore promotion descendant has no directory recovery owner")
+	}
+	components := strings.Split(strings.TrimPrefix(target, stored+"/"), "/")
+	fd, err := openWorktreeDirectoryAt(int(parent.Fd()), recovery.name)
+	if err = errors.Join(err, parent.Close()); err != nil {
+		if fd >= 0 {
+			fscompat.Close(fd)
+		}
+		return nil, "", err
+	}
+
 	var stat fscompat.Stat_t
 	if err := fscompat.Fstat(fd, &stat); err != nil || !statMatchesRecovery(stat, recovery) {
 		fscompat.Close(fd)
 		return nil, "", errors.Join(errors.New("filesystem restore promotion recovery root changed identity"), err)
 	}
 	current := fd
-	for _, component := range components[1 : len(components)-1] {
+	for _, component := range components[:len(components)-1] {
 		next, openErr := openWorktreeDirectoryAt(current, component)
 		fscompat.Close(current)
 		if openErr != nil {
@@ -1940,7 +2002,14 @@ func completeRestorePromotionAction(ctx context.Context, db *sql.DB, root *opene
 	if err != nil {
 		return errors.Join(errors.New("filesystem restore promotion recovery owner is absent"), err)
 	}
-	targetParent, targetLeaf, err := openRestorePromotionTargetParent(root, recovery, value.Target)
+	var dirs map[string]retainedCheckoutDirectory
+	if strings.Contains(recovery.path, "/") {
+		dirs, err = loadRetainedCheckoutDirectories(ctx, db, recovery.worktree)
+		if err != nil {
+			return err
+		}
+	}
+	targetParent, targetLeaf, err := openRestorePromotionTargetParent(root, recovery, value.Target, dirs)
 	if err != nil {
 		return err
 	}

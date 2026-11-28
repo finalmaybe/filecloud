@@ -3,6 +3,7 @@ package library
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,15 @@ import (
 
 func (c *Catalog) registerDesktopOperations(mux *http.ServeMux) {
 	// These endpoints accept API sessions only; the console retains its cookie/form handlers.
-	for pattern, handle := range map[string]http.HandlerFunc{"GET /v1/libraries/{LibraryId}/content": c.snapshotContent, "POST /v1/libraries/{LibraryId}/file-history/{CommitId}/restore": c.restoreVersionAPI, "GET /v1/libraries/{LibraryId}/trash": c.trashPage, "GET /v1/libraries/{LibraryId}/restore-location": c.restoreLocation, "POST /v1/libraries/{LibraryId}/trash/{id}/restore": c.restoreTrashAPI, "POST /v1/libraries/{LibraryId}/retention": c.retentionAPI} {
+	for pattern, handle := range map[string]http.HandlerFunc{
+		"GET /v1/libraries/{LibraryId}/content":                          c.snapshotContent,
+		"POST /v1/libraries/{LibraryId}/file-history/{CommitId}/restore": c.restoreVersionAPI,
+		"GET /v1/libraries/{LibraryId}/trash":                            c.trashPage,
+		"GET /v1/libraries/{LibraryId}/restore-location":                 c.restoreLocation,
+		"POST /v1/libraries/{LibraryId}/trash/{id}/restore":              c.restoreTrashAPI,
+		"POST /v1/libraries/{LibraryId}/trash/delete":                    c.deleteTrashAPI,
+		"POST /v1/libraries/{LibraryId}/retention":                       c.retentionAPI,
+	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if !validUUID(r.PathValue("LibraryId")) {
 				c.core.invalid(w)
@@ -92,7 +101,7 @@ func (c *Catalog) trashPage(w http.ResponseWriter, r *http.Request) {
 		Next    int64
 	}{Message: "success", Entries: []item{}}
 	for i, v := range rows {
-		if i == 100 {
+		if i == storage.TrashPageSize {
 			page.Next = rows[i-1].ID
 			break
 		}
@@ -155,6 +164,45 @@ func (c *Catalog) restoreTrashAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *Catalog) deleteTrashAPI(w http.ResponseWriter, r *http.Request) {
+	ids := decodeTrashDeleteIDs(http.MaxBytesReader(w, r.Body, _maxRequestBody))
+	owner, _ := auth.UserID(r.Context())
+	err := c.DeleteTrash(r.Context(), owner, r.PathValue("LibraryId"), ids)
+	switch {
+	case errors.Is(err, storage.ErrInvalidTrashIDs):
+		c.core.invalid(w)
+	case errors.Is(err, storage.ErrLibraryNotFound):
+		c.core.writeError(w, http.StatusNotFound, 2000, "library or trash record not found; no records deleted")
+	case err != nil:
+		c.core.writeBrowseError(w, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// Accept exactly one list, so a repeated or unknown field cannot replace the
+// IDs the caller intended to delete. A nil result fails the store's validation.
+func decodeTrashDeleteIDs(r io.Reader) []int64 {
+	d := json.NewDecoder(r)
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return nil
+	}
+	if token, err := d.Token(); err != nil || token != "IDs" {
+		return nil
+	}
+	var ids []int64
+	if err := d.Decode(&ids); err != nil {
+		return nil
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return nil
+	}
+	if _, err := d.Token(); !errors.Is(err, io.EOF) {
+		return nil
+	}
+	return ids
 }
 
 func (c *Catalog) retentionAPI(w http.ResponseWriter, r *http.Request) {

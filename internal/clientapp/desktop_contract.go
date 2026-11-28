@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mingming-cn/filecloud/internal/fscompat"
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 )
 
 // Machine mode returns either the complete normal response or a redacted error envelope.
@@ -72,7 +73,7 @@ func checkServer(ctx context.Context, args []string, out, stderr io.Writer) erro
 	return json.NewEncoder(out).Encode(struct{}{})
 }
 
-func checkBindingDirectory(args []string, out, stderr io.Writer) error {
+func checkBindingDirectoryWithRules(args []string, out, stderr io.Writer, rules syncignore.Rules) error {
 	flags := newFlagSet("library check-directory", stderr)
 	path := flags.String("worktree", "", "Local worktree directory")
 	if err := flags.Parse(args); err != nil {
@@ -95,6 +96,18 @@ func checkBindingDirectory(args []string, out, stderr io.Writer) error {
 	names, err := readDirectoryNames(root.directory, -1)
 	if err != nil {
 		return err
+	}
+	if rules.Active() {
+		snapshot, err := scanSyncSnapshot(context.Background(), bindOptions{worktreeRoot: root, scanConfig: worktreeScanConfig{ignore: rules}}, "")
+		if err != nil {
+			return err
+		}
+		names = names[:0]
+		for _, value := range snapshot.paths {
+			if !strings.Contains(value.path, "/") {
+				names = append(names, value.path)
+			}
+		}
 	}
 	return json.NewEncoder(out).Encode(struct {
 		Empty      bool
@@ -236,6 +249,10 @@ func syncErrorCode(err error) string {
 		return "no_common_base"
 	case errors.As(err, &del):
 		return "delete_confirmation"
+	case errors.Is(err, errSyncIgnoreBlocked):
+		return "ignore_blocked"
+	case errors.Is(err, errCheckoutIgnoreRulesChanged):
+		return "ignore_rules_changed"
 	case errors.Is(err, errSyncBusy):
 		return "busy"
 	case errors.As(err, &stale), errors.Is(err, _errNoProtectedDeletion), errors.Is(err, _errWrongDeletePrefix):

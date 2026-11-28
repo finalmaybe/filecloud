@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,6 +91,69 @@ func TestRetentionPreviewAndSweepExpiredPublishedBlocks(t *testing.T) {
 	}
 	if ok, err := s.HasObject(ctx, l.OwnerUserID, l.ID, "commits", commit.Parents[0]); err != nil || !ok {
 		t.Fatal("baseline metadata lost", err)
+	}
+}
+
+func TestDeleteTrashAtomicallyScopesRecordsAndCascadesArchives(t *testing.T) {
+	s := openAccountStore(t)
+	defer closeAccountStore(t, s)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, user := range []User{{ID: "mine", Username: "alice", PasswordHash: "hash"}, {ID: "theirs", Username: "bob", PasswordHash: "hash"}} {
+		if err := s.CreateUser(ctx, user, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, l := range []Library{{OwnerUserID: "mine", ID: "bin", Name: "bin"}, {OwnerUserID: "mine", ID: "other", Name: "other"}, {OwnerUserID: "theirs", ID: "bin", Name: "bin"}} {
+		if _, _, err := s.CreateLibrary(ctx, l, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add := func(owner, lib, kind string, restored int64, expires time.Time) int64 {
+		t.Helper()
+		var id int64
+		if err := s.db.QueryRowContext(ctx, `INSERT INTO trash_entries(owner,library,path,kind,object_id,modified,source,deleted_at,expires_at,restored)
+			VALUES(?,?,'same-path',?,'object','modified','commit',?,?,?) RETURNING id`, owner, lib, kind, now.Add(-time.Hour).Unix(), expires.Unix(), restored).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO trash_versions VALUES(?,'same-path','commit','object','modified','content')`, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	future := now.Add(time.Hour)
+	file := add("mine", "bin", "File", 0, future)
+	dir := add("mine", "bin", "Directory", 0, future)
+	version := add("mine", "bin", "Version", 0, future)
+	unselected := add("mine", "bin", "File", 0, future)
+	restored := add("mine", "bin", "Version", now.Unix(), future)
+	expired := add("mine", "bin", "File", 0, now)
+	otherLibrary := add("mine", "other", "File", 0, future)
+	otherOwner := add("theirs", "bin", "File", 0, future)
+
+	assertCounts := func(id int64, want int) {
+		t.Helper()
+		var records, archives int
+		if err := s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM trash_entries WHERE id=?),
+			(SELECT COUNT(*) FROM trash_versions WHERE trash_id=?)`, id, id).Scan(&records, &archives); err != nil || records != want || archives != want {
+			t.Fatalf("id %d: records=%d archives=%d, want %d each, err=%v", id, records, archives, want, err)
+		}
+	}
+	for _, invalid := range []int64{otherOwner, otherLibrary, restored, expired, otherOwner + 1} {
+		if err := s.DeleteTrash(ctx, "mine", "bin", []int64{file, invalid, dir}, now); !errors.Is(err, ErrLibraryNotFound) {
+			t.Fatalf("invalid id %d: %v", invalid, err)
+		}
+		assertCounts(file, 1)
+		assertCounts(dir, 1)
+	}
+	if err := s.DeleteTrash(ctx, "mine", "bin", []int64{file, dir, version}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{file, dir, version} {
+		assertCounts(id, 0)
+	}
+	for _, id := range []int64{unselected, restored, expired, otherLibrary, otherOwner} {
+		assertCounts(id, 1)
 	}
 }
 

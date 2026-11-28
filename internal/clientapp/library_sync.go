@@ -80,11 +80,21 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	status _publicationOutcome, stdout io.Writer) error {
 	db, binding, config := session.db, session.binding, session.config
 	if status.Kind() == _publicationOutcomeCheckoutPending {
-		if err := continueSyncCheckout(ctx, db, options, binding, *status.checkout, stdout, config); err != _errSyncCheckoutRolledBack {
+		resume := options
+		saved, err := checkoutIgnoreRules(ctx, db, binding.Worktree, options.scanConfig.ignore)
+		if err != nil {
+			return err
+		}
+		if ignoreRulesID(saved) != ignoreRulesID(options.scanConfig.ignore) {
+			resume.scanConfig, err = session.scanConfigWithRules(ctx, options.scanConfig.warning, saved)
+			if err != nil {
+				return err
+			}
+		}
+		if err := continueSyncCheckout(ctx, db, resume, binding, *status.checkout, stdout, config); err != _errSyncCheckoutRolledBack {
 			return err
 		}
 		var lifecycle _publicationLifecycle
-		var err error
 		status, err = lifecycle.Advance(ctx, session, _inspectPublicationRequest{})
 		if err != nil {
 			return err
@@ -99,7 +109,7 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 		return _errNoProtectedDeletion
 	}
 
-	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, options, binding.SyncBaseRoot)
 	if err != nil {
 		return fmt.Errorf("scan worktree: %w", err)
 	}
@@ -118,7 +128,7 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 	localChanged := snapshot.root != binding.SyncBaseRoot
 	remoteChanged := *head.CommitID != binding.SyncBase
 	if !localChanged {
-		if remoteChanged {
+		if remoteChanged || snapshot.needsCheckout {
 			checkout := pendingCheckout{ServerURL: binding.ServerURL, LibraryID: binding.LibraryID, Worktree: binding.Worktree,
 				UserID: binding.UserID, DeviceID: binding.DeviceID, TargetCommit: *head.CommitID, HeadETag: head.ETag,
 				ApplyState: "pending", ConflictPromotions: _emptyConflictPromotions}
@@ -127,7 +137,7 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 			}
 			return continueSyncCheckout(ctx, db, options, binding, checkout, stdout, config)
 		}
-		if err := replacePathIndex(ctx, db, binding.Worktree, snapshot.paths); err != nil {
+		if err := replacePathIndex(ctx, db, binding.Worktree, snapshot.indexPaths()); err != nil {
 			return err
 		}
 		if config.syncEvent != nil {
@@ -142,7 +152,7 @@ func syncLibrary(ctx context.Context, session *_lockedBoundWorktreeSession, opti
 		round.budget = _newReplayBudget()
 		prepared, err = prepareSyncMergePublication(ctx, session, options, snapshot, head, round.budget)
 	} else {
-		prepared, err = prepareDirectSyncPublication(session, options.scanConfig.trackedPaths, snapshot, head)
+		prepared, err = prepareDirectSyncPublication(session, participatingTrackedPaths(options.scanConfig), snapshot, head)
 	}
 	if err != nil {
 		return err
@@ -310,12 +320,40 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 	} else if pending.TargetRoot != commit.Root {
 		return errors.New("pending checkout target commit changed root")
 	}
-	paths, err := downloadCheckoutTree(ctx, options, pending.TargetRoot)
+	promotions, err := _decodeConflictPromotions(pending.ConflictPromotions)
+	if err != nil {
+		return fmt.Errorf("decode pending conflict provenance: %w", err)
+	}
+	for _, promotion := range promotions {
+		if ignoreSyncPath(options.scanConfig.ignore, promotion.source) || ignoreSyncPath(options.scanConfig.ignore, promotion.target) {
+			return errCheckoutIgnoreRulesChanged
+		}
+	}
+	paths, omitted, err := downloadCheckoutView(ctx, options, pending.TargetRoot)
 	if err != nil {
 		return err
 	}
-	if err := saveCheckoutPaths(ctx, db, binding.Worktree, paths); err != nil {
+	options.syncFileReplacement, err = loadCheckoutFileReplacement(ctx, db, binding.Worktree)
+	if err != nil {
 		return err
+	}
+	var stable worktreeSnapshot
+	if pending.ApplyState == "pending" && options.scanConfig.ignore.Active() {
+		stable, err = scanSyncSnapshot(ctx, options, binding.SyncBaseRoot)
+		if err != nil {
+			return err
+		}
+		if err := prepareCheckoutIgnorePlan(ctx, db, &options, paths, stable); err != nil {
+			if errors.Is(err, errSyncIgnoreBlocked) {
+				return errors.Join(err, clearUnstartedCheckout(ctx, db, binding.Worktree))
+			}
+			return err
+		}
+	} else if options.scanConfig.ignore.Active() || options.syncFileReplacement != "" {
+		options.retainedDirs, err = loadRetainedCheckoutDirectories(ctx, db, binding.Worktree)
+		if err != nil {
+			return err
+		}
 	}
 	if pending.ApplyState == "pending" {
 		if config.beforeSyncRecoveryPrepare != nil {
@@ -323,19 +361,66 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 				return fmt.Errorf("prepare sync recovery: %w", err)
 			}
 		}
-		stable, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+		stable, err = scanSyncSnapshot(ctx, options, binding.SyncBaseRoot)
 		if err != nil || stable.root != binding.SyncBaseRoot {
 			if clearErr := clearUnstartedCheckout(ctx, db, binding.Worktree); clearErr != nil {
 				return errors.Join(errors.New("local worktree changed before remote apply"), err, clearErr)
 			}
 			return errors.Join(errors.New("local and remote libraries both changed; merge is not supported yet"), err)
 		}
-		if err := registerSyncRecoveryPlan(ctx, db, options.worktreeRoot, binding.Worktree, stable.paths, config); err != nil {
+		for path := range ignoredAncestors(stable.ignored) {
+			if _, retained := options.retainedDirs[path]; !retained {
+				return errors.Join(errSyncIgnoreBlocked, clearUnstartedCheckout(ctx, db, binding.Worktree))
+			}
+		}
+		var replacement *syncFileReplacementPlan
+		if len(promotions) == 0 {
+			replacement, err = planSyncFileReplacement(ctx, db, options, binding.SyncBaseRoot, stable, paths, omitted)
+			if err != nil {
+				return err
+			}
+		}
+		if replacement == nil {
+			if err := saveCheckoutPaths(ctx, db, binding.Worktree, paths); err != nil {
+				return err
+			}
+		}
+		if err := registerSyncRecoveryPlan(ctx, db, options.worktreeRoot, binding.Worktree, stable.paths, config, options.retainedDirs, replacement); err != nil {
 			return err
 		}
+		if replacement != nil {
+			options.syncFileReplacement = replacement.old.path
+			options.retainedDirs, err = loadRetainedCheckoutDirectories(ctx, db, binding.Worktree)
+			if err != nil {
+				return err
+			}
+		}
 		pending.ApplyState = "applying"
+	} else if options.syncFileReplacement == "" {
+		if err := saveCheckoutPaths(ctx, db, binding.Worktree, paths); err != nil {
+			return err
+		}
 	}
-	if err := prepareSyncRecoveries(ctx, db, options.worktreeRoot, binding.Worktree, config); err != nil {
+	materializePaths := paths
+	var staged *stagedCheckoutFile
+	if options.syncFileReplacement != "" {
+		materializePaths = fileReplacementTargets(paths, options.syncFileReplacement)
+		if err := validateFileReplacementIntents(ctx, db, options, materializePaths, len(promotions)); err != nil {
+			return err
+		}
+		if err := materializeCheckoutDirectories(ctx, db, options, materializePaths, config); err != nil {
+			return err
+		}
+		target := materializePaths[len(materializePaths)-1]
+		staged, err = stageSyncFileReplacement(ctx, db, options, target, config)
+		if err != nil {
+			return rollbackChangedFileReplacementOnApplyError(ctx, db, options, target, config, err)
+		}
+	}
+	if err := prepareSyncRecoveries(ctx, db, options.worktreeRoot, binding.Worktree, config, options.scanConfig.ignore.Active(), options.syncFileReplacement != ""); err != nil {
+		if errors.Is(err, errFileReplacementSourceChanged) {
+			return errors.Join(err, rollbackApplyingCheckout(ctx, db, options, config))
+		}
 		return err
 	}
 	if config.beforeCheckoutMaterialize != nil {
@@ -343,22 +428,31 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 			return fmt.Errorf("prepare checkout materialization: %w", err)
 		}
 	}
-	if err := materializeCheckoutDirectories(ctx, db, options, paths, config); err != nil {
-		return err
+	if options.syncFileReplacement == "" {
+		if err := materializeCheckoutDirectories(ctx, db, options, materializePaths, config); err != nil {
+			return err
+		}
 	}
-	promotions, err := _decodeConflictPromotions(pending.ConflictPromotions)
-	if err != nil {
-		return fmt.Errorf("decode pending conflict provenance: %w", err)
-	}
-	if err := promoteCapturedConflictFiles(ctx, db, options.worktreeRoot, binding.Worktree, promotions, paths, config); err != nil {
+	if err := promoteCapturedConflictFiles(ctx, db, options, binding.Worktree, promotions, paths, config); err != nil {
 		return err
 	}
 	latePaths, err := reconcilePromotedConflictFiles(ctx, db, options, paths, config)
 	if err != nil {
 		return err
 	}
-	if err := materializeCheckoutFiles(ctx, db, options, paths, config); err != nil {
+	if err := materializeCheckoutFiles(ctx, db, options, materializePaths, config, staged); err != nil {
+		if options.syncFileReplacement != "" {
+			return rollbackChangedFileReplacementOnApplyError(ctx, db, options, materializePaths[len(materializePaths)-1], config, err)
+		}
 		return err
+	}
+	var installed checkoutPath
+	if options.syncFileReplacement != "" {
+		installed.path = options.syncFileReplacement
+		_, installed.device, installed.inode, _, err = checkoutTempRecord(ctx, db, binding.Worktree, installed.path)
+		if err != nil || installed.device == 0 || installed.inode == 0 {
+			return errors.Join(errors.New("installed single-file checkout has no journal identity"), err)
+		}
 	}
 	moreMaterializedLate, err := reconcilePromotedConflictFiles(ctx, db, options, paths, config)
 	if err != nil {
@@ -368,29 +462,35 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 		latePaths[path] = true
 	}
 	if err := verifyAllSyncRecoveries(ctx, db, options.worktreeRoot, binding.Worktree); err != nil {
-		rollbackErr := beginSyncRollback(ctx, db, binding.Worktree)
-		if rollbackErr == nil {
-			rollbackErr = rollbackSyncApply(ctx, db, options.worktreeRoot, options.clientDir, binding.Worktree, config)
+		return errors.Join(fmt.Errorf("captured local content changed during remote apply: %w", err), rollbackApplyingCheckout(ctx, db, options, config))
+	}
+	verify := func(options bindOptions) (worktreeSnapshot, error) {
+		snapshot, err := verifyCheckoutView(options, pending.TargetRoot, paths)
+		if err == nil && installed.path != "" {
+			err = verifyFileReplacementIdentities(snapshot, options.retainedDirs, installed)
 		}
-		if rollbackErr == nil {
-			rollbackErr = clearApplyingCheckout(ctx, db, binding.Worktree)
+		return snapshot, err
+	}
+	rollbackReplacement := func(err error) error {
+		if installed.path == "" {
+			return err
 		}
-		return errors.Join(fmt.Errorf("captured local content changed during remote apply: %w", err), rollbackErr)
+		return errors.Join(err, rollbackApplyingCheckout(ctx, db, options, config))
 	}
 	ignored, err := registeredSyncRecoveryNames(ctx, db, binding.Worktree)
 	if err != nil {
 		return err
 	}
 	scanConfig := options.scanConfig
-	scanConfig.ignoredRootNames = ignored
-	scanConfig.ignoredPaths = latePaths
-	verified, err := scanWorktreeWithConfig(options.worktreeRoot, scanConfig)
-	if err != nil || verified.root != pending.TargetRoot {
+	scanConfig.ignoredPaths = joinCheckoutPaths(ignored, latePaths)
+	verifyOptions := options
+	verifyOptions.scanConfig = scanConfig
+	if _, err := verify(verifyOptions); err != nil {
 		var lateErr error
 		if len(latePaths) != 0 {
 			lateErr = errors.New("late conflict paths require rerun sync")
 		}
-		return errors.Join(errors.New("applied remote snapshot did not match its fixed target"), lateErr, err)
+		return rollbackReplacement(errors.Join(errors.New("applied remote snapshot did not match its fixed target"), lateErr, err))
 	}
 	if config.beforeFinalize != nil {
 		if err := config.beforeFinalize(); err != nil {
@@ -405,22 +505,22 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 		latePaths[path] = true
 	}
 	if err := verifyAllSyncRecoveries(ctx, db, options.worktreeRoot, binding.Worktree); err != nil {
-		return fmt.Errorf("captured local content changed before finalization: %w", err)
+		return rollbackReplacement(fmt.Errorf("captured local content changed before finalization: %w", err))
 	}
 	ignored, err = registeredSyncRecoveryNames(ctx, db, binding.Worktree)
 	if err != nil {
 		return err
 	}
 	scanConfig = options.scanConfig
-	scanConfig.ignoredRootNames = ignored
-	scanConfig.ignoredPaths = latePaths
-	verified, err = scanWorktreeWithConfig(options.worktreeRoot, scanConfig)
-	if err != nil || verified.root != pending.TargetRoot {
+	scanConfig.ignoredPaths = joinCheckoutPaths(ignored, latePaths)
+	verifyOptions.scanConfig = scanConfig
+	verified, err := verify(verifyOptions)
+	if err != nil {
 		var lateErr error
 		if len(latePaths) != 0 {
 			lateErr = errors.New("late conflict paths require rerun sync")
 		}
-		return errors.Join(errors.New("remote target changed before finalization"), lateErr, err)
+		return rollbackReplacement(errors.Join(errors.New("remote target changed before finalization"), lateErr, err))
 	}
 	finalRecoveries, err := loadSyncRecoveries(ctx, db, binding.Worktree)
 	if err != nil {
@@ -436,9 +536,9 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 	}
 	finalIgnored := make(map[string]bool, len(finalRecoveries)*2)
 	for _, recovery := range finalRecoveries {
-		finalIgnored[recovery.name] = true
+		finalIgnored[recoveryStoredPath(recovery, recovery.name)] = true
 		if recovery.tombstone != "" {
-			finalIgnored[recovery.tombstone] = true
+			finalIgnored[recoveryStoredPath(recovery, recovery.tombstone)] = true
 		}
 	}
 	finalValidation := func() error {
@@ -450,27 +550,35 @@ func continueSyncCheckout(ctx context.Context, db *sql.DB, options bindOptions, 
 			if recovery.tombstone != "" {
 				name = recovery.tombstone
 			}
-			if recovery.kind == "File" && directPromotions[recovery.path] {
-				if _, err := statAt(options.worktreeRoot.directory, name); errors.Is(err, fscompat.ENOENT) {
-					continue
-				}
-			}
-			if err := verifyNamedRecovery(options.worktreeRoot.directory, name, recovery); err != nil {
-				return fmt.Errorf("verify captured path %q: %w", recovery.path, err)
+			if err := verifySyncRecoveryAt(options.worktreeRoot, options.retainedDirs, recovery, name, directPromotions[recovery.path]); err != nil {
+				return err
 			}
 		}
-		finalScan := options.scanConfig
-		finalScan.ignoredRootNames = finalIgnored
-		finalScan.ignoredPaths = latePaths
-		snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, finalScan)
-		if err != nil || snapshot.root != pending.TargetRoot {
+		finalOptions := options
+		finalOptions.scanConfig.ignoredPaths = joinCheckoutPaths(finalIgnored, latePaths)
+		if _, err := verify(finalOptions); err != nil {
 			return errors.Join(errors.New("worktree no longer matches checkout Candidate"), err)
 		}
 		return nil
 	}
-	if err := finalizeSyncApply(ctx, db, binding, pending, paths, config, finalValidation); err != nil {
+	indexPaths := paths
+	if options.scanConfig.ignore.Active() {
+		byPath := make(map[string]checkoutPath, len(verified.paths))
+		for _, path := range verified.paths {
+			byPath[path.path] = path
+		}
+		indexPaths = make([]checkoutPath, 0, len(paths)+len(omitted))
+		for _, path := range paths {
+			indexPaths = append(indexPaths, byPath[path.path])
+		}
+	}
+	indexPaths = append(indexPaths, omittedForIndex(omitted, options.scanConfig)...)
+	if err := finalizeSyncApply(ctx, db, binding, pending, indexPaths, config, finalValidation); err != nil {
 		var rerun *syncRerunError
 		if errors.As(err, &rerun) {
+			if installed.path != "" {
+				return rollbackReplacement(err)
+			}
 			if _, reconcileErr := reconcilePromotedConflictFiles(ctx, db, options, paths, config); reconcileErr != nil {
 				return errors.Join(err, reconcileErr)
 			}
@@ -519,6 +627,16 @@ func beginSyncRollback(ctx context.Context, db *sql.DB, worktree string) error {
 	return nil
 }
 
+func rollbackApplyingCheckout(ctx context.Context, db *sql.DB, options bindOptions, config libraryClientConfig) error {
+	if err := beginSyncRollback(ctx, db, options.worktree); err != nil {
+		return err
+	}
+	if err := rollbackSyncApply(ctx, db, options.worktreeRoot, options.clientDir, options.worktree, config); err != nil {
+		return err
+	}
+	return clearApplyingCheckout(ctx, db, options.worktree)
+}
+
 func clearApplyingCheckout(ctx context.Context, db *sql.DB, worktree string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -533,7 +651,7 @@ func clearApplyingCheckout(ctx context.Context, db *sql.DB, worktree string) err
 }
 
 func registerSyncRecoveryPlan(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, paths []checkoutPath,
-	config libraryClientConfig) error {
+	config libraryClientConfig, retained map[string]retainedCheckoutDirectory, replacement *syncFileReplacementPlan) error {
 	if root == nil || root.path != worktree {
 		return errors.New("sync recovery plan has no exact worktree root")
 	}
@@ -545,10 +663,17 @@ func registerSyncRecoveryPlan(ctx context.Context, db *sql.DB, root *openedWorkt
 		return err
 	}
 	rootMtimeNS := filesystemMtimeNS(time.Unix(rootStat.Mtim.Sec, rootStat.Mtim.Nsec))
-	top := make([]checkoutPath, 0)
-	for _, path := range paths {
-		if !strings.Contains(path.path, "/") {
-			top = append(top, path)
+	var top []checkoutPath
+	if replacement != nil {
+		top = []checkoutPath{replacement.old}
+	} else {
+		for _, path := range paths {
+			parent, _ := splitFSActionPath(path.path)
+			_, kept := retained[path.path]
+			_, parentKept := retained[parent]
+			if !kept && (parent == "" || parentKept) {
+				top = append(top, path)
+			}
 		}
 	}
 	sort.Slice(top, func(i, j int) bool { return top[i].path < top[j].path })
@@ -559,6 +684,11 @@ func registerSyncRecoveryPlan(ctx context.Context, db *sql.DB, root *openedWorkt
 	var existing int
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sync_recoveries WHERE worktree = ?", worktree).Scan(&existing); err != nil || existing != 0 {
 		return errors.Join(errors.New("sync recovery plan already exists"), err, tx.Rollback())
+	}
+	if replacement != nil {
+		if err := saveSyncFileReplacement(ctx, tx, worktree, replacement); err != nil {
+			return errors.Join(err, tx.Rollback())
+		}
 	}
 	for _, path := range top {
 		name, err := newReservedName(syncRecoveryPrefix)
@@ -601,9 +731,9 @@ func registeredSyncRecoveryNames(ctx context.Context, db *sql.DB, worktree strin
 	}
 	names := make(map[string]bool, len(values)*2)
 	for _, value := range values {
-		names[value.name] = true
+		names[recoveryStoredPath(value, value.name)] = true
 		if value.tombstone != "" {
-			names[value.tombstone] = true
+			names[recoveryStoredPath(value, value.tombstone)] = true
 		}
 	}
 	return names, nil
@@ -898,7 +1028,7 @@ func validatePromotionOwnership(ctx context.Context, db fsActionQueryer, worktre
 			}
 			child = child[1:]
 		}
-		sourcePath := recovery.name
+		sourcePath := recoveryStoredPath(recovery, recovery.name)
 		if child != "" {
 			sourcePath += "/" + child
 		}
@@ -1060,7 +1190,8 @@ func validatePendingPromotionTargets(ctx context.Context, db *sql.DB, worktree s
 
 func restorePromotionParentMtime(ctx context.Context, db fsActionQueryer, recovery syncRecovery, sourcePath string) (string, error) {
 	parent, _ := splitFSActionPath(sourcePath)
-	if parent == "" {
+	recoveryParent, _ := splitFSActionPath(recovery.path)
+	if parent == recoveryParent {
 		return "", nil
 	}
 	if parent != recovery.path && !strings.HasPrefix(parent, recovery.path+"/") {
@@ -1098,7 +1229,7 @@ func linkedPromotionProvenance(recovery syncRecovery, link syncRecoveryPromotion
 		if expected.source != link.sourcePath {
 			continue
 		}
-		sourcePath := recovery.name
+		sourcePath := recoveryStoredPath(recovery, recovery.name)
 		if expected.source != recovery.path {
 			sourcePath += "/" + strings.TrimPrefix(expected.source, recovery.path+"/")
 		}
@@ -1237,7 +1368,7 @@ func consumeSyncRecovery(ctx context.Context, db *sql.DB, recovery syncRecovery)
 	return tx.Commit()
 }
 
-func prepareSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, config libraryClientConfig) error {
+func prepareSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, config libraryClientConfig, rulesActive, singleFile bool) error {
 	values, err := loadSyncRecoveries(ctx, db, worktree)
 	if err != nil {
 		return err
@@ -1251,110 +1382,141 @@ func prepareSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree
 		return err
 	}
 	for _, value := range values {
-		directFilePromotion := false
-		if value.completed {
-			for index := range links {
-				link := &links[index]
-				if link.recoveryPath != value.path {
-					continue
-				}
-				sourcePath, expected, err := linkedPromotionProvenance(value, *link, promotions)
-				if err != nil {
-					return err
-				}
-				current, err := validateCompletedPromotion(ctx, db, root, value, link, sourcePath, expected, config)
-				if err != nil {
-					return err
-				}
-				directFilePromotion = directFilePromotion || link.sourcePath == value.path
-				if current.Attempt > 0 {
-					if err := resetPromotedCheckoutIfNeeded(ctx, db, root, worktree, expected.target, nil); err != nil {
-						return err
-					}
-				}
-			}
-		}
-		visible, visibleErr := statAt(root.directory, value.path)
-		hidden, hiddenErr := statAt(root.directory, value.name)
-		visibleExists, hiddenExists := visibleErr == nil, hiddenErr == nil
-		if visibleErr != nil && !errors.Is(visibleErr, fscompat.ENOENT) {
-			return visibleErr
-		}
-		if hiddenErr != nil && !errors.Is(hiddenErr, fscompat.ENOENT) {
-			return hiddenErr
-		}
-		if value.completed {
-			if !hiddenExists && value.kind == "File" {
-				if !directFilePromotion {
-					return fmt.Errorf("completed sync recovery %q changed identity", value.path)
-				}
-				continue
-			}
-			if !hiddenExists || !statMatchesRecovery(hidden, value) {
-				return fmt.Errorf("completed sync recovery %q changed identity", value.path)
-			}
-			continue
-		}
-		switch {
-		case visibleExists && !hiddenExists:
-			if !statMatchesRecovery(visible, value) {
-				return fmt.Errorf("worktree path %q changed before recovery rename", value.path)
-			}
-			if err := verifyNamedRecovery(root.directory, value.path, value); err != nil {
-				return fmt.Errorf("worktree path %q changed before recovery rename: %w", value.path, err)
-			}
-			if config.beforeSyncRecoveryRename != nil {
-				if err := config.beforeSyncRecoveryRename(value.path, value.name); err != nil {
-					return fmt.Errorf("before sync recovery rename: %w", err)
-				}
-			}
-			current, err := statAt(root.directory, value.path)
-			if err != nil {
-				return fmt.Errorf("worktree path %q changed at recovery rename: %w", value.path, err)
-			}
-			if !statMatchesRecovery(current, value) {
-				if value.kind != "File" || current.Mode&fscompat.S_IFMT != fscompat.S_IFREG {
-					return fmt.Errorf("worktree path %q changed structurally at recovery rename; Issue #18 owns preservation", value.path)
-				}
-				args := append([]any{uint64(current.Dev), current.Ino}, syncRecoveryCASArgs(value)...)
-				result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET device=?,inode=? WHERE "+_syncRecoveryCAS, args...)
-				if err != nil {
-					return err
-				}
-				if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-					return errors.Join(errors.New("record replacement recovery inode failed"), err)
-				}
-				value.device, value.inode = uint64(current.Dev), current.Ino
-			}
-			if err := journalRename(ctx, db, root, worktree, fsPhasePreBase, "", value.path, value.name,
-				value.kind, "", value.name, value.device, value.inode, config.fsActionFault); err != nil {
-				return fmt.Errorf("move existing path %q to registered recovery: %w", value.path, err)
-			}
-			if config.afterSyncRecoveryRename != nil {
-				if err := config.afterSyncRecoveryRename(value.path, value.name); err != nil {
-					return fmt.Errorf("after sync recovery rename: %w", err)
-				}
-			}
-		case !visibleExists && hiddenExists:
-			if !statMatchesRecovery(hidden, value) {
-				return fmt.Errorf("renamed sync recovery %q changed identity", value.path)
-			}
-		default:
-			return fmt.Errorf("sync recovery %q has ambiguous visible and hidden state", value.path)
-		}
-		if config.beforeSyncRecoveryCompleted != nil {
-			if err := config.beforeSyncRecoveryCompleted(value.path); err != nil {
-				return fmt.Errorf("before sync recovery completion: %w", err)
-			}
-		}
-		result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET completed=1 WHERE "+_syncRecoveryCAS,
-			syncRecoveryCASArgs(value)...)
-		if err != nil {
+		if err := prepareSyncRecovery(ctx, db, root, worktree, config, value, promotions, links, rulesActive, singleFile); err != nil {
 			return err
 		}
-		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-			return errors.New("record sync recovery completion failed")
+	}
+	return nil
+}
+
+func prepareSyncRecovery(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, config libraryClientConfig,
+	value syncRecovery, promotions []_conflictPromotion, links []syncRecoveryPromotion, rulesActive, singleFile bool) error {
+	parent, parentPath, leaf, err := openSyncRecoveryParent(ctx, db, root, value)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	directFilePromotion := false
+	if value.completed {
+		for index := range links {
+			link := &links[index]
+			if link.recoveryPath != value.path {
+				continue
+			}
+			sourcePath, expected, err := linkedPromotionProvenance(value, *link, promotions)
+			if err != nil {
+				return err
+			}
+			current, err := validateCompletedPromotion(ctx, db, root, value, link, sourcePath, expected, config)
+			if err != nil {
+				return err
+			}
+			directFilePromotion = directFilePromotion || link.sourcePath == value.path
+			if current.Attempt > 0 {
+				if err := resetPromotedCheckoutIfNeeded(ctx, db, root, worktree, expected.target, nil); err != nil {
+					return err
+				}
+			}
 		}
+	}
+	visible, visibleErr := statAt(parent, leaf)
+	hidden, hiddenErr := statAt(parent, value.name)
+	visibleExists, hiddenExists := visibleErr == nil, hiddenErr == nil
+	if visibleErr != nil && !errors.Is(visibleErr, fscompat.ENOENT) {
+		return visibleErr
+	}
+	if hiddenErr != nil && !errors.Is(hiddenErr, fscompat.ENOENT) {
+		return hiddenErr
+	}
+	if value.completed {
+		if !hiddenExists && value.kind == "File" {
+			if !directFilePromotion {
+				return fmt.Errorf("completed sync recovery %q changed identity", value.path)
+			}
+			return nil
+		}
+		if !hiddenExists || !statMatchesRecovery(hidden, value) {
+			return fmt.Errorf("completed sync recovery %q changed identity", value.path)
+		}
+		return nil
+	}
+	sourceChanged := func(err error) error {
+		if singleFile && !hiddenExists {
+			unstarted, checkErr := fileReplacementCaptureUnstarted(ctx, db, value, parentPath)
+			if unstarted {
+				return errors.Join(errFileReplacementSourceChanged, err)
+			}
+			return errors.Join(err, checkErr)
+		}
+		return err
+	}
+	switch {
+	case visibleExists && !hiddenExists:
+		if !statMatchesRecovery(visible, value) {
+			return sourceChanged(fmt.Errorf("worktree path %q changed before recovery rename", value.path))
+		}
+		if err := verifyNamedRecovery(parent, leaf, value); err != nil {
+			return sourceChanged(fmt.Errorf("worktree path %q changed before recovery rename: %w", value.path, err))
+		}
+		if config.beforeSyncRecoveryRename != nil {
+			if err := config.beforeSyncRecoveryRename(value.path, value.name); err != nil {
+				return fmt.Errorf("before sync recovery rename: %w", err)
+			}
+		}
+		current, err := statAt(parent, leaf)
+		if err != nil {
+			return sourceChanged(fmt.Errorf("worktree path %q changed at recovery rename: %w", value.path, err))
+		}
+		if singleFile && !sameRollbackFileState(visible, current) {
+			return sourceChanged(fmt.Errorf("worktree path %q changed at recovery rename", value.path))
+		}
+		if !statMatchesRecovery(current, value) {
+			if value.kind != "File" || current.Mode&fscompat.S_IFMT != fscompat.S_IFREG {
+				return fmt.Errorf("worktree path %q changed structurally at recovery rename; Issue #18 owns preservation", value.path)
+			}
+			args := append([]any{uint64(current.Dev), current.Ino}, syncRecoveryCASArgs(value)...)
+			result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET device=?,inode=? WHERE "+_syncRecoveryCAS, args...)
+			if err != nil {
+				return err
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				return errors.Join(errors.New("record replacement recovery inode failed"), err)
+			}
+			value.device, value.inode = uint64(current.Dev), current.Ino
+		}
+		if rulesActive && value.kind == "Directory" {
+			if err := verifyNamedRecovery(parent, leaf, value); err != nil {
+				return fmt.Errorf("captured directory changed before checkout: %w", err)
+			}
+		}
+		if err := journalRenameAt(ctx, db, root, parent, worktree, fsPhasePreBase, parentPath, leaf, value.name,
+			value.kind, "", value.name, value.device, value.inode, config.fsActionFault); err != nil {
+			return fmt.Errorf("move existing path %q to registered recovery: %w", value.path, err)
+		}
+		if config.afterSyncRecoveryRename != nil {
+			if err := config.afterSyncRecoveryRename(value.path, value.name); err != nil {
+				return fmt.Errorf("after sync recovery rename: %w", err)
+			}
+		}
+	case !visibleExists && hiddenExists:
+		if !statMatchesRecovery(hidden, value) {
+			return fmt.Errorf("renamed sync recovery %q changed identity", value.path)
+		}
+	default:
+		return sourceChanged(fmt.Errorf("sync recovery %q has ambiguous visible and hidden state", value.path))
+	}
+	if config.beforeSyncRecoveryCompleted != nil {
+		if err := config.beforeSyncRecoveryCompleted(value.path); err != nil {
+			return fmt.Errorf("before sync recovery completion: %w", err)
+		}
+	}
+	result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET completed=1 WHERE "+_syncRecoveryCAS,
+		syncRecoveryCASArgs(value)...)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return errors.New("record sync recovery completion failed")
 	}
 	return nil
 }
@@ -1478,7 +1640,7 @@ func reconcilePromotedConflictFiles(ctx context.Context, db *sql.DB, options bin
 		}
 	}
 	if len(late) != 0 {
-		if err := materializeCheckoutFiles(ctx, db, options, targets, config); err != nil {
+		if err := materializeCheckoutFiles(ctx, db, options, targets, config, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -1853,8 +2015,9 @@ func registerPromotedCheckoutPath(ctx context.Context, db *sql.DB, root *openedW
 	return nil
 }
 
-func promoteCapturedConflictFiles(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string,
+func promoteCapturedConflictFiles(ctx context.Context, db *sql.DB, options bindOptions, worktree string,
 	promotions []_conflictPromotion, targets []checkoutPath, config libraryClientConfig) error {
+	root := options.worktreeRoot
 	recoveries, err := loadSyncRecoveries(ctx, db, worktree)
 	if err != nil {
 		return err
@@ -1885,7 +2048,7 @@ func promoteCapturedConflictFiles(ctx context.Context, db *sql.DB, root *openedW
 		if recovery == nil {
 			return fmt.Errorf("conflict provenance source %q has no captured recovery", promotion.source)
 		}
-		sourcePath := recovery.name
+		sourcePath := recoveryStoredPath(*recovery, recovery.name)
 		if promotion.source != recovery.path {
 			sourcePath += "/" + strings.TrimPrefix(promotion.source, recovery.path+"/")
 		}
@@ -1950,7 +2113,7 @@ func promoteCapturedConflictFiles(ctx context.Context, db *sql.DB, root *openedW
 			return err
 		}
 		internalSource := ""
-		if sourceParent == "" {
+		if promotion.source == recovery.path {
 			internalSource = sourceLeaf
 		}
 		if err := journalPromotion(ctx, db, root, worktree, promotion.source, sourceParent, sourceLeaf, destination,
@@ -1983,15 +2146,27 @@ func promoteCapturedConflictFiles(ctx context.Context, db *sql.DB, root *openedW
 		if recovery.kind == "File" {
 			continue
 		}
-		file, info, err := openScannableAt(root.directory, recovery.name, recovery.path)
+		parent, _, _, err := openSyncRecoveryParent(ctx, db, root, recovery)
 		if err != nil {
 			return err
+		}
+		file, info, err := openScannableAt(parent, recovery.name, recovery.path)
+		if closeErr := parent.Close(); err != nil || closeErr != nil {
+			if file != nil {
+				closeErr = errors.Join(closeErr, file.Close())
+			}
+			return errors.Join(err, closeErr)
 		}
 		snapshot := worktreeSnapshot{blocks: make(map[string]blockSource)}
 		id, scanErr := scanDirectory(file, recovery.path, &snapshot)
 		closeErr := file.Close()
 		if scanErr != nil || closeErr != nil {
 			return errors.Join(scanErr, closeErr)
+		}
+		for _, value := range snapshot.paths {
+			if ignoreSyncPath(options.scanConfig.ignore, value.path) {
+				return errSyncIgnoreBlocked
+			}
 		}
 		mtime := canonicalProtocolMtime(info.ModTime())
 		args := append([]any{id, mtime}, syncRecoveryCASArgs(recovery)...)
@@ -2019,6 +2194,10 @@ func verifyAllSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktr
 	for _, link := range links {
 		directPromotions[link.recoveryPath] = directPromotions[link.recoveryPath] || link.sourcePath == link.recoveryPath
 	}
+	dirs, err := loadRetainedCheckoutDirectories(ctx, db, worktree)
+	if err != nil {
+		return err
+	}
 	for _, value := range values {
 		if !value.completed {
 			return fmt.Errorf("sync recovery %q is incomplete", value.path)
@@ -2027,14 +2206,26 @@ func verifyAllSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktr
 		if value.tombstone != "" {
 			name = value.tombstone
 		}
-		if value.kind == "File" && directPromotions[value.path] {
-			if _, err := statAt(root.directory, name); errors.Is(err, fscompat.ENOENT) {
-				continue
-			}
+		if err := verifySyncRecoveryAt(root, dirs, value, name, directPromotions[value.path]); err != nil {
+			return err
 		}
-		if err := verifyNamedRecovery(root.directory, name, value); err != nil {
-			return fmt.Errorf("verify captured path %q: %w", value.path, err)
+	}
+	return nil
+}
+
+func verifySyncRecoveryAt(root *openedWorktree, dirs map[string]retainedCheckoutDirectory, recovery syncRecovery, name string, directPromotion bool) error {
+	parent, _, _, err := openSyncRecoveryParentAt(root, dirs, recovery)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if recovery.kind == "File" && directPromotion {
+		if _, err := statAt(parent, name); errors.Is(err, fscompat.ENOENT) {
+			return nil
 		}
+	}
+	if err := verifyNamedRecovery(parent, name, recovery); err != nil {
+		return fmt.Errorf("verify captured path %q: %w", recovery.path, err)
 	}
 	return nil
 }
@@ -2184,10 +2375,11 @@ func persistRecoveryRemovalPlan(ctx context.Context, db *sql.DB, root *openedWor
 	if err := bindFSJournalRoot(ctx, db, worktree, root); err != nil {
 		return nil, err
 	}
-	identities := map[string][2]uint64{value.tombstone: {value.device, value.inode}}
+	stored := recoveryStoredPath(value, value.tombstone)
+	identities := map[string][2]uint64{stored: {value.device, value.inode}}
 	for _, path := range paths {
 		relative := strings.TrimPrefix(path.path, value.path+"/")
-		identities[value.tombstone+"/"+relative] = [2]uint64{path.device, path.inode}
+		identities[stored+"/"+relative] = [2]uint64{path.device, path.inode}
 	}
 	sort.Slice(paths, func(i, j int) bool {
 		left, right := strings.Count(paths[i].path, "/"), strings.Count(paths[j].path, "/")
@@ -2208,7 +2400,7 @@ func persistRecoveryRemovalPlan(ctx context.Context, db *sql.DB, root *openedWor
 	actions := make([]fsAction, 0, len(paths)+1)
 	for _, path := range paths {
 		relative := strings.TrimPrefix(path.path, value.path+"/")
-		actual := value.tombstone + "/" + relative
+		actual := stored + "/" + relative
 		parent, leaf := splitFSActionPath(actual)
 		identity, ok := identities[parent]
 		if !ok {
@@ -2232,8 +2424,15 @@ func persistRecoveryRemovalPlan(ctx context.Context, db *sql.DB, root *openedWor
 	if err != nil {
 		return fail(err)
 	}
+	parentPath, _ := splitFSActionPath(stored)
+	var parentDevice, parentInode = root.device, root.inode
+	if parentPath != "" {
+		if err := tx.QueryRowContext(ctx, `SELECT device,inode FROM checkout_retained_directories WHERE worktree=? AND path=?`, worktree, parentPath).Scan(&parentDevice, &parentInode); err != nil {
+			return fail(err)
+		}
+	}
 	actions = append(actions, fsAction{Worktree: worktree, ActionID: id, Order: order, Phase: fsPhasePostBase,
-		Op: fsOpRmdir, Parent: "", ParentDevice: root.device, ParentInode: root.inode, Source: value.tombstone,
+		Op: fsOpRmdir, Parent: parentPath, ParentDevice: parentDevice, ParentInode: parentInode, Source: value.tombstone,
 		ExpectedKind: "Directory", ExpectedDevice: value.device, ExpectedInode: value.inode,
 		ExpectedObject: value.id, ExpectedMtime: value.mtime, InternalSource: value.tombstone, State: fsStateIntent})
 	for _, action := range actions {
@@ -2272,8 +2471,12 @@ func persistRecoveryRemovalPlan(ctx context.Context, db *sql.DB, root *openedWor
 
 func removeRecoveryDirectory(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string,
 	value syncRecovery, fault fsActionFault) error {
-	paths, err := snapshotRecoveryRemoval(root.directory, value.tombstone, value)
+	parent, _, _, err := openSyncRecoveryParent(ctx, db, root, value)
 	if err != nil {
+		return err
+	}
+	paths, err := snapshotRecoveryRemoval(parent, value.tombstone, value)
+	if err = errors.Join(err, parent.Close()); err != nil {
 		return err
 	}
 	actions, err := persistRecoveryRemovalPlan(ctx, db, root, worktree, value, paths, fault)
@@ -2292,86 +2495,123 @@ func cleanupSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree
 	if err := validatePendingPromotionTargets(ctx, db, worktree); err != nil {
 		return err
 	}
+	replacement, err := loadCheckoutFileReplacement(ctx, db, worktree)
+	if err != nil {
+		return err
+	}
 	values, err := loadSyncRecoveries(ctx, db, worktree)
 	if err != nil {
 		return err
 	}
 	for _, value := range values {
-		if value.tombstone == "" {
-			value.tombstone, err = newReservedName(syncTombstonePrefix)
-			if err != nil {
-				return err
-			}
-			registered := value.tombstone
-			value.tombstone = ""
-			args := append([]any{registered}, syncRecoveryCASArgs(value)...)
-			result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET tombstone_name=? WHERE "+_syncRecoveryCAS, args...)
-			if err != nil {
-				return err
-			}
-			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-				return errors.Join(errors.New("register sync recovery tombstone failed"), err)
-			}
-			value.tombstone = registered
+		if replacement != "" && (value.path != replacement || value.kind != "File") {
+			return errors.New("single-file checkout cleanup is outside its scope")
 		}
-		if config.beforeSyncRecoveryCleanup != nil {
-			if err := config.beforeSyncRecoveryCleanup(value.path, value.name); err != nil {
-				return fmt.Errorf("before sync recovery cleanup: %w", err)
-			}
-		}
-		recoveryStat, recoveryErr := statAt(root.directory, value.name)
-		tombstoneStat, tombstoneErr := statAt(root.directory, value.tombstone)
-		recoveryExists, tombstoneExists := recoveryErr == nil, tombstoneErr == nil
-		if recoveryErr != nil && !errors.Is(recoveryErr, fscompat.ENOENT) {
-			return recoveryErr
-		}
-		if tombstoneErr != nil && !errors.Is(tombstoneErr, fscompat.ENOENT) {
-			return tombstoneErr
-		}
-		switch {
-		case recoveryExists && !tombstoneExists:
-			if !statMatchesRecovery(recoveryStat, value) {
-				return fmt.Errorf("registered sync recovery %q changed identity", value.path)
-			}
-			if err := journalRename(ctx, db, root, worktree, fsPhasePostBase, "", value.name, value.tombstone,
-				value.kind, value.name, value.tombstone, value.device, value.inode, config.fsActionFault); err != nil {
-				return fmt.Errorf("isolate sync recovery %q for cleanup: %w", value.path, err)
-			}
-		case !recoveryExists && tombstoneExists:
-			if !statMatchesRecovery(tombstoneStat, value) {
-				return fmt.Errorf("sync recovery tombstone %q changed identity", value.path)
-			}
-		case !recoveryExists && !tombstoneExists:
-			if err := consumeSyncRecovery(ctx, db, value); err != nil {
-				return err
-			}
-			continue
-		default:
-			return fmt.Errorf("sync recovery %q has ambiguous cleanup state", value.path)
-		}
-		if config.afterSyncRecoveryCleanupRename != nil {
-			if err := config.afterSyncRecoveryCleanupRename(value.path, value.tombstone); err != nil {
-				return fmt.Errorf("after sync recovery cleanup rename: %w", err)
-			}
-		}
-		if err := verifyNamedRecovery(root.directory, value.tombstone, value); err != nil {
-			return fmt.Errorf("verify sync recovery %q before cleanup: %w", value.path, err)
-		}
-		if value.kind == "File" {
-			if err := journalRemove(ctx, db, root, worktree, fsPhasePostBase, "", value.tombstone,
-				"File", value.tombstone, value.id, value.mtime, value.size, value.device, value.inode, config.fsActionFault); err != nil {
-				return fmt.Errorf("remove sync recovery %q: %w", value.path, err)
-			}
-		} else {
-			if err := removeRecoveryDirectory(ctx, db, root, worktree, value, config.fsActionFault); err != nil {
-				return fmt.Errorf("remove sync recovery %q: %w", value.path, err)
-			}
-		}
-		if err := consumeSyncRecovery(ctx, db, value); err != nil {
+		if err := cleanupSyncRecovery(ctx, db, root, worktree, value, config, replacement != ""); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func cleanupSyncRecovery(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, value syncRecovery, config libraryClientConfig, singleFile bool) error {
+	parent, parentPath, _, err := openSyncRecoveryParent(ctx, db, root, value)
+	if err != nil {
+		if singleFile && parentPath != "" {
+			dir, _, proofErr := removedFileReplacementParent(ctx, db, worktree, parentPath)
+			if proofErr != nil {
+				return errors.Join(err, proofErr)
+			}
+			if dir.path != "" {
+				moved, checkErr := fileReplacementParentMoved(root, dir)
+				if moved {
+					return consumeSyncRecovery(ctx, db, value)
+				}
+				return errors.Join(err, checkErr)
+			}
+		}
+		return err
+	}
+	defer parent.Close()
+	consume := func() error {
+		// Removing the recovery changes its parent mtime, even after the
+		// target was verified and its Sync Base committed. Keep the recovery
+		// row until the journal has made that last mtime change durable.
+		if singleFile {
+			if err := setFileReplacementParentAfterCleanup(ctx, db, root, worktree, parentPath, config.fsActionFault); err != nil {
+				return err
+			}
+		}
+		return consumeSyncRecovery(ctx, db, value)
+	}
+	if value.tombstone == "" {
+		value.tombstone, err = newReservedName(syncTombstonePrefix)
+		if err != nil {
+			return err
+		}
+		registered := value.tombstone
+		value.tombstone = ""
+		args := append([]any{registered}, syncRecoveryCASArgs(value)...)
+		result, err := db.ExecContext(ctx, "UPDATE sync_recoveries SET tombstone_name=? WHERE "+_syncRecoveryCAS, args...)
+		if err != nil {
+			return err
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return errors.Join(errors.New("register sync recovery tombstone failed"), err)
+		}
+		value.tombstone = registered
+	}
+	if config.beforeSyncRecoveryCleanup != nil {
+		if err := config.beforeSyncRecoveryCleanup(value.path, value.name); err != nil {
+			return fmt.Errorf("before sync recovery cleanup: %w", err)
+		}
+	}
+	recoveryStat, recoveryErr := statAt(parent, value.name)
+	tombstoneStat, tombstoneErr := statAt(parent, value.tombstone)
+	recoveryExists, tombstoneExists := recoveryErr == nil, tombstoneErr == nil
+	if recoveryErr != nil && !errors.Is(recoveryErr, fscompat.ENOENT) {
+		return recoveryErr
+	}
+	if tombstoneErr != nil && !errors.Is(tombstoneErr, fscompat.ENOENT) {
+		return tombstoneErr
+	}
+	switch {
+	case recoveryExists && !tombstoneExists:
+		if !statMatchesRecovery(recoveryStat, value) {
+			return fmt.Errorf("registered sync recovery %q changed identity", value.path)
+		}
+		if err := journalRenameAt(ctx, db, root, parent, worktree, fsPhasePostBase, parentPath, value.name, value.tombstone,
+			value.kind, value.name, value.tombstone, value.device, value.inode, config.fsActionFault); err != nil {
+			return fmt.Errorf("isolate sync recovery %q for cleanup: %w", value.path, err)
+		}
+	case !recoveryExists && tombstoneExists:
+		if !statMatchesRecovery(tombstoneStat, value) {
+			return fmt.Errorf("sync recovery tombstone %q changed identity", value.path)
+		}
+	case !recoveryExists && !tombstoneExists:
+		return consume()
+	default:
+		return fmt.Errorf("sync recovery %q has ambiguous cleanup state", value.path)
+	}
+	if config.afterSyncRecoveryCleanupRename != nil {
+		if err := config.afterSyncRecoveryCleanupRename(value.path, value.tombstone); err != nil {
+			return fmt.Errorf("after sync recovery cleanup rename: %w", err)
+		}
+	}
+	if err := verifyNamedRecovery(parent, value.tombstone, value); err != nil {
+		return fmt.Errorf("verify sync recovery %q before cleanup: %w", value.path, err)
+	}
+	if value.kind == "File" {
+		if err := journalRemove(ctx, db, root, worktree, fsPhasePostBase, parentPath, value.tombstone,
+			"File", value.tombstone, value.id, value.mtime, value.size, value.device, value.inode, config.fsActionFault); err != nil {
+			return fmt.Errorf("remove sync recovery %q: %w", value.path, err)
+		}
+	} else {
+		if err := removeRecoveryDirectory(ctx, db, root, worktree, value, config.fsActionFault); err != nil {
+			return fmt.Errorf("remove sync recovery %q: %w", value.path, err)
+		}
+	}
+	return consume()
 }
 
 type rollbackCheckoutPath struct {
@@ -2384,6 +2624,10 @@ type rollbackCheckoutPath struct {
 
 func rollbackSyncApply(ctx context.Context, db *sql.DB, root *openedWorktree, clientDir, worktree string, config libraryClientConfig) error {
 	if err := validatePendingCheckoutState(ctx, db, worktree); err != nil {
+		return err
+	}
+	replacement, err := loadCheckoutFileReplacement(ctx, db, worktree)
+	if err != nil {
 		return err
 	}
 	if err := rollbackSyncRecoveryPromotions(ctx, db, root, worktree, config); err != nil {
@@ -2401,10 +2645,13 @@ func rollbackSyncApply(ctx context.Context, db *sql.DB, root *openedWorktree, cl
 	if err := cleanupCheckoutTemps(ctx, db, root, cacheRoot, worktree, fsPhaseRollback, temps, config.fsActionFault); err != nil {
 		return err
 	}
-	if err := rollbackInstalledCheckoutPaths(ctx, db, root, cacheRoot, worktree, config); err != nil {
+	if err := rollbackInstalledCheckoutPaths(ctx, db, root, cacheRoot, worktree, replacement, config); err != nil {
 		return err
 	}
-	if err := rollbackSyncRecoveries(ctx, db, root, worktree, config); err != nil {
+	if err := rollbackSyncRecoveries(ctx, db, root, worktree, replacement, config); err != nil {
+		return err
+	}
+	if err := restoreRetainedDirectoryMtimes(ctx, db, root, worktree, replacement, config.fsActionFault); err != nil {
 		return err
 	}
 	if err := restoreRollbackRootMtime(ctx, db, root, worktree, config.fsActionFault); err != nil {
@@ -2555,13 +2802,50 @@ func deleteRolledBackCheckoutPath(ctx context.Context, db *sql.DB, worktree, pat
 	return err
 }
 
-func rollbackInstalledCheckoutPaths(ctx context.Context, db *sql.DB, root *openedWorktree, cacheRoot *os.File, worktree string, config libraryClientConfig) error {
+func rollbackInstalledCheckoutPaths(ctx context.Context, db *sql.DB, root *openedWorktree, cacheRoot *os.File, worktree, replacement string, config libraryClientConfig) error {
 	values, err := loadRollbackCheckoutPaths(ctx, db, worktree)
 	if err != nil {
 		return err
 	}
+	dirs, err := loadRetainedCheckoutDirectories(ctx, db, worktree)
+	if err != nil {
+		return err
+	}
+	var captured bool
+	if replacement != "" {
+		err := db.QueryRowContext(ctx, `SELECT completed FROM sync_recoveries WHERE worktree=? AND path=?`, worktree, replacement).Scan(&captured)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	for _, value := range values {
-		parent, name, found, err := openRollbackParent(root, value.path)
+		if replacement != "" && (value.path != replacement && !isCheckoutAncestor(value.path, replacement) ||
+			value.path == replacement && value.kind != "File" || value.path != replacement && value.kind != "Directory") {
+			return errors.New("single-file checkout rollback is outside its scope")
+		}
+		if replacement == value.path && !captured {
+			// Staging can create a temporary identity before the old file is
+			// captured, but installation cannot have run at that point.
+			if err := deleteRolledBackCheckoutPath(ctx, db, worktree, value.path); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, kept := dirs[value.path]; kept {
+			if err := deleteRolledBackCheckoutPath(ctx, db, worktree, value.path); err != nil {
+				return err
+			}
+			continue
+		}
+		var parent *os.File
+		var name string
+		var found bool
+		if replacement != "" {
+			parent, _, name, err = openSyncRecoveryParentAt(root, dirs, syncRecovery{path: value.path})
+			found = err == nil
+		} else {
+			parent, name, found, err = openRollbackParent(root, value.path)
+		}
 		if err != nil {
 			return err
 		}
@@ -2571,7 +2855,17 @@ func rollbackInstalledCheckoutPaths(ctx context.Context, db *sql.DB, root *opene
 			}
 			continue
 		}
-		err = rollbackCheckoutTarget(ctx, db, root, parent, cacheRoot, name, worktree, value, config)
+		handled := false
+		if value.path == replacement {
+			handled, err = rollbackFileReplacementSave(ctx, db, root, parent, cacheRoot, worktree, name, value, config.fsActionFault)
+		}
+		if err == nil {
+			if handled {
+				err = deleteRolledBackCheckoutPath(ctx, db, worktree, value.path)
+			} else {
+				err = rollbackCheckoutTarget(ctx, db, root, parent, cacheRoot, name, worktree, value, config)
+			}
+		}
 		closeErr := parent.Close()
 		if err != nil || closeErr != nil {
 			return errors.Join(err, closeErr)
@@ -2585,6 +2879,8 @@ func rollbackCheckoutTarget(ctx context.Context, db *sql.DB, root *openedWorktre
 	if value.kind == "Directory" && value.targetDevice != 0 && value.targetInode != 0 {
 		device, inode = value.targetDevice, value.targetInode
 	}
+	parentPath, _ := splitFSActionPath(value.path)
+	absParent := filepath.Join(worktree, filepath.FromSlash(parentPath))
 	_, visibleErr := statAt(parent, name)
 	visibleExists := visibleErr == nil
 	if visibleErr != nil && !errors.Is(visibleErr, fscompat.ENOENT) {
@@ -2627,12 +2923,11 @@ func rollbackCheckoutTarget(ctx context.Context, db *sql.DB, root *openedWorktre
 		if err := verifyRollbackCheckoutTarget(parent, cacheRoot, name, value, device, inode); err != nil {
 			return fmt.Errorf("checkout target %q changed before rollback: %w", value.path, err)
 		}
-		parentPath, _ := splitFSActionPath(value.path)
-		if err := journalRename(ctx, db, root, worktree, fsPhaseRollback, parentPath, name, value.rollbackName,
+		if err := journalRenameAt(ctx, db, root, parent, worktree, fsPhaseRollback, parentPath, name, value.rollbackName,
 			value.kind, "", value.rollbackName, device, inode, config.fsActionFault); err != nil {
 			return fmt.Errorf("isolate checkout target %q for rollback: %w", value.path, err)
 		}
-		if err := syncRollbackParent(parent, config); err != nil {
+		if err := syncRollbackParentAt(parent, absParent, config); err != nil {
 			return err
 		}
 	case !visibleExists && tombstoneExists:
@@ -2647,12 +2942,11 @@ func rollbackCheckoutTarget(ctx context.Context, db *sql.DB, root *openedWorktre
 	if err := verifyRollbackCheckoutTarget(parent, cacheRoot, value.rollbackName, value, device, inode); err != nil {
 		return fmt.Errorf("checkout rollback tombstone %q changed before deletion: %w", value.path, err)
 	}
-	parentPath, _ := splitFSActionPath(value.path)
 	if err := journalRemove(ctx, db, root, worktree, fsPhaseRollback, parentPath, value.rollbackName,
 		value.kind, value.rollbackName, value.id, value.mtime, value.size, device, inode, config.fsActionFault); err != nil {
 		return fmt.Errorf("remove checkout target %q during rollback: %w", value.path, err)
 	}
-	if err := syncRollbackParent(parent, config); err != nil {
+	if err := syncRollbackParentAt(parent, absParent, config); err != nil {
 		return err
 	}
 	return deleteRolledBackCheckoutPath(ctx, db, worktree, value.path)
@@ -2774,11 +3068,11 @@ func openRollbackParent(root *openedWorktree, path string) (*os.File, string, bo
 	return os.NewFile(uintptr(current), currentPath), components[len(components)-1], true, nil
 }
 
-func syncRollbackParent(parent *os.File, config libraryClientConfig) error {
+func syncRollbackParentAt(parent *os.File, path string, config libraryClientConfig) error {
 	if err := parent.Sync(); err != nil {
 		return err
 	}
-	return config.syncDirectory(parent.Name())
+	return config.syncDirectory(path)
 }
 
 func restoreRollbackRootMtime(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, fault fsActionFault) error {
@@ -2839,54 +3133,80 @@ func restoreRollbackRootMtime(ctx context.Context, db *sql.DB, root *openedWorkt
 		root.device, root.inode, fault)
 }
 
-func rollbackSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, config libraryClientConfig) error {
+func rollbackSyncRecoveries(ctx context.Context, db *sql.DB, root *openedWorktree, worktree, replacement string, config libraryClientConfig) error {
 	values, err := loadSyncRecoveries(ctx, db, worktree)
 	if err != nil {
 		return err
 	}
 	for _, value := range values {
-		visible, visibleErr := statAt(root.directory, value.path)
-		hidden, hiddenErr := statAt(root.directory, value.name)
-		visibleExists, hiddenExists := visibleErr == nil, hiddenErr == nil
-		if visibleErr != nil && !errors.Is(visibleErr, fscompat.ENOENT) {
-			return visibleErr
+		if replacement != "" && (value.path != replacement || value.kind != "File") {
+			return errors.New("single-file sync recovery rollback is outside its scope")
 		}
-		if hiddenErr != nil && !errors.Is(hiddenErr, fscompat.ENOENT) {
-			return hiddenErr
-		}
-		switch {
-		case !hiddenExists && visibleExists:
-			if !statMatchesRecovery(visible, value) || verifyNamedRecovery(root.directory, value.path, value) != nil {
-				return fmt.Errorf("restored sync recovery %q changed identity or content", value.path)
-			}
-			if err := syncRollbackParent(root.directory, config); err != nil {
-				return err
-			}
-		case hiddenExists && !visibleExists:
-			if !statMatchesRecovery(hidden, value) {
-				return fmt.Errorf("sync recovery %q changed identity", value.path)
-			}
-			if err := verifyNamedRecovery(root.directory, value.name, value); err != nil {
-				return fmt.Errorf("verify sync recovery %q for rollback: %w", value.path, err)
-			}
-			if err := journalRename(ctx, db, root, worktree, fsPhaseRollback, "", value.name, value.path,
-				value.kind, value.name, "", value.device, value.inode, config.fsActionFault); err != nil {
-				return fmt.Errorf("restore sync recovery %q: %w", value.path, err)
-			}
-			if err := syncRollbackParent(root.directory, config); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("sync recovery %q has ambiguous rollback state", value.path)
-		}
-		if config.afterSyncRecoveryRestore != nil {
-			if err := config.afterSyncRecoveryRestore(value.path); err != nil {
-				return fmt.Errorf("after sync recovery restore: %w", err)
-			}
-		}
-		if err := consumeSyncRecovery(ctx, db, value); err != nil {
+		if err := rollbackSyncRecovery(ctx, db, root, worktree, value, config, replacement != ""); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func rollbackSyncRecovery(ctx context.Context, db *sql.DB, root *openedWorktree, worktree string, value syncRecovery, config libraryClientConfig, singleFile bool) error {
+	parent, parentPath, leaf, err := openSyncRecoveryParent(ctx, db, root, value)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	visible, visibleErr := statAt(parent, leaf)
+	hidden, hiddenErr := statAt(parent, value.name)
+	visibleExists, hiddenExists := visibleErr == nil, hiddenErr == nil
+	if visibleErr != nil && !errors.Is(visibleErr, fscompat.ENOENT) {
+		return visibleErr
+	}
+	if hiddenErr != nil && !errors.Is(hiddenErr, fscompat.ENOENT) {
+		return hiddenErr
+	}
+	if singleFile && !hiddenExists {
+		unstarted, err := fileReplacementCaptureUnstarted(ctx, db, value, parentPath)
+		if err != nil {
+			return err
+		}
+		if unstarted {
+			// The old path has never been ours to restore. It may now be
+			// changed, replaced, or absent because of a local edit.
+			return consumeSyncRecovery(ctx, db, value)
+		}
+	}
+	switch {
+	case !hiddenExists && visibleExists:
+		if !statMatchesRecovery(visible, value) || verifyNamedRecovery(parent, leaf, value) != nil {
+			return fmt.Errorf("restored sync recovery %q changed identity or content", value.path)
+		}
+		if err := syncRollbackParentAt(parent, filepath.Join(root.path, filepath.FromSlash(parentPath)), config); err != nil {
+			return err
+		}
+	case hiddenExists && !visibleExists:
+		if !statMatchesRecovery(hidden, value) {
+			return fmt.Errorf("sync recovery %q changed identity", value.path)
+		}
+		if err := verifyNamedRecovery(parent, value.name, value); err != nil {
+			return fmt.Errorf("verify sync recovery %q for rollback: %w", value.path, err)
+		}
+		if err := journalRenameAt(ctx, db, root, parent, worktree, fsPhaseRollback, parentPath, value.name, leaf,
+			value.kind, value.name, "", value.device, value.inode, config.fsActionFault); err != nil {
+			return fmt.Errorf("restore sync recovery %q: %w", value.path, err)
+		}
+		if err := syncRollbackParentAt(parent, filepath.Join(root.path, filepath.FromSlash(parentPath)), config); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("sync recovery %q has ambiguous rollback state", value.path)
+	}
+	if config.afterSyncRecoveryRestore != nil {
+		if err := config.afterSyncRecoveryRestore(value.path); err != nil {
+			return fmt.Errorf("after sync recovery restore: %w", err)
+		}
+	}
+	if err := consumeSyncRecovery(ctx, db, value); err != nil {
+		return err
 	}
 	return nil
 }
@@ -2915,9 +3235,13 @@ func updateBindingAndIndex(ctx context.Context, tx *sql.Tx, binding clientBindin
 	if _, err := tx.ExecContext(ctx, "DELETE FROM path_index WHERE worktree = ?", worktree); err != nil {
 		return err
 	}
+	return insertPathIndex(ctx, tx, worktree, paths)
+}
+
+func insertPathIndex(ctx context.Context, tx *sql.Tx, worktree string, paths []checkoutPath) error {
 	for _, path := range paths {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO path_index(worktree, path, type, object_id, canonical_mtime, actual_mtime, size)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, worktree, path.path, path.kind, path.id, path.mtime, path.mtime, path.size); err != nil {
+    VALUES (?, ?, ?, ?, ?, ?, ?)`, worktree, path.path, path.kind, path.id, path.mtime, path.actualMtime(), path.size); err != nil {
 			return err
 		}
 	}
@@ -2932,11 +3256,8 @@ func replacePathIndex(ctx context.Context, db *sql.DB, worktree string, paths []
 	if _, err := tx.ExecContext(ctx, "DELETE FROM path_index WHERE worktree = ?", worktree); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
-	for _, path := range paths {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO path_index(worktree, path, type, object_id, canonical_mtime, actual_mtime, size)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, worktree, path.path, path.kind, path.id, path.mtime, path.mtime, path.size); err != nil {
-			return errors.Join(err, tx.Rollback())
-		}
+	if err := insertPathIndex(ctx, tx, worktree, paths); err != nil {
+		return errors.Join(err, tx.Rollback())
 	}
 	return tx.Commit()
 }

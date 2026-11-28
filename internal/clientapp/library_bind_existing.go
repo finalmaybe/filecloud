@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"sort"
 
 	"github.com/mingming-cn/filecloud/internal/object"
@@ -38,7 +39,11 @@ func bindExistingFolder(ctx context.Context, options bindOptions, owner string, 
 		return staleSyncCandidate("library has no published version; check the folder again")
 	}
 	headID := *head.CommitID
-	candidate := object.ID([]byte(options.serverURL + "\x00" + owner + "\x00" + options.libraryID + "\x00" + options.worktree + "\x00" + headID + snapshot.root))
+	identity := options.serverURL + "\x00" + owner + "\x00" + options.libraryID + "\x00" + options.worktree + "\x00" + headID + snapshot.root
+	if rules := ignoreRulesID(options.scanConfig.ignore); rules != "" {
+		identity += "\x00" + rules
+	}
+	candidate := object.ID([]byte(identity))
 	if !options.previewMerge && options.mergeCandidate != candidate {
 		return staleSyncCandidate("folder or library changed; preview the merge again")
 	}
@@ -51,11 +56,41 @@ func bindExistingFolder(ctx context.Context, options bindOptions, owner string, 
 	}
 	preview := folderMergePreview{Candidate: candidate, Identical: snapshot.root == commit.Root}
 	baseID, paths := headID, snapshot.paths
+	var remote []checkoutPath
 	if !preview.Identical {
-		remote, err := _verifiedRemotePaths(ctx, options, commit.Root, _newReplayBudget())
+		remote, err = _verifiedRemotePaths(ctx, options, commit.Root, _newReplayBudget())
 		if err != nil {
 			return err
 		}
+		if options.scanConfig.ignore.Active() {
+			var omitted []checkoutPath
+			remote = slices.DeleteFunc(remote, func(path checkoutPath) bool {
+				if ignoreSyncPath(options.scanConfig.ignore, path.path) {
+					omitted = append(omitted, path)
+					return true
+				}
+				return false
+			})
+			if err := validateIgnoreCheckoutTargets(snapshot.ignored, remote); err != nil {
+				return err
+			}
+			// Ignored remote entries may make the complete roots differ even when
+			// every participating path is already present in the existing folder.
+			local := make(map[string]checkoutPath, len(snapshot.paths))
+			for _, path := range snapshot.paths {
+				local[path.path] = path
+			}
+			preview.Identical = len(local) == len(remote)
+			for _, path := range remote {
+				value := local[path.path]
+				preview.Identical = preview.Identical && value.kind == path.kind && (path.kind == "Directory" || value.id == path.id && value.mtime == path.mtime)
+			}
+			if preview.Identical {
+				paths = append(paths, omittedForIndex(omitted, options.scanConfig)...)
+			}
+		}
+	}
+	if !preview.Identical {
 		if err := preview.compare(snapshot.paths, remote); err != nil {
 			return err
 		}

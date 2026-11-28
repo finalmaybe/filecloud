@@ -1,11 +1,13 @@
 package webconsole
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"path"
 	"strconv"
 
+	"github.com/mingming-cn/filecloud/internal/library"
 	"github.com/mingming-cn/filecloud/internal/storage"
 )
 
@@ -23,41 +25,57 @@ func (c *console) moveTrash(w http.ResponseWriter, r *http.Request, who identity
 }
 
 type trashPage struct {
-	LibraryID, LibraryName string
-	Entries                []storage.TrashEntry
-	Next                   int64
+	LibraryID, LibraryName, Filter string
+	Entries                        []storage.TrashEntry
+	Before, Next                   int64
+}
+
+func trashBefore(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	before, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || before < 1 {
+		return 0, library.ErrInvalidPage
+	}
+	return before, nil
 }
 
 func (c *console) trash(w http.ResponseWriter, r *http.Request, who identity) {
-	lib, err := c.Store.GetLibrary(r.Context(), who.user, r.PathValue("library"))
+	q := r.URL.Query()
+	before, err := trashBefore(q.Get("before"))
 	if err != nil {
 		c.problem(w, r, who, err)
 		return
 	}
-	var before int64
-	if s := r.URL.Query().Get("before"); s != "" {
-		before, err = strconv.ParseInt(s, 10, 64)
-		if err != nil || before <= 0 {
-			http.Error(w, "无效的分页参数", 400)
-			return
-		}
+	msg := ""
+	if q.Get("deleted") == "1" {
+		msg = "已永久删除所选回收站条目。"
+	} else if q.Get("restored") == "1" {
+		msg = "已恢复所选条目。"
+	}
+	c.showTrash(w, r, who, before, q.Get("filter"), http.StatusOK, msg)
+}
+
+func (c *console) showTrash(w http.ResponseWriter, r *http.Request, who identity, before int64, filter string, status int, msg string) {
+	lib, err := c.Store.GetLibrary(r.Context(), who.user, r.PathValue("library"))
+	if err != nil {
+		c.problem(w, r, who, err)
+		return
 	}
 	items, err := c.Catalog.ListTrash(r.Context(), who.user, lib.ID, before)
 	if err != nil {
 		c.problem(w, r, who, err)
 		return
 	}
-	data := trashPage{LibraryID: lib.ID, LibraryName: lib.Name, Entries: items}
-	if len(items) > 100 {
-		data.Next = items[99].ID
-		data.Entries = items[:100]
+	data := trashPage{LibraryID: lib.ID, LibraryName: lib.Name, Filter: filter, Before: before, Entries: items}
+	if len(items) > storage.TrashPageSize {
+		data.Entries = items[:storage.TrashPageSize]
+		data.Next = data.Entries[len(data.Entries)-1].ID
 	}
-	msg := ""
-	if r.URL.Query().Get("restored") == "1" {
-		msg = "已恢复所选条目。"
-	}
-	c.show(w, r, who, 200, "回收站", "trash", data, msg)
+	c.show(w, r, who, status, "回收站", "trash", data, msg)
 }
+
 func (c *console) restoreTrash(w http.ResponseWriter, r *http.Request, who identity) {
 	id, err := strconv.ParseInt(r.PostForm.Get("id"), 10, 64)
 	if err != nil || id < 1 {
@@ -70,6 +88,48 @@ func (c *console) restoreTrash(w http.ResponseWriter, r *http.Request, who ident
 		return
 	}
 	http.Redirect(w, r, "/libraries/"+lib+"/trash?restored=1", 303)
+}
+
+func (c *console) deleteTrash(w http.ResponseWriter, r *http.Request, who identity) {
+	raw := r.PostForm["id"]
+	if len(raw) == 0 || len(raw) > storage.TrashPageSize {
+		http.Error(w, "无效的回收站条目", http.StatusBadRequest)
+		return
+	}
+	ids := make([]int64, 0, len(raw))
+	for _, v := range raw {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			http.Error(w, "无效的回收站条目", http.StatusBadRequest)
+			return
+		}
+		ids = append(ids, id)
+	}
+	before, err := trashBefore(r.PostForm.Get("before"))
+	if err != nil {
+		c.problem(w, r, who, err)
+		return
+	}
+	filter := r.PostForm.Get("filter")
+	lib := r.PathValue("library")
+	err = c.Catalog.DeleteTrash(r.Context(), who.user, lib, ids)
+	switch {
+	case errors.Is(err, storage.ErrInvalidTrashIDs):
+		http.Error(w, "无效的回收站条目", http.StatusBadRequest)
+	case errors.Is(err, storage.ErrLibraryNotFound):
+		c.showTrash(w, r, who, before, filter, http.StatusNotFound, "所选条目中有记录已不在回收站；本次未删除任何条目。请重新选择。")
+	case err != nil:
+		c.problem(w, r, who, err)
+	default:
+		q := url.Values{"deleted": {"1"}}
+		if before != 0 {
+			q.Set("before", strconv.FormatInt(before, 10))
+		}
+		if filter != "" {
+			q.Set("filter", filter)
+		}
+		http.Redirect(w, r, "/libraries/"+lib+"/trash?"+q.Encode(), http.StatusSeeOther)
+	}
 }
 
 type retentionPage struct {

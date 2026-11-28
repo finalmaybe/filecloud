@@ -70,7 +70,7 @@ func (r _restorePublicationRound) preview(ctx context.Context, pending _pendingP
 	if err := r.prepareScan(ctx, request.warning); err != nil {
 		return _publicationOutcome{}, err
 	}
-	snapshot, err := scanWorktreeWithConfig(r.root, r.options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, fmt.Errorf("scan worktree: %w", err)
 	}
@@ -120,7 +120,7 @@ func (r _restorePublicationRound) confirm(ctx context.Context, current _pendingP
 	if err := r.prepareScan(ctx, request.warning); err != nil {
 		return _publicationOutcome{}, err
 	}
-	snapshot, err := scanWorktreeWithConfig(r.root, r.options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, fmt.Errorf("scan worktree: %w", err)
 	}

@@ -18,7 +18,7 @@ const (
 )
 
 func (r _restorePublicationRound) resumeCurrent(ctx context.Context, pending _restorePublicationState) (_publicationOutcome, error) {
-	snapshot, err := scanWorktreeWithConfig(r.root, r.options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, fmt.Errorf("scan worktree: %w", err)
 	}
@@ -83,12 +83,12 @@ func (r _restorePublicationRound) resolvePublicationResult(ctx context.Context, 
 	var observed worktreeSnapshot
 	var err error
 	if conflict && head.ETag != "" {
-		observed, err = scanWorktreeWithConfig(r.root, r.options.scanConfig)
+		observed, err = scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 		if err != nil {
 			return _publicationOutcome{}, fmt.Errorf("rescan worktree after Head conflict: %w", err)
 		}
 	} else {
-		head, observed, err = headAfterPublication(ctx, r.options, publishErr)
+		head, observed, err = headAfterPublication(ctx, r.options, publishErr, r.binding.SyncBaseRoot)
 		if err != nil {
 			return _publicationOutcome{}, err
 		}

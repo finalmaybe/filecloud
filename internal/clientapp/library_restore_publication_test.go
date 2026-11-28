@@ -22,9 +22,6 @@ func TestCanonicalRestoreCommitFixedVector(t *testing.T) {
 }
 
 func TestClientV24RestorePublicationSchemaAndRoundTrip(t *testing.T) {
-	if _clientSchemaVersion != 24 {
-		t.Fatalf("client schema version=%d, want 24", _clientSchemaVersion)
-	}
 	db, err := initializeClientDB(t.Context(), t.TempDir(), syncDirectory)
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +32,8 @@ func TestClientV24RestorePublicationSchemaAndRoundTrip(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), "SELECT MAX(version) FROM client_schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 24 {
-		t.Fatalf("schema migration version=%d, want 24", version)
+	if version != _clientSchemaVersion {
+		t.Fatalf("schema migration version=%d, want %d", version, _clientSchemaVersion)
 	}
 
 	binding, pending := testRestorePendingPublication(t)
@@ -111,7 +108,7 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 		expected.RequiresDeleteConfirmation, expected.DeleteConfirmed, expected.LegacyRevalidationRequired); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP TABLE v23_pending_publications; DELETE FROM client_schema_migrations WHERE version=24`); err != nil {
+	if _, err := db.Exec(`DROP TABLE v23_pending_publications; DELETE FROM client_schema_migrations WHERE version>=24`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,8 +128,8 @@ func TestClientV23ToV24SyncPendingMigrationPreservesFields(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), "SELECT MAX(version) FROM client_schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 24 {
-		t.Fatalf("migrated schema version=%d, want 24", version)
+	if version != _clientSchemaVersion {
+		t.Fatalf("migrated schema version=%d, want %d", version, _clientSchemaVersion)
 	}
 }
 

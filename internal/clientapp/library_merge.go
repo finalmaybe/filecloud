@@ -99,7 +99,7 @@ func prepareSyncMergePublication(ctx context.Context, session *_lockedBoundWorkt
 	if err != nil {
 		return _preparedSyncPublication{}, err
 	}
-	verified, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	verified, err := scanSyncSnapshot(ctx, options, binding.SyncBaseRoot)
 	if err != nil || verified.root != snapshot.root {
 		return _preparedSyncPublication{}, errors.New("worktree changed while preparing recursive merge")
 	}

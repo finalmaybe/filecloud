@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 )
 
 func TestPublicationLifecycleSyncReplansContinuousCompetition(t *testing.T) {
@@ -200,6 +203,84 @@ func leaveTestSyncPending(t *testing.T, state importedBinding) (*_lockedBoundWor
 	}
 	session.config.beforeHeadCAS = nil
 	return session, start
+}
+
+func TestPublicationRecoveryPreservesDeletedIgnoredPathIndex(t *testing.T) {
+	for _, liftBeforeRecovery := range []bool{false, true} {
+		name := "rules still active"
+		if liftBeforeRecovery {
+			name = "rules already lifted"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(syncignore.Env, "")
+			env, aDir, aTree, bDir, bTree, _, _ := newSyncPair(t)
+			sync := func(dir, tree string) {
+				t.Helper()
+				if err := syncTestWorktree(t, dir, tree); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeLibraryIgnoreFile(t, filepath.Join(bTree, "keep.tmp"), "old ignored")
+			sync(bDir, bTree)
+			sync(aDir, aTree)
+			rules := setLibraryIgnoreRules(t, `{"Patterns":["*.tmp"]}`)
+			sync(aDir, aTree)
+			t.Setenv(syncignore.Env, "")
+			if err := os.Remove(filepath.Join(bTree, "keep.tmp")); err != nil {
+				t.Fatal(err)
+			}
+			if err := syncTestWorktreeConfirmingDeletes(t, bDir, bTree); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(syncignore.Env, rules)
+			sync(aDir, aTree)
+			checkLibraryIgnoreFile(t, filepath.Join(aTree, "keep.tmp"), "old ignored")
+			index := captureTestPathIndex(t, aDir, aTree)
+			i := slices.IndexFunc(index, func(row testPathIndexRow) bool { return row.path == "keep.tmp" })
+			if i < 0 || index[i].actualMtime != "" || index[i].canonicalMtime == "" {
+				t.Fatalf("missing prior unmaterialized row: %v", index)
+			}
+
+			writeLibraryIgnoreFile(t, filepath.Join(aTree, "added"), "captured")
+			stop := errors.New("stop before Head publication")
+			err := runLibraryWithConfig(t.Context(), []string{"sync", "--client-dir", aDir, "--worktree", aTree}, strings.NewReader(""), io.Discard, io.Discard, libraryClientConfig{
+				checkFilesystem: func(*os.File) error { return nil }, beforeHeadCAS: func() error { return stop },
+			})
+			if !errors.Is(err, stop) {
+				t.Fatalf("leave a pending publication: %v", err)
+			}
+			pending := readTestSyncPublication(t, aDir, aTree)
+			if _, conflict, err := updateRemoteHead(t.Context(), mustServerURL(t, env.server.URL), testClientLibraryID, []byte(env.token), pending.ExpectedETag, pending.CandidateCommit); err != nil || conflict {
+				t.Fatalf("publish pending candidate: conflict=%t err=%v", conflict, err)
+			}
+			writeLibraryIgnoreFile(t, filepath.Join(aTree, "added"), "dirty after publication")
+			if liftBeforeRecovery {
+				t.Setenv(syncignore.Env, "")
+			}
+			if err := syncTestWorktree(t, aDir, aTree); err == nil || !strings.Contains(err.Error(), "preserving local changes") {
+				t.Fatalf("dirty recovery: %v", err)
+			}
+			checkLibraryIgnoreFile(t, filepath.Join(aTree, "keep.tmp"), "old ignored")
+			checkLibraryIgnoreFile(t, filepath.Join(aTree, "added"), "dirty after publication")
+			if got := captureTestPathIndex(t, aDir, aTree); !slices.Contains(got, index[i]) {
+				t.Fatalf("recovery lost the omitted local copy: %v", got)
+			}
+			if got := readTestBinding(t, aDir, aTree); got.SyncBase != pending.CandidateCommit || countClientRows(t, aDir, "pending_publications", aTree) != 0 {
+				t.Fatalf("recovery did not settle the pending publication: %+v", got)
+			}
+
+			t.Setenv(syncignore.Env, "")
+			sync(aDir, aTree)
+			sync(bDir, bTree)
+			checkLibraryIgnoreFile(t, filepath.Join(bTree, "added"), "dirty after publication")
+			for _, tree := range []string{aTree, bTree} {
+				if _, err := os.Stat(filepath.Join(tree, "keep.tmp")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("deleted file resurrected in %s: %v", tree, err)
+				}
+			}
+			assertTestConverged(t, env, aDir, aTree)
+		})
+	}
 }
 
 func TestPublicationLifecycleSyncRecoversPublishedCandidate(t *testing.T) {

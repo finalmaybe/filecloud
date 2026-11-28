@@ -25,6 +25,7 @@ import (
 
 	fscompat "github.com/mingming-cn/filecloud/internal/fscompat"
 	"github.com/mingming-cn/filecloud/internal/object"
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 	_ "modernc.org/sqlite"
 )
 
@@ -62,6 +63,7 @@ func isTransientHTTPStatus(status int) bool {
 }
 
 type libraryClientConfig struct {
+	ignoreRules                     syncignore.Rules
 	syncEvent                       func(string) error
 	conflictSaved                   func(source, target string) error
 	checkFilesystem                 func(*os.File) error
@@ -128,6 +130,8 @@ type bindOptions struct {
 	confirmDelete                                       string
 	confirmDeleteSet                                    bool
 	scanConfig                                          worktreeScanConfig
+	retainedDirs                                        map[string]retainedCheckoutDirectory
+	syncFileReplacement                                 string
 }
 
 type clientBinding struct {
@@ -176,6 +180,14 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		return errors.New("usage: filecloud-client library <create|list|inspect|history|bind|bindings|status|sync|watch|restore|unbind> [options]")
 	}
 	switch args[0] {
+	case "bind", "check-directory", "sync", "watch", "restore":
+		rules, err := syncignore.Load(os.Getenv(syncignore.Env))
+		if err != nil {
+			return err
+		}
+		config.ignoreRules = rules
+	}
+	switch args[0] {
 	case "create":
 		return runLibraryCreate(ctx, args[1:], stdin, stdout, stderr)
 	case "list":
@@ -202,7 +214,7 @@ func runLibraryWithConfig(ctx context.Context, args []string, stdin io.Reader, s
 		defer clear(options.token)
 		return bindLibrary(ctx, options, stdout, config)
 	case "check-directory":
-		return checkBindingDirectory(args[1:], stdout, stderr)
+		return checkBindingDirectoryWithRules(args[1:], stdout, stderr, config.ignoreRules)
 	case "bindings":
 		return runLibraryBindings(ctx, args[1:], stdout, stderr)
 	case "status":
@@ -274,8 +286,9 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 		clear(token)
 		return bindOptions{}, errors.Join(errors.New("client state directory must be outside the worktree"), worktreeRoot.Close())
 	}
+	scanConfig := worktreeScanConfig{fault: config.scanFault, ignore: config.ignoreRules}
 	if !*importLocal && !*preview && *merge == "" {
-		if emptyErr := worktreeRoot.validateEmpty(); emptyErr != nil {
+		if emptyErr := validateEmptyForBind(ctx, worktreeRoot, scanConfig); emptyErr != nil {
 			resumable, stateErr := resumableBindExists(ctx, canonicalClientDir, canonicalWorktree)
 			if stateErr != nil || !resumable {
 				clear(token)
@@ -283,7 +296,7 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 			}
 		}
 	} else if *importLocal {
-		if _, err := scanWorktreeWithConfig(worktreeRoot, worktreeScanConfig{fault: config.scanFault}); err != nil {
+		if _, err := scanWorktreeWithConfig(worktreeRoot, scanConfig); err != nil {
 			clear(token)
 			return bindOptions{}, errors.Join(err, worktreeRoot.Close())
 		}
@@ -292,7 +305,7 @@ func parseLibraryBind(ctx context.Context, args []string, stdin io.Reader, stder
 	base.Host = strings.ToLower(base.Host)
 	return bindOptions{clientDir: canonicalClientDir, serverURL: strings.TrimSuffix(base.String(), "/"), libraryID: *libraryID,
 		worktree: canonicalWorktree, deviceID: *deviceID, base: base, token: token, worktreeRoot: worktreeRoot, importLocal: *importLocal, previewMerge: *preview, mergeCandidate: *merge,
-		scanConfig: worktreeScanConfig{fault: config.scanFault}}, nil
+		scanConfig: scanConfig}, nil
 }
 
 func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, config libraryClientConfig) (retErr error) {
@@ -331,7 +344,7 @@ func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, con
 	}
 	snapshot := worktreeSnapshot{root: emptyRoot}
 	if !recoveringBind {
-		snapshot, err = scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+		snapshot, err = scanSyncSnapshot(ctx, options, "")
 		if err != nil {
 			return fmt.Errorf("scan worktree: %w", err)
 		}
@@ -358,6 +371,10 @@ func bindLibrary(ctx context.Context, options bindOptions, stdout io.Writer, con
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, db.Close()) }()
+	options.scanConfig.ignore, err = checkoutIgnoreRules(ctx, db, options.worktree, options.scanConfig.ignore)
+	if err != nil {
+		return err
+	}
 	if err := validatePendingPromotionTargets(ctx, db, options.worktree); err != nil {
 		return fmt.Errorf("validate checkout promotion targets: %w", err)
 	}
@@ -493,7 +510,7 @@ func canonicalEmptyDirectory() ([]byte, string, error) {
 }
 
 func rescanRoot(options bindOptions, expected string) (worktreeSnapshot, error) {
-	snapshot, err := scanWorktreeWithConfig(options.worktreeRoot, options.scanConfig)
+	snapshot, err := scanSyncSnapshot(context.Background(), options, "")
 	if err != nil {
 		return worktreeSnapshot{}, fmt.Errorf("worktree changed during bind: %w", err)
 	}
@@ -801,7 +818,7 @@ func confirmExistingBinding(ctx context.Context, db *sql.DB, options bindOptions
 	if commit.AuthorUserID != existing.UserID || commit.Root != existing.SyncBaseRoot {
 		return errors.New("existing binding base commit does not match its owner and snapshot")
 	}
-	if _, err := rescanRoot(options, existing.SyncBaseRoot); err != nil {
+	if snapshot, err := scanSyncSnapshot(ctx, options, existing.SyncBaseRoot); err != nil || snapshot.root != existing.SyncBaseRoot {
 		return errors.New("existing binding worktree has changes; run library sync")
 	}
 	if config.beforeBindingRefresh != nil {
@@ -861,7 +878,13 @@ func runLibraryWatch(ctx context.Context, args []string, stdout, stderr io.Write
 		if deadline, ok := ctx.Deadline(); ok {
 			roundCtx, stopRound = context.WithDeadline(roundCtx, deadline)
 		}
-		err := runLibrarySync(roundCtx, syncArgs, stdout, stderr, config)
+		rules, err := syncignore.Load(os.Getenv(syncignore.Env))
+		if err != nil {
+			stopRound()
+			return err
+		}
+		config.ignoreRules = rules
+		err = runLibrarySync(roundCtx, syncArgs, stdout, stderr, config)
 		stopRound()
 		if err != nil {
 			if ctx.Err() != nil && errors.Is(err, context.Canceled) {
@@ -1401,7 +1424,7 @@ func initializeClientDB(ctx context.Context, clientDir string, syncDir func(stri
 	return db, nil
 }
 
-const _clientSchemaVersion = 24
+const _clientSchemaVersion = 26
 
 var legacyClientV12Columns = map[string][]string{
 	"bindings":             {"server_url|TEXT|1||0", "library_id|TEXT|1||0", "worktree|TEXT|1||1", "user_id|TEXT|1||0", "device_id|TEXT|1||0", "sync_base_commit|TEXT|1||0", "sync_base_root|TEXT|1||0", "head_etag|TEXT|1||0", "access_token|BLOB|1||0"},
@@ -2064,7 +2087,17 @@ func validateClientSchemaVersion(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	version := versions[len(versions)-1]
-	if version == _clientSchemaVersion {
+	if version >= 25 {
+		if err := validateCheckoutIgnoreSchema(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version >= 26 {
+		if err := validateCheckoutFileReplacementSchema(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version >= 24 {
 		if err := _validateClientV24Schema(ctx, db); err != nil {
 			return err
 		}
@@ -2754,6 +2787,12 @@ func initializeClientSchema(ctx context.Context, db *sql.DB) error {
 	} else if restorePublicationColumns != 12 {
 		return fail(errors.New("pending publication restore schema is incomplete"))
 	}
+	if err := migrateCheckoutIgnoreSchema(ctx, tx); err != nil {
+		return fail(err)
+	}
+	if err := migrateCheckoutFileReplacementSchema(ctx, tx); err != nil {
+		return fail(err)
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (13);
 		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (14);
 		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (15);
@@ -2765,7 +2804,9 @@ func initializeClientSchema(ctx context.Context, db *sql.DB) error {
 		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (21);
 		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (22);
 		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (23);
-		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (24)`); err != nil {
+		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (24);
+		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (25);
+		INSERT OR IGNORE INTO client_schema_migrations(version) VALUES (26)`); err != nil {
 		return fail(err)
 	}
 	if err := _validateClientV24Schema(ctx, tx); err != nil {
@@ -2903,7 +2944,7 @@ func finalizeBinding(ctx context.Context, db *sql.DB, binding clientBinding, acc
 	}
 	for _, path := range paths {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO path_index(worktree, path, type, object_id, canonical_mtime, actual_mtime, size)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, binding.Worktree, path.path, path.kind, path.id, path.mtime, path.mtime, path.size); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, binding.Worktree, path.path, path.kind, path.id, path.mtime, path.actualMtime(), path.size); err != nil {
 			return errors.Join(fmt.Errorf("save imported path index: %w", err), tx.Rollback())
 		}
 	}

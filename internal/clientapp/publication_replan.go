@@ -45,7 +45,7 @@ func (c *_syncReplanChallenge) prepare(ctx context.Context) (_replaceSyncPublica
 		return _replaceSyncPublicationRequest{}, _errPublicationRequestInvalid
 	}
 	if c.replacement == nil {
-		verified, err := scanWorktreeWithConfig(r.root, r.options.scanConfig)
+		verified, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 		if err != nil || verified.root != c.observed.CapturedRoot {
 			return _replaceSyncPublicationRequest{}, errors.New("worktree changed before pending merge replacement")
 		}
@@ -60,7 +60,7 @@ func (c *_syncReplanChallenge) prepare(ctx context.Context) (_replaceSyncPublica
 
 func (c *_syncReplanChallenge) replace(ctx context.Context) (_publicationOutcome, error) {
 	r, old, plan := c.round, c.observed, c.replacement
-	snapshot, err := scanWorktreeWithConfig(r.root, r.options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 	if err != nil || snapshot.root != old.CapturedRoot {
 		return _publicationOutcome{}, errors.New("worktree changed while preparing pending merge replacement")
 	}

@@ -34,7 +34,7 @@ const entries = document.querySelector('.entry-table tbody');
 if (entries) {
   const filter = document.querySelector('#list-filter');
   filter.closest('label').hidden = entries.closest('table').hidden;
-  filter.addEventListener('input', () => {
+  const updateFilter = () => {
     const query = filter.value.trim().toLowerCase();
     let visible = 0;
     for (const row of entries.rows) {
@@ -44,7 +44,68 @@ if (entries) {
     }
     document.querySelector('#visible-count').textContent = visible;
     document.querySelector('#filter-empty').hidden = visible !== 0;
+  };
+  filter.addEventListener('input', updateFilter);
+  if (entries.closest('.trash-list')) {
+    updateFilter();
+    enableTrashDeletion(entries, filter);
+  }
+}
+
+function enableTrashDeletion(entries, filter) {
+  const batch = document.getElementById('trash-delete-selected');
+  const dialog = document.getElementById('trash-delete-dialog');
+  const form = dialog.querySelector('form');
+  const target = document.getElementById('trash-delete-target');
+  const ids = document.getElementById('trash-delete-ids');
+  const checks = [...entries.querySelectorAll('.trash-select')];
+  let opener;
+
+  const selected = () => checks.filter(check => check.checked && !check.closest('tr').hidden);
+  const updateSelection = () => {
+    for (const check of checks) {
+      if (check.closest('tr').hidden) check.checked = false;
+    }
+    const count = selected().length;
+    batch.disabled = count === 0;
+    batch.textContent = `永久删除所选（${count}）`;
+  };
+  const confirmDelete = (items, label, trigger) => {
+    target.textContent = label;
+    ids.replaceChildren(...items.map(check => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'id';
+      input.value = check.value;
+      return input;
+    }));
+    form.elements.namedItem('filter').value = filter.value;
+    opener = trigger;
+    dialog.showModal();
+  };
+  for (const check of checks) check.hidden = false;
+  for (const button of entries.querySelectorAll('.trash-delete-one')) {
+    button.hidden = false;
+    button.addEventListener('click', () => {
+      const row = button.closest('tr');
+      if (row.hidden) return;
+      const menu = button.closest('.row-actions');
+      menu.open = false;
+      const summary = menu.querySelector('summary');
+      summary.focus({preventScroll: true});
+      confirmDelete([row.querySelector('.trash-select')], row.dataset.path, summary);
+    });
+  }
+  batch.hidden = false;
+  batch.addEventListener('click', () => {
+    const items = selected();
+    if (items.length) confirmDelete(items, `已选择 ${items.length} 个条目`, batch);
   });
+  entries.addEventListener('change', updateSelection);
+  filter.addEventListener('input', updateSelection);
+  updateSelection();
+  dialog.querySelector('button[type="button"]').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => opener?.focus({preventScroll: true}));
 }
 
 const openMenu = '.account-menu[open], .row-actions[open]';

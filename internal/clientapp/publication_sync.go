@@ -72,7 +72,7 @@ func (r _syncPublicationRound) start(ctx context.Context, prepared _preparedSync
 }
 
 func (r _syncPublicationRound) resumeCurrent(ctx context.Context, pending _syncPublicationState) (_publicationOutcome, error) {
-	snapshot, err := scanWorktreeWithConfig(r.options.worktreeRoot, r.options.scanConfig)
+	snapshot, err := scanSyncSnapshot(ctx, r.options, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, fmt.Errorf("scan worktree: %w", err)
 	}
@@ -111,10 +111,10 @@ func (r _syncPublicationRound) resume(ctx context.Context, snapshot worktreeSnap
 	if published {
 		return r.settlePublished(ctx, snapshot, head, pending)
 	}
-	if *head.CommitID != pending.ExpectedHead {
+	if *head.CommitID != pending.ExpectedHead && (snapshot.root == pending.CapturedRoot || !r.options.scanConfig.ignore.Active() && len(r.options.scanConfig.ignoreIndex) == 0) {
 		return r.requestReplan(pending, head), nil
 	}
-	if head.ETag != pending.ExpectedETag {
+	if *head.CommitID == pending.ExpectedHead && head.ETag != pending.ExpectedETag {
 		if err := refreshPendingETag(ctx, r.db, r.binding.Worktree, &pending, head.ETag); err != nil {
 			return _publicationOutcome{}, err
 		}
@@ -243,7 +243,7 @@ func (r _syncPublicationRound) uploadPrepared(ctx context.Context, snapshot work
 }
 
 func (r _syncPublicationRound) publish(ctx context.Context, snapshot worktreeSnapshot, pending _syncPublicationState) (_publicationOutcome, error) {
-	current, err := headBeforePublication(ctx, r.options, r.config, pending._publicationCandidate)
+	current, err := headBeforePublication(ctx, r.options, r.config, pending._publicationCandidate, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, err
 	}
@@ -255,11 +255,17 @@ func (r _syncPublicationRound) publish(ctx context.Context, snapshot worktreeSna
 			return _publicationOutcome{}, err
 		}
 	}
+	if err := verifyIgnoredPublication(ctx, r.options, r.binding.UserID, *current.CommitID, pending.CandidateRoot); err != nil {
+		if errors.Is(err, errSyncIgnoreBlocked) {
+			err = errors.Join(err, discardPendingPublication(ctx, r.db, r.binding.Worktree, pending))
+		}
+		return _publicationOutcome{}, err
+	}
 	if err := _assertPendingPublication(ctx, r.db, r.binding.Worktree, pending); err != nil {
 		return _publicationOutcome{}, err
 	}
 	_, _, publishErr := updateRemoteHead(ctx, r.options.base, r.binding.LibraryID, r.options.token, pending.ExpectedETag, pending.CandidateCommit)
-	published, observed, err := headAfterPublication(ctx, r.options, publishErr)
+	published, observed, err := headAfterPublication(ctx, r.options, publishErr, r.binding.SyncBaseRoot)
 	if err != nil {
 		return _publicationOutcome{}, err
 	}
@@ -350,7 +356,7 @@ func (r _syncPublicationRound) finalize(ctx context.Context, snapshot worktreeSn
 	if err != nil {
 		return err
 	}
-	if err := updateBindingAndIndex(ctx, tx, r.binding, pending.CandidateCommit, pending.CandidateRoot, etag, snapshot.paths); err != nil {
+	if err := updateBindingAndIndex(ctx, tx, r.binding, pending.CandidateCommit, pending.CandidateRoot, etag, snapshot.indexPaths()); err != nil {
 		return errors.Join(err, tx.Rollback())
 	}
 	if err := _deletePendingPublication(ctx, tx, r.binding.Worktree, pending,

@@ -19,6 +19,7 @@ import (
 
 	fscompat "github.com/mingming-cn/filecloud/internal/fscompat"
 	"github.com/mingming-cn/filecloud/internal/object"
+	"github.com/mingming-cn/filecloud/internal/syncignore"
 	"golang.org/x/text/cases"
 )
 
@@ -36,6 +37,15 @@ type checkoutPath struct {
 	path, kind, id, mtime string
 	size                  int64
 	device, inode         uint64
+	unmaterialized        bool
+}
+
+// An empty actual mtime marks an entry that is remote-only in this worktree.
+func (p checkoutPath) actualMtime() string {
+	if p.unmaterialized {
+		return ""
+	}
+	return p.mtime
 }
 
 func _validConflictPromotionPath(path string) bool {
@@ -337,9 +347,18 @@ func runInitialCheckout(ctx context.Context, db *sql.DB, options bindOptions, ow
 	} else if pending.TargetRoot != commit.Root {
 		return errors.New("pending checkout target commit changed root")
 	}
-	paths, err := downloadCheckoutTree(ctx, options, pending.TargetRoot)
+	paths, omitted, err := downloadCheckoutView(ctx, options, pending.TargetRoot)
 	if err != nil {
 		return err
+	}
+	if options.scanConfig.ignore.Active() {
+		snapshot, err := scanForInitialIgnorePlan(ctx, db, options)
+		if err != nil {
+			return err
+		}
+		if err := prepareCheckoutIgnorePlan(ctx, db, &options, paths, snapshot); err != nil {
+			return err
+		}
 	}
 	if err := saveCheckoutPaths(ctx, db, options.worktree, paths); err != nil {
 		return err
@@ -352,7 +371,7 @@ func runInitialCheckout(ctx context.Context, db *sql.DB, options bindOptions, ow
 	if err := materializeCheckout(ctx, db, options, paths, config); err != nil {
 		return err
 	}
-	if _, err := rescanRoot(options, pending.TargetRoot); err != nil {
+	if _, err := verifyCheckoutView(options, pending.TargetRoot, paths); err != nil {
 		return fmt.Errorf("verify checked out tree: %w", err)
 	}
 	if config.beforeFinalize != nil {
@@ -360,10 +379,10 @@ func runInitialCheckout(ctx context.Context, db *sql.DB, options bindOptions, ow
 			return fmt.Errorf("finalize checkout: %w", err)
 		}
 	}
-	if _, err := rescanRoot(options, pending.TargetRoot); err != nil {
+	if _, err := verifyCheckoutView(options, pending.TargetRoot, paths); err != nil {
 		return fmt.Errorf("verify checked out tree: %w", err)
 	}
-	if err := finalizeCheckout(ctx, db, options, *pending, config); err != nil {
+	if err := finalizeCheckout(ctx, db, options, *pending, config, omittedForIndex(omitted, options.scanConfig)); err != nil {
 		return err
 	}
 	latest, err := getRemoteHead(ctx, options.base, options.libraryID, options.token)
@@ -389,12 +408,18 @@ func downloadTargetCommit(ctx context.Context, options bindOptions, target, owne
 	return commit, nil
 }
 
-func downloadCheckoutTree(ctx context.Context, options bindOptions, root string) ([]checkoutPath, error) {
-	return deriveRemotePaths(ctx, options, root, true)
+func deriveRemotePaths(ctx context.Context, options bindOptions, root string, downloadBlocks bool) ([]checkoutPath, error) {
+	paths, _, err := deriveRemotePathsWithRules(ctx, options, root, downloadBlocks, syncignore.Rules{})
+	return paths, err
 }
 
-func deriveRemotePaths(ctx context.Context, options bindOptions, root string, downloadBlocks bool) ([]checkoutPath, error) {
+func downloadCheckoutView(ctx context.Context, options bindOptions, root string) ([]checkoutPath, []checkoutPath, error) {
+	return deriveRemotePathsWithRules(ctx, options, root, true, options.scanConfig.ignore)
+}
+
+func deriveRemotePathsWithRules(ctx context.Context, options bindOptions, root string, downloadBlocks bool, rules syncignore.Rules) ([]checkoutPath, []checkoutPath, error) {
 	paths := make([]checkoutPath, 0)
+	var omitted []checkoutPath
 	var walk func(string, string, int) error
 	walk = func(id, prefix string, depth int) error {
 		if depth > 256 {
@@ -417,6 +442,11 @@ func deriveRemotePaths(ctx context.Context, options bindOptions, root string, do
 				return errors.New("remote path exceeds checkout limit")
 			}
 			value := checkoutPath{path: path, kind: entry.Type, id: entry.ID, mtime: entry.ModifiedAt}
+			if ignoreSyncName(rules, entry.Name) {
+				value.unmaterialized = true
+				omitted = append(omitted, value)
+				continue
+			}
 			if entry.Type == "Directory" {
 				paths = append(paths, value)
 				if err := walk(entry.ID, path, depth+1); err != nil {
@@ -445,9 +475,9 @@ func deriveRemotePaths(ctx context.Context, options bindOptions, root string, do
 		return nil
 	}
 	if err := walk(root, "", 0); err != nil {
-		return nil, fmt.Errorf("download checkout tree: %w", err)
+		return nil, nil, fmt.Errorf("download checkout tree: %w", err)
 	}
-	return paths, nil
+	return paths, omitted, nil
 }
 
 func loadRemoteTrackedPaths(ctx context.Context, options bindOptions, binding clientBinding) (map[string]bool, error) {
@@ -714,23 +744,30 @@ func saveCheckoutPaths(ctx context.Context, db *sql.DB, worktree string, paths [
 	if err != nil {
 		return fmt.Errorf("begin checkout path intents: %w", err)
 	}
+	if err := saveCheckoutPathsWith(ctx, tx, worktree, paths); err != nil {
+		return errors.Join(err, tx.Rollback())
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit checkout path intents: %w", err)
+	}
+	return nil
+}
+
+func saveCheckoutPathsWith(ctx context.Context, tx *sql.Tx, worktree string, paths []checkoutPath) error {
 	for _, value := range paths {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO checkout_paths(worktree, path, type, object_id, canonical_mtime, size)
 			VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(worktree, path) DO NOTHING`, worktree, value.path, value.kind, value.id, value.mtime, value.size); err != nil {
-			return errors.Join(fmt.Errorf("save checkout path intent: %w", err), tx.Rollback())
+			return fmt.Errorf("save checkout path intent: %w", err)
 		}
 		var kind, id, mtime string
 		var size int64
 		if err := tx.QueryRowContext(ctx, `SELECT type, object_id, canonical_mtime, size FROM checkout_paths
 			WHERE worktree = ? AND path = ?`, worktree, value.path).Scan(&kind, &id, &mtime, &size); err != nil {
-			return errors.Join(fmt.Errorf("verify checkout path intent: %w", err), tx.Rollback())
+			return fmt.Errorf("verify checkout path intent: %w", err)
 		}
 		if kind != value.kind || id != value.id || mtime != value.mtime || size != value.size {
-			return errors.Join(errors.New("pending checkout path intent does not match fixed target"), tx.Rollback())
+			return errors.New("pending checkout path intent does not match fixed target")
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit checkout path intents: %w", err)
 	}
 	return nil
 }
@@ -739,13 +776,19 @@ func materializeCheckout(ctx context.Context, db *sql.DB, options bindOptions, p
 	if err := materializeCheckoutDirectories(ctx, db, options, paths, config); err != nil {
 		return err
 	}
-	return materializeCheckoutFiles(ctx, db, options, paths, config)
+	return materializeCheckoutFiles(ctx, db, options, paths, config, nil)
 }
 
 func materializeCheckoutDirectories(ctx context.Context, db *sql.DB, options bindOptions, paths []checkoutPath,
 	config libraryClientConfig) error {
 	for _, value := range paths {
 		if value.kind == "Directory" {
+			if dir, ok := options.retainedDirs[value.path]; ok {
+				if err := adoptRetainedCheckoutDirectory(ctx, db, options, value, dir); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := installCheckoutDirectory(ctx, db, options, value, config); err != nil {
 				return err
 			}
@@ -755,16 +798,24 @@ func materializeCheckoutDirectories(ctx context.Context, db *sql.DB, options bin
 }
 
 func materializeCheckoutFiles(ctx context.Context, db *sql.DB, options bindOptions, paths []checkoutPath,
-	config libraryClientConfig) error {
+	config libraryClientConfig, staged *stagedCheckoutFile) error {
 	for _, value := range paths {
 		if value.kind == "File" {
-			if err := installCheckoutFile(ctx, db, options, value, config); err != nil {
+			if err := installCheckoutFile(ctx, db, options, value, config, staged); err != nil {
 				return err
 			}
 		}
 	}
 	for index := len(paths) - 1; index >= 0; index-- {
 		if paths[index].kind == "Directory" {
+			if dir, retained := options.retainedDirs[paths[index].path]; retained {
+				if options.syncFileReplacement != "" && isCheckoutAncestor(dir.path, options.syncFileReplacement) {
+					if err := setFileReplacementDirectoryMtime(ctx, db, options.worktreeRoot, options.worktree, fsPhasePreBase, paths[index], dir, config.fsActionFault); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			if err := setCheckoutMtime(ctx, db, options, paths[index], config); err != nil {
 				return err
 			}
@@ -828,7 +879,7 @@ func installCheckoutDirectory(ctx context.Context, db *sql.DB, options bindOptio
 	parentPath, _ := splitFSActionPath(value.path)
 	needsIdentity := tempDevice == 0 && tempInode == 0
 	if needsIdentity {
-		if err := journalCreate(ctx, db, options.worktreeRoot, options.worktree, value.path, parentPath, tempName, "Directory", config.fsActionFault); err != nil {
+		if err := journalCreateAt(ctx, db, options.worktreeRoot, parent, options.worktree, value.path, parentPath, tempName, "Directory", config.fsActionFault); err != nil {
 			return fmt.Errorf("create checkout temporary directory: %w", err)
 		}
 		var found bool
@@ -873,12 +924,18 @@ func installCheckoutDirectory(ctx context.Context, db *sql.DB, options bindOptio
 	return recordCheckoutDirectoryInstalled(ctx, db, options.worktree, value, opened, config)
 }
 
-func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, value checkoutPath, config libraryClientConfig) error {
+type stagedCheckoutFile struct {
+	name          string
+	device, inode uint64
+	verified      fscompat.Stat_t
+}
+
+func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, value checkoutPath, config libraryClientConfig, staged *stagedCheckoutFile) error {
 	completed, err := checkoutPathCompleted(ctx, db, options.worktree, value.path)
 	if err != nil {
 		return err
 	}
-	tempName, tempDevice, tempInode, registered, err := checkoutTempRecord(ctx, db, options.worktree, value.path)
+	_, tempDevice, tempInode, _, err := checkoutTempRecord(ctx, db, options.worktree, value.path)
 	if err != nil {
 		return err
 	}
@@ -917,38 +974,178 @@ func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, v
 	} else if !errors.Is(err, fscompat.ENOENT) {
 		return err
 	}
-	if !registered || tempName == "" {
-		tempName, err = newCheckoutTempName()
+	if staged == nil {
+		staged, err = stageCheckoutFileAt(ctx, db, options, value, parent, config)
 		if err != nil {
 			return err
 		}
+	}
+	tempName, tempDevice, tempInode := staged.name, staged.device, staged.inode
+	if options.syncFileReplacement != "" {
+		stat, err := statAt(parent, tempName)
+		if err != nil || !sameRollbackFileState(stat, staged.verified) {
+			return errors.Join(errors.New("staged checkout file changed before installation"), err)
+		}
+	}
+	parentPath, _ := splitFSActionPath(value.path)
+	if config.beforeCheckoutFileRename != nil {
+		if err := config.beforeCheckoutFileRename(value.path, tempName); err != nil {
+			return fmt.Errorf("before checkout file rename: %w", err)
+		}
+	}
+	if options.syncFileReplacement != "" {
+		stat, err := statAt(parent, tempName)
+		if err != nil || !sameRollbackFileState(stat, staged.verified) {
+			return errors.Join(errors.New("staged checkout file changed at installation"), err)
+		}
+	}
+	if err := journalRenameAt(ctx, db, options.worktreeRoot, parent, options.worktree, fsPhasePreBase, parentPath,
+		tempName, name, "File", tempName, "", tempDevice, tempInode, config.fsActionFault); err != nil {
+		return fmt.Errorf("install checkout file %q: %w", value.path, err)
+	}
+	if config.afterCheckoutInstall != nil {
+		if err := config.afterCheckoutInstall(value.path, value.kind); err != nil {
+			return fmt.Errorf("record installed checkout file: %w", err)
+		}
+	}
+	if err := verifyCheckoutFilePathIdentity(parent, name, tempDevice, tempInode); err != nil {
+		return fmt.Errorf("verify installed checkout file before completion: %w", err)
+	}
+	return recordCheckoutCompleted(ctx, db, options.worktree, value)
+}
+
+func stageCheckoutFileAt(ctx context.Context, db *sql.DB, options bindOptions, value checkoutPath, parent *os.File, config libraryClientConfig) (*stagedCheckoutFile, error) {
+	tempName, tempDevice, tempInode, registered, err := checkoutTempRecord(ctx, db, options.worktree, value.path)
+	if err != nil {
+		return nil, err
+	}
+	if !registered || tempName == "" {
+		tempName, err = newCheckoutTempName()
+		if err != nil {
+			return nil, err
+		}
 		if err := registerCheckoutTemp(ctx, db, options.worktree, value, tempName); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	parentPath, _ := splitFSActionPath(value.path)
 	needsIdentity := tempDevice == 0 && tempInode == 0
 	if needsIdentity {
-		if err := journalCreate(ctx, db, options.worktreeRoot, options.worktree, value.path, parentPath, tempName, "File", config.fsActionFault); err != nil {
-			return fmt.Errorf("create checkout temporary file: %w", err)
+		if err := journalCreateAt(ctx, db, options.worktreeRoot, parent, options.worktree, value.path, parentPath, tempName, "File", config.fsActionFault); err != nil {
+			return nil, fmt.Errorf("create checkout temporary file: %w", err)
 		}
 		var found bool
 		tempDevice, tempInode, found, err = completedFSCreateIdentity(ctx, db, options.worktree, value.path)
 		if err != nil || !found {
-			return errors.Join(errors.New("created checkout file has no durable identity"), err)
+			return nil, errors.Join(errors.New("created checkout file has no durable identity"), err)
 		}
 	}
+	var fd int
+	var created bool
+	var opened fscompat.Stat_t
+	if options.syncFileReplacement != "" {
+		fd, opened, err = openFileReplacementTemp(parent, tempName, tempDevice, tempInode)
+	} else {
+		fd, opened, created, err = openCheckoutFileTemp(parent, tempName, tempDevice, tempInode)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open checkout temporary file: %w", err)
+	}
+	if created {
+		tempDevice, tempInode = uint64(opened.Dev), opened.Ino
+	}
+	if err := verifyCheckoutFileIdentity(fd, tempDevice, tempInode); err != nil {
+		return nil, errors.Join(fmt.Errorf("verify checkout temporary file: %w", err), fscompat.Close(fd))
+	}
+	if needsIdentity || created {
+		identityErr := recordCheckoutTempIdentity(ctx, db, options.worktree, value.path, tempName, opened, config)
+		if identityErr != nil {
+			return nil, errors.Join(fmt.Errorf("record checkout temporary identity: %w", identityErr), fscompat.Close(fd))
+		}
+	}
+	if config.beforeCheckoutFileWrite != nil {
+		if err := config.beforeCheckoutFileWrite(value.path, tempName); err != nil {
+			return nil, errors.Join(fmt.Errorf("before checkout file write: %w", err), fscompat.Close(fd))
+		}
+	}
+	if err := verifyCheckoutFileIdentity(fd, tempDevice, tempInode); err != nil {
+		return nil, errors.Join(fmt.Errorf("verify checkout temporary file before write: %w", err), fscompat.Close(fd))
+	}
+	temp := os.NewFile(uintptr(fd), tempName)
+	info, err := temp.Stat()
+	if err != nil {
+		return nil, errors.Join(err, temp.Close())
+	}
+	staged := &stagedCheckoutFile{name: tempName, device: tempDevice, inode: tempInode}
+	if options.syncFileReplacement != "" && info.Size() == value.size && canonicalProtocolMtime(info.ModTime()) == value.mtime {
+		// Matching bytes and mtime do not prove a prior process synced the
+		// file. Sync the owned descriptor before validating and reusing it.
+		if err := config.syncFile(temp); err != nil {
+			return nil, errors.Join(err, temp.Close())
+		}
+		if err := temp.Close(); err != nil {
+			return nil, err
+		}
+		return staged, verifyStagedFileReplacement(options, value, parent, staged)
+	}
+	if info.Size() != 0 {
+		if _, err := verifiedCheckoutTempID(temp, info, options.cacheRoot, value.id, value.size); err != nil {
+			return nil, errors.Join(err, temp.Close())
+		}
+	}
+	fileData, err := cachedRemoteObject(ctx, options, "files", value.id)
+	if err != nil {
+		return nil, errors.Join(err, temp.Close())
+	}
+	file, _ := object.VerifyFile(fileData, value.id)
+	var written int64
+	for _, blockID := range file.Blocks {
+		block, err := cachedRemoteBlock(ctx, options, blockID)
+		if err != nil {
+			return nil, errors.Join(err, temp.Close())
+		}
+		count, err := temp.WriteAt(block, written)
+		written += int64(count)
+		if err != nil || count != len(block) {
+			return nil, errors.Join(errors.New("write checkout file failed"), err, temp.Close())
+		}
+	}
+	if written != file.Size {
+		return nil, errors.Join(errors.New("checkout file size mismatch"), temp.Close())
+	}
+	if err := config.syncFile(temp); err != nil {
+		return nil, errors.Join(err, temp.Close())
+	}
+	if err := verifyCheckoutFileIdentity(int(temp.Fd()), tempDevice, tempInode); err != nil {
+		return nil, errors.Join(fmt.Errorf("verify checkout temporary file before rename: %w", err), temp.Close())
+	}
+	if err := temp.Close(); err != nil {
+		return nil, err
+	}
+	if err := journalMtime(ctx, db, options.worktreeRoot, options.worktree, fsPhasePreBase, parentPath,
+		tempName, "File", value.mtime, tempDevice, tempInode, config.fsActionFault); err != nil {
+		return nil, fmt.Errorf("set checkout file mtime %q: %w", value.path, err)
+	}
+	if options.syncFileReplacement != "" {
+		if err := verifyStagedFileReplacement(options, value, parent, staged); err != nil {
+			return nil, err
+		}
+	}
+	return staged, nil
+}
+
+func openCheckoutFileTemp(parent *os.File, tempName string, tempDevice, tempInode uint64) (int, fscompat.Stat_t, bool, error) {
 	fd, err := fscompat.Openat(int(parent.Fd()), tempName, fscompat.O_WRONLY|fscompat.O_CREAT|fscompat.O_EXCL|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0o600)
 	created := err == nil
 	var opened fscompat.Stat_t
 	if errors.Is(err, fscompat.EEXIST) {
 		if tempDevice == 0 || tempInode == 0 {
-			return errors.New("registered checkout temporary file has no identity; pending checkout retained")
+			return -1, opened, false, errors.New("registered checkout temporary file has no identity; pending checkout retained")
 		}
 		var existing fscompat.Stat_t
 		if statErr := fscompat.Fstatat(int(parent.Fd()), tempName, &existing, fscompat.AT_SYMLINK_NOFOLLOW); statErr != nil ||
 			existing.Mode&fscompat.S_IFMT != fscompat.S_IFREG {
-			return errors.New("registered checkout temporary file is not a regular file")
+			return -1, opened, false, errors.New("registered checkout temporary file is not a regular file")
 		}
 		fd, err = fscompat.Openat(int(parent.Fd()), tempName, fscompat.O_RDWR|fscompat.O_NOFOLLOW|fscompat.O_CLOEXEC, 0)
 		if err == nil {
@@ -967,89 +1164,9 @@ func installCheckoutFile(ctx context.Context, db *sql.DB, options bindOptions, v
 		if fd >= 0 {
 			fscompat.Close(fd)
 		}
-		return fmt.Errorf("open checkout temporary file: %w", err)
+		return -1, opened, false, err
 	}
-	if created {
-		tempDevice, tempInode = uint64(opened.Dev), opened.Ino
-	}
-	if err := verifyCheckoutFileIdentity(fd, tempDevice, tempInode); err != nil {
-		return errors.Join(fmt.Errorf("verify checkout temporary file: %w", err), fscompat.Close(fd))
-	}
-	if needsIdentity || created {
-		identityErr := recordCheckoutTempIdentity(ctx, db, options.worktree, value.path, tempName, opened, config)
-		if identityErr != nil {
-			return errors.Join(fmt.Errorf("record checkout temporary identity: %w", identityErr), fscompat.Close(fd))
-		}
-	}
-	if config.beforeCheckoutFileWrite != nil {
-		if err := config.beforeCheckoutFileWrite(value.path, tempName); err != nil {
-			return errors.Join(fmt.Errorf("before checkout file write: %w", err), fscompat.Close(fd))
-		}
-	}
-	if err := verifyCheckoutFileIdentity(fd, tempDevice, tempInode); err != nil {
-		return errors.Join(fmt.Errorf("verify checkout temporary file before write: %w", err), fscompat.Close(fd))
-	}
-	temp := os.NewFile(uintptr(fd), tempName)
-	info, err := temp.Stat()
-	if err != nil {
-		return errors.Join(err, temp.Close())
-	}
-	if info.Size() != 0 {
-		if _, err := verifiedCheckoutTempID(temp, info, options.cacheRoot, value.id, value.size); err != nil {
-			return errors.Join(err, temp.Close())
-		}
-	}
-	fileData, err := cachedRemoteObject(ctx, options, "files", value.id)
-	if err != nil {
-		return errors.Join(err, temp.Close())
-	}
-	file, _ := object.VerifyFile(fileData, value.id)
-	var written int64
-	for _, blockID := range file.Blocks {
-		block, err := cachedRemoteBlock(ctx, options, blockID)
-		if err != nil {
-			return errors.Join(err, temp.Close())
-		}
-		count, err := temp.WriteAt(block, written)
-		written += int64(count)
-		if err != nil || count != len(block) {
-			return errors.Join(errors.New("write checkout file failed"), err, temp.Close())
-		}
-	}
-	if written != file.Size {
-		return errors.Join(errors.New("checkout file size mismatch"), temp.Close())
-	}
-	if err := config.syncFile(temp); err != nil {
-		return errors.Join(err, temp.Close())
-	}
-	if err := verifyCheckoutFileIdentity(int(temp.Fd()), tempDevice, tempInode); err != nil {
-		return errors.Join(fmt.Errorf("verify checkout temporary file before rename: %w", err), temp.Close())
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := journalMtime(ctx, db, options.worktreeRoot, options.worktree, fsPhasePreBase, parentPath,
-		tempName, "File", value.mtime, tempDevice, tempInode, config.fsActionFault); err != nil {
-		return fmt.Errorf("set checkout file mtime %q: %w", value.path, err)
-	}
-	if config.beforeCheckoutFileRename != nil {
-		if err := config.beforeCheckoutFileRename(value.path, tempName); err != nil {
-			return fmt.Errorf("before checkout file rename: %w", err)
-		}
-	}
-	if err := journalRename(ctx, db, options.worktreeRoot, options.worktree, fsPhasePreBase, parentPath,
-		tempName, name, "File", tempName, "", tempDevice, tempInode, config.fsActionFault); err != nil {
-		return fmt.Errorf("install checkout file %q: %w", value.path, err)
-	}
-	if config.afterCheckoutInstall != nil {
-		if err := config.afterCheckoutInstall(value.path, value.kind); err != nil {
-			return fmt.Errorf("record installed checkout file: %w", err)
-		}
-	}
-	if err := verifyCheckoutFilePathIdentity(parent, name, tempDevice, tempInode); err != nil {
-		return fmt.Errorf("verify installed checkout file before completion: %w", err)
-	}
-	return recordCheckoutCompleted(ctx, db, options.worktree, value)
+	return fd, opened, created, nil
 }
 
 type checkoutDirectoryVerifier func(string, fscompat.Stat_t) error
@@ -1358,6 +1475,9 @@ func verifyInstalledFile(ctx context.Context, db *sql.DB, options bindOptions, v
 		return nil, fmt.Errorf("installed checkout file identity changed before recovery: %w", err)
 	}
 	if canonicalProtocolMtime(info.ModTime()) != value.mtime {
+		if options.syncFileReplacement != "" {
+			return nil, errors.New("installed checkout file mtime changed")
+		}
 		parentPath, _ := splitFSActionPath(value.path)
 		if err := journalMtime(ctx, db, options.worktreeRoot, options.worktree, fsPhasePreBase, parentPath,
 			name, "File", value.mtime, expectedDevice, expectedInode, config.fsActionFault); err != nil {
@@ -1370,7 +1490,7 @@ func verifyInstalledFile(ctx context.Context, db *sql.DB, options bindOptions, v
 	return installed, nil
 }
 
-func finalizeCheckout(ctx context.Context, db *sql.DB, options bindOptions, pending pendingCheckout, config libraryClientConfig) error {
+func finalizeCheckout(ctx context.Context, db *sql.DB, options bindOptions, pending pendingCheckout, config libraryClientConfig, omitted []checkoutPath) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin checkout finalization: %w", err)
@@ -1403,6 +1523,9 @@ func finalizeCheckout(ctx context.Context, db *sql.DB, options bindOptions, pend
 	}
 	if expected != completed {
 		return fail(errors.New("checkout path index is incomplete"))
+	}
+	if err := insertPathIndex(ctx, tx, options.worktree, omitted); err != nil {
+		return fail(err)
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM pending_checkouts WHERE worktree = ?", options.worktree); err != nil {
 		return fail(err)

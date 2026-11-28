@@ -12,6 +12,7 @@ import {
   empty,
   sub,
   tabs,
+  toggle,
   search,
   filterRows,
   noMatch,
@@ -637,6 +638,33 @@ function activities() {
     );
   main.replaceChildren(pane);
 }
+async function editIgnoreRules() {
+  const rules = await api.IgnoreRules();
+  const hidden = toggle("同步隐藏文件（名称以 . 开头）", !rules.SkipHidden);
+  const patterns = n("textarea");
+  patterns.rows = 6;
+  patterns.spellcheck = false;
+  patterns.value = (rules.Patterns || []).join("\n");
+  patterns.placeholder = "*.tmp\nnode_modules";
+  const saved = await dialog(
+    "同步忽略规则",
+    [
+      sub("适用于本机所有资料库。从下一轮同步起，匹配项将跳过上传和下载，已有副本会保留。"),
+      hidden.label,
+      n("label", "field", n("span", "", "忽略的名称（每行一条）"), patterns),
+      sub("只填名称，不填路径。*.tmp 匹配任意目录下的临时文件；匹配文件夹时会跳过整个文件夹。删除一行即可恢复该项同步。"),
+    ],
+    "保存",
+    {
+      onAccept: () =>
+        api.SetIgnoreRules({
+          SkipHidden: !hidden.input.checked,
+          Patterns: patterns.value.split("\n").map((s) => s.trim()).filter(Boolean),
+        }),
+    },
+  );
+  if (saved) tell("已保存同步忽略规则。");
+}
 function settings() {
   const p = n("section", "pane settings");
   p.append(
@@ -646,7 +674,6 @@ function settings() {
       render();
     }),
   );
-  const general = prefTab === "通用";
   const row = (ic: Icon, t: string, ...controls: (Node | string)[]) =>
     box("setting-row", icon(ic), n("span", "grow", t), ...controls);
   const sw = (
@@ -667,7 +694,7 @@ function settings() {
     b.setAttribute("aria-checked", String(on));
     return b;
   };
-  if (general) {
+  if (prefTab === "通用") {
     const auto = row("power", "登录时启动 Filecloud", sub("正在读取…"));
     p.append(
       section(
@@ -706,7 +733,7 @@ function settings() {
             "chevron",
           ),
         ),
-        sub("暂停自动检查不会中断当前轮次。"),
+        row("folder", "同步忽略规则", btn("编辑规则…", editIgnoreRules)),
       ),
     );
     void prefs
@@ -718,7 +745,7 @@ function settings() {
       )
       .catch((e) => auto.lastChild?.replaceWith(sub(errorText(e))));
   }
-  if (general || prefTab === "账号")
+  if (prefTab === "账号")
     p.append(
       section(
         "账号",
@@ -754,7 +781,7 @@ function settings() {
         ),
       ),
     );
-  if (general || prefTab === "通知") {
+  if (prefTab === "通知") {
     const notification = section("通知");
     p.append(notification);
     void prefs
@@ -784,7 +811,7 @@ function settings() {
       })
       .catch((e) => notification.append(sub(errorText(e))));
   }
-  if (general || prefTab === "诊断") {
+  if (prefTab === "诊断") {
     const l = libsSelected();
     p.append(
       section(
@@ -850,28 +877,20 @@ function settings() {
             "chevron",
           ),
         ),
-        ...(!general
-          ? [
-              row(
-                "power",
-                "结束后台运行",
-                btn("退出应用", async () => {
-                  if (
-                    await dialog(
-                      "退出 Filecloud？",
-                      [
-                        sub(
-                          "等待当前轮次完成后退出。仅关闭窗口可继续后台同步。",
-                        ),
-                      ],
-                      "退出应用",
-                    )
-                  )
-                    await prefs.Quit();
-                }),
-              ),
-            ]
-          : []),
+        row(
+          "power",
+          "结束后台运行",
+          btn("退出应用", async () => {
+            if (
+              await dialog(
+                "退出 Filecloud？",
+                [sub("等待当前轮次完成后退出。仅关闭窗口可继续后台同步。")],
+                "退出应用",
+              )
+            )
+              await prefs.Quit();
+          }),
+        ),
       ),
     );
   }

@@ -15,3 +15,7 @@
 ### Cross-platform acceptance hosts
 
 在 macOS/APFS 或 Windows/NTFS 上验收前，先按[跨平台验收主机指南](docs/agents/acceptance-hosts.md)连接目标系统，再在目标系统的本地磁盘上运行测试。
+
+## Desktop
+
+- 修改desktop客户端后，在交付给用户前重新打包。
