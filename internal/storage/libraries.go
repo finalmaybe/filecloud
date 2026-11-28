@@ -255,6 +255,7 @@ func (s *Store) PublishHead(ctx context.Context, ownerUserID, libraryID string, 
 	if err := tx.Commit(); err != nil {
 		return Library{}, fmt.Errorf("commit update library head: %w", err)
 	}
+	s.headChanges.notify(headChangeScope{ownerUserID, libraryID})
 	return ret, nil
 }
 

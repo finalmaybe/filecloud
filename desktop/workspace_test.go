@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,7 +38,9 @@ func TestDesktopTwoDevices(t *testing.T) {
 	}
 	run("", "init", "--data-dir", data)
 	run(pass, "user", "add", "--data-dir", data, "--username", "desktop-test", "--password-stdin")
-	process := exec.Command(server, "serve", "--data-dir", data, "--listen", "127.0.0.1:0")
+	defaults := Policy{TrashDays: 47, HistoryDays: 121}
+	process := exec.Command(server, "serve", "--data-dir", data, "--listen", "127.0.0.1:0",
+		"--trash-days", fmt.Sprint(defaults.TrashDays), "--history-days", fmt.Sprint(defaults.HistoryDays))
 	out, err := process.StdoutPipe()
 	must(t, err)
 	must(t, process.Start())
@@ -95,11 +99,43 @@ func TestDesktopTwoDevices(t *testing.T) {
 	for i := range 10 {
 		must(t, os.WriteFile(filepath.Join(pa, fmt.Sprint(i)), []byte("sync data"), 0600))
 	}
-	a.tick(time.Now())
-	must(t, b.RequestSync(id))
-	if buf, err := os.ReadFile(filepath.Join(pb, "0")); err != nil || string(buf) != "sync data" {
-		t.Fatal("second device did not converge")
-	}
+	t.Run("event-driven sync", func(t *testing.T) {
+		ctx, stop := context.WithCancel(t.Context())
+		var workers sync.WaitGroup
+		defer func() { stop(); workers.Wait() }()
+		for _, device := range []*Workspace{a, b} {
+			workers.Go(func() { device.runAutoSync(ctx) })
+		}
+		waitFile := func(device *Workspace, dir, name, want string) {
+			t.Helper()
+			deadline := time.Now().Add(10 * time.Second) // shorter than one fallback round
+			for time.Now().Before(deadline) {
+				device.mu.Lock()
+				buf, err := os.ReadFile(filepath.Join(dir, name))
+				device.mu.Unlock()
+				if err == nil && string(buf) == want {
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			t.Fatalf("%s did not arrive before the fallback poll", name)
+		}
+		waitFile(b, pb, "0", "sync data")
+		// The startup sync has completed on both ends. Neither edit calls sync manually.
+		saved := time.Now()
+		must(t, os.WriteFile(filepath.Join(pb, "0"), []byte("edited on B"), 0600))
+		waitFile(a, pa, "0", "edited on B")
+		t.Logf("local edit to second device: %s", time.Since(saved).Round(time.Millisecond))
+		must(t, a.SetPaused(id, true))
+		must(t, os.WriteFile(filepath.Join(pa, "0"), []byte("sync data"), 0600))
+		last := a.Snapshot().Libraries[0].LastSuccess
+		a.tick(ctx, time.Now().Add(fallbackSyncInterval))
+		if a.Snapshot().Libraries[0].LastSuccess != last {
+			t.Fatal("paused binding ran a sync")
+		}
+		must(t, a.SetPaused(id, false))
+		waitFile(b, pb, "0", "sync data")
+	})
 	must(t, os.Remove(filepath.Join(pa, "0")))
 	if err := a.RequestSync(id); err == nil {
 		t.Fatal("protected deletion not stopped")
@@ -125,6 +161,20 @@ func TestDesktopTwoDevices(t *testing.T) {
 	if a.Snapshot().Libraries[0].Pending != "delete-confirmation" || len(a.Snapshot().Activity) == 0 {
 		t.Fatal("lost pending state or activity on reopen")
 	}
+	t.Run("retention defaults after restart", func(t *testing.T) {
+		before := a.Snapshot()
+		if before.DefaultTrashDays != 0 || before.DefaultHistoryDays != 0 || before.CatalogFresh {
+			t.Fatal("expected a not-yet-refreshed catalog after restart")
+		}
+		got, err := a.RetentionDefaults()
+		must(t, err)
+		if got != defaults {
+			t.Fatalf("server defaults = %+v, want %+v", got, defaults)
+		}
+		if a.Snapshot() != before {
+			t.Fatal("reading defaults changed the workspace view")
+		}
+	})
 	review, err = a.ReviewDeletion(id)
 	must(t, err)
 	a.CancelReview()

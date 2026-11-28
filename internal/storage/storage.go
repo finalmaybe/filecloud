@@ -125,6 +125,7 @@ type Store struct {
 	objectsDir             string
 	lock                   *dataLock
 	gcActivity             gcActivities
+	headChanges            headChangeWaiters
 	objectLocksMu          sync.Mutex
 	objectLocks            map[string]*objectPublication
 	objectLockQueued       func(string)

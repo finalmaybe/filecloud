@@ -430,7 +430,10 @@ func serve(ctx context.Context, schedule gcSchedule, confirmHistory string, defa
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}
-	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{BrowserOrigin: origin, Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig})
+	libraries, err := libraryapi.NewHandler(store, logger, libraryapi.Config{
+		BrowserOrigin: origin, Upload: uploadConfig, HeadValidation: headConfig, History: historyConfig,
+		HeadChangesShutdown: ctx,
+	})
 	if err != nil {
 		return errors.Join(err, listener.Close())
 	}

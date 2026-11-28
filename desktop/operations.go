@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -217,6 +218,11 @@ func (s *Workspace) syncOne(id, prefix string) error {
 		s.publish()
 		return errors.New("此资料库需要先核对待办。")
 	}
+	// Consume hints before the scan so edits arriving during sync survive this round.
+	if w := s.watches[id]; w != nil {
+		w.localAt.Store(0)
+		w.remoteHead.Store(nil)
+	}
 	s.running = id
 	s.scanDone = false
 	s.publish()
@@ -274,7 +280,7 @@ func (s *Workspace) syncOne(id, prefix string) error {
 		code = "interrupted"
 	}
 	now := time.Now()
-	delay := 30 * time.Second
+	delay := fallbackSyncInterval
 	if code == "offline" || code == "retry_later" {
 		delay = max(delay, min(5*time.Minute, 2*s.delays[id]))
 	}
@@ -328,19 +334,15 @@ func (s *Workspace) activity(id, kind string, t time.Time) {
 		s.data.Activity = s.data.Activity[len(s.data.Activity)-200:]
 	}
 }
-func (s *Workspace) tick(now time.Time) {
+func (s *Workspace) tick(ctx context.Context, now time.Time) {
 	if !s.mu.TryLock() {
 		return
 	}
 	defer s.mu.Unlock()
-	if s.locked() {
-		return
-	}
+	s.updateWatches(ctx)
 	var next string
-	for id, b := range s.bound {
-		pending := s.states[id].Pending
-		code := s.problems[id]
-		if b.Phase != "bound" || s.data.Paused[id] || pending == "delete-confirmation" || pending == "restore-confirmation" || code == "auth_required" || code == "status_unavailable" || code == "unsupported_fs" || s.due[id].After(now) {
+	for id, w := range s.watches {
+		if s.due[id].After(now) && (s.problems[id] != "" || !w.changed(now, s.states[id].SyncBase)) {
 			continue
 		}
 		if next == "" || s.due[id].Before(s.due[next]) {

@@ -79,21 +79,24 @@ async function mutate(fn: () => Promise<unknown>) {
 function folderAction(l: LibraryView) {
   return btn("打开文件夹", () => api.OpenWorktree(l.ID), "", "folder");
 }
-function syncAction(l: LibraryView) {
+function syncRequiredAction(l: LibraryView) {
   if (l.Pending === "delete-confirmation")
     return btn("检查删除", () => mutate(() => reviewDelete(l)), "", "shield");
   if (l.Pending === "restore-confirmation")
     return btn("核对恢复", () => mutate(() => reviewRestore(l)), "", "history");
   if (l.Problem === "auth_required")
     return btn("重新登录", () => go("login"), "", "lock");
-  const b = btn(
-    l.Problem ? "立即重试" : "同步",
-    () => mutate(() => api.RequestSync(l.ID)),
-    "",
-    "sync",
-  );
+}
+function requestSyncAction(l: LibraryView, label: string, cls = "") {
+  const b = btn(label, () => mutate(() => api.RequestSync(l.ID)), cls, "sync");
   b.disabled = l.Running;
   return b;
+}
+function syncAction(l: LibraryView) {
+  return (
+    syncRequiredAction(l) ||
+    requestSyncAction(l, l.Problem ? "立即重试" : "同步")
+  );
 }
 function openBind(l: LibraryView) {
   return mutate(() => bindLibrary(l));
@@ -252,9 +255,39 @@ function showIssue(l: LibraryView) {
     go("conflicts");
   } else go("attention");
 }
+function inspectorSyncStatus(l: LibraryView) {
+  if (
+    l.Running ||
+    l.Problem ||
+    (l.Pending && l.Pending !== "none") ||
+    l.Conflicts?.length
+  )
+    return status({ ...l, Paused: false });
+  return box(
+    "status",
+    l.Paused ? icon("pause") : icon("check", "green"),
+    n("span", "", l.Paused ? "已暂停" : "自动同步已开启"),
+  );
+}
+function inspectorSyncToggle(l: LibraryView) {
+  const label = l.Paused ? "恢复自动同步" : "暂停自动同步";
+  const toggle = btn(
+    label,
+    () => mutate(() => api.SetPaused(l.ID, !l.Paused)),
+    "outline square sync-toggle",
+    l.Paused ? "play" : "pause",
+    true,
+  );
+  toggle.removeAttribute("title");
+  const hint = n("span", "sync-toggle-hint", label);
+  hint.setAttribute("aria-hidden", "true");
+  toggle.append(hint);
+  return toggle;
+}
 function inspector(l: LibraryView) {
   const side = n("aside", "inspector");
   const bound = l.Phase === "bound";
+  const required = bound && !l.Running ? syncRequiredAction(l) : undefined;
   side.append(
     box(
       "inspector-head",
@@ -266,22 +299,27 @@ function inspector(l: LibraryView) {
       ),
     ),
   );
-  const actions = box(
-    "actions",
-    ...(bound
-      ? [folderAction(l), libraryMenu(l, "更多 ⌄")]
-      : [
-          l.Phase === "binding"
-            ? btn(
-                "继续同步",
-                () => mutate(() => api.RetryBinding(l.ID)),
-                "primary",
-                "folder",
-              )
-            : btn("同步该资料库", () => openBind(l), "primary", "folder"),
-        ]),
-  );
-  side.append(actions);
+  if (bound) {
+    const syncOnce = requestSyncAction(l, "立即同步一次", "menu-link");
+    if (required) syncOnce.disabled = true;
+    side.append(
+      box("actions", folderAction(l), libraryMenu(l, "更多 ⌄", syncOnce)),
+    );
+  } else {
+    side.append(
+      box(
+        "actions",
+        l.Phase === "binding"
+          ? btn(
+              "继续同步",
+              () => mutate(() => api.RetryBinding(l.ID)),
+              "primary",
+              "folder",
+            )
+          : btn("同步该资料库", () => openBind(l), "primary", "folder"),
+      ),
+    );
+  }
   if (l.Worktree)
     side.append(
       section(
@@ -289,23 +327,18 @@ function inspector(l: LibraryView) {
         box("path", n("span", "", l.Worktree), copy(l.Worktree)),
       ),
     );
-  if (bound)
-    side.append(
-      section(
-        "同步",
-        box(
-          "sync-controls",
-          status(l),
-          btn(
-            l.Paused ? "继续自动检查" : "暂停后续同步",
-            () => mutate(() => api.SetPaused(l.ID, !l.Paused)),
-            "outline",
-          ),
-        ),
-        ...(l.Running ? [] : [syncAction(l)]),
-        sub("暂停在当前轮次结束后生效。"),
-      ),
+  if (bound) {
+    const sync = section(
+      "同步",
+      box("sync-controls", inspectorSyncStatus(l), inspectorSyncToggle(l)),
     );
+    if (required) sync.append(box("actions", required));
+    else if (!l.Running && l.Problem)
+      sync.append(box("actions", requestSyncAction(l, "立即重试")));
+    else if (l.Running && !l.Paused)
+      sync.append(sub("暂停在当前轮次结束后生效。"));
+    side.append(sync);
+  }
   const size = n("span", "", "正在读取…");
   void stats(l)
     .then((value) => {
@@ -335,16 +368,17 @@ function inspector(l: LibraryView) {
       }),
     ),
   );
-  if (bound)
-    side.append(
-      box("metadata footnote", icon("sync"), "自动检查 · 每轮结束 30 秒后"),
-    );
   return side;
 }
-function libraryMenu(l: LibraryView, caption = "···") {
+function libraryMenu(
+  l: LibraryView,
+  caption = "···",
+  ...extraItems: HTMLElement[]
+) {
   return menu(
     nameOf(l) + "的更多操作",
     [
+      ...extraItems,
       btn("浏览文件", () => openDetail(l, "文件"), "menu-link", "file"),
       btn("版本历史", () => openDetail(l, "版本历史"), "menu-link", "history"),
       btn("资料库设置", () => openDetail(l, "设置"), "menu-link", "settings"),
@@ -1054,8 +1088,17 @@ async function update(force = false) {
     const focus = document.activeElement;
     const label = focus?.getAttribute("aria-label"),
       lib = focus?.closest<HTMLElement>("[data-library]")?.dataset.library;
+    const syncToggleLibrary =
+      page === "libraries" && focus?.matches(".sync-toggle:focus-visible")
+        ? selected
+        : null;
     render();
-    if (!force && !sessionChanged && label) {
+    if (!sessionChanged && syncToggleLibrary !== null) {
+      if (page === "libraries" && selected === syncToggleLibrary)
+        main
+          .querySelector<HTMLButtonElement>(".sync-toggle")
+          ?.focus({ preventScroll: true });
+    } else if (!force && !sessionChanged && label) {
       const match = Array.from(
         document.querySelectorAll<HTMLElement>("[aria-label]"),
       ).find(

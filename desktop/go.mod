@@ -6,6 +6,7 @@ toolchain go1.27.4
 
 require (
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/rjeczalik/notify v0.9.3
 	github.com/wailsapp/wails/v3 v3.1.0
 	github.com/zalando/go-keyring v0.2.6
 )

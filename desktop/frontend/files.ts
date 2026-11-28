@@ -19,7 +19,6 @@ import {
   pickRow,
   fileType,
   menu,
-  revealLabel,
   canOpenDocument,
   load,
   childPath,
@@ -232,7 +231,7 @@ export function files(
             options.push(btn("查看本机文件", local, "menu-link", "device"));
           options.push(
             btn(
-              revealLabel(),
+              "打开文件位置",
               () => api.RevealLocal(l.ID, path),
               "menu-link",
               "folder",

@@ -244,6 +244,12 @@ LibraryId 由客户端生成 UUID，并只在当前认证用户的所有者作�
 
 HTTP 同时返回 `ETag`。客户端可发送 `If-None-Match`；未变化返回 `304`，无 JSON body。
 
+## WaitForHeadChange
+
+`GET /v1/libraries/{LibraryId}/head/changes?after={CommitId}` 使用与读取 Head 相同的 Bearer 会话和所有者范围。`after` 为空表示尚无已知提交。若当前 Head 已不同，立即返回 `200` 和 `{"CommitId":"<当前提交>"}`（空库的值为 `""`）；否则等待发布，约 20 秒内无变化返回 `204`，客户端可用相同游标继续等待。发布成功才唤醒等待者，单纯上传块或未成功的提交不会触发。连接中断后用最后看到的提交重连即可，无需重放每次通知。
+
+此接口只提示客户端运行普通双向同步；它不传文件，也不推进客户端的同步基线。
+
 ## CheckObjects
 
 `POST /v1/libraries/{LibraryId}/object-checks`

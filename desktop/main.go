@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
-	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -133,7 +132,8 @@ func run() error {
 	menu.Add("设置…").OnClick(func(*application.Context) { show(); app.Event.Emit("navigate", "settings") })
 	menu.Add("退出 Filecloud").OnClick(func(*application.Context) { app.Quit() })
 	tray.SetMenu(menu)
-	stop := make(chan struct{})
+	syncCtx, stopSync := context.WithCancel(context.Background())
+	defer stopSync()
 	ns := prefs.notifications
 	s.notify = func(id string) {
 		if prefs.ready.Load() {
@@ -161,22 +161,11 @@ func run() error {
 				}
 			})
 		}
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case now := <-ticker.C:
-					s.tick(now)
-				case <-stop:
-					return
-				}
-			}
-		}()
+		go s.runAutoSync(syncCtx)
 	})
 	app.OnShutdown(func() {
 		s.closed.Store(true)
-		close(stop)
+		stopSync()
 		s.mu.Lock()
 		s.mu.Unlock()
 		if prefs.ready.Load() {

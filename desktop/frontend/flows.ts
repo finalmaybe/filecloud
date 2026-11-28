@@ -26,6 +26,7 @@ import {
   type Conflict,
 } from "./ui.js";
 import { previewBody, showPreview } from "./preview.js";
+import { retentionDefaultLabel, showRetentionDefaults } from "./retention.js";
 import { Clipboard } from "/wails/runtime.js";
 export function wizard(
   title: string,
@@ -170,14 +171,21 @@ export async function createLibrary(view: View) {
   const name = field("资料库名称"),
     trash = field("回收站保留天数", "number"),
     history = field("历史版本保留天数", "number");
-  for (const [f, d] of [
-    [trash, view.DefaultTrashDays],
-    [history, view.DefaultHistoryDays],
+  const trashDefault = n("span", "sub"),
+    historyDefault = n("span", "sub");
+  for (const [f, hint] of [
+    [trash, trashDefault],
+    [history, historyDefault],
   ] as const) {
     f.input.min = "1";
     f.input.max = "36500";
-    f.input.placeholder = d ? `跟随服务器默认 · ${d} 天` : "跟随服务器默认";
+    f.input.placeholder = "留空则跟随服务器默认";
+    f.label.append(hint);
   }
+  showRetentionDefaults(view, (defaults) => {
+    trashDefault.textContent = retentionDefaultLabel(defaults.TrashDays);
+    historyDefault.textContent = retentionDefaultLabel(defaults.HistoryDays);
+  });
   if (
     await dialog(
       "新建资料库",

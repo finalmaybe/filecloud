@@ -52,6 +52,7 @@ type Config struct {
 	Upload                   storage.UploadConfig
 	HeadValidation           HeadValidationConfig
 	History                  HistoryConfig
+	HeadChangesShutdown      context.Context // Cancels only Head change polls during server shutdown.
 	headLimiter              *headValidationLimiter
 	historyLimiter           *historyLimiter
 	afterHeadValidationAdmit func(context.Context)
@@ -70,6 +71,7 @@ type handler struct {
 	headValidation           HeadValidationConfig
 	headLimiter              *headValidationLimiter
 	history                  HistoryConfig
+	headChangesShutdown      context.Context
 	historyLimiter           *historyLimiter
 	afterHeadValidationAdmit func(context.Context)
 	afterHistoryAdmit        func(context.Context)
@@ -148,6 +150,7 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 		headValidation:           headValidation,
 		headLimiter:              config.headLimiter,
 		history:                  history,
+		headChangesShutdown:      config.HeadChangesShutdown,
 		historyLimiter:           config.historyLimiter,
 		afterHeadValidationAdmit: config.afterHeadValidationAdmit,
 		afterHistoryAdmit:        config.afterHistoryAdmit,
@@ -171,6 +174,7 @@ func NewHandler(store *storage.Store, logger *log.Logger, config Config) (*Catal
 	}
 	catalog.registerDesktopOperations(mux)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/head", h.getHead)
+	mux.HandleFunc("GET /v1/libraries/{LibraryId}/head/changes", h.getHeadChanges)
 	mux.HandleFunc("PUT /v1/libraries/{LibraryId}/head", h.updateHead)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/history", h.listHistory)
 	mux.HandleFunc("GET /v1/libraries/{LibraryId}/history/{CommitId}", h.getHistoryCommit)

@@ -628,7 +628,6 @@ main {
 }
 .inspector > .section,
 .inspector-links,
-.footnote,
 .inspector > div > .section {
   border-top: 1px solid var(--line);
   margin-top: 18px;
@@ -1187,9 +1186,31 @@ dialog.wide {
 .choice > .grow {
   text-align: left;
 }
-.sync-controls {
-  justify-content: space-between;
-  flex-wrap: wrap;
+.sync-controls > .status {
+  flex: 1;
+  min-width: 0;
+}
+.sync-toggle {
+  position: relative;
+  flex: none;
+  width: 34px;
+}
+.sync-toggle-hint {
+  position: absolute;
+  z-index: 1;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-end: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  white-space: nowrap;
+  visibility: hidden;
+  pointer-events: none;
+}
+.sync-toggle:is(:hover, :focus-visible) > .sync-toggle-hint {
+  visibility: visible;
 }
 .actions > .row-menu > summary {
   font: inherit;

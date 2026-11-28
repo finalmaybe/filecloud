@@ -52,10 +52,10 @@ type profile struct {
 }
 type library struct{ LibraryId, DeviceId, Worktree, Phase string }
 type status struct {
-	LibraryId, Worktree, Pending string
-	Confirmation                 *struct{ Kind, CandidatePrefix string }
-	Deletion                     *struct{ Deleted, Tracked int64 }
-	Restore                      *RestoreImpact
+	LibraryId, Worktree, Pending, SyncBase string
+	Confirmation                           *struct{ Kind, CandidatePrefix string }
+	Deletion                               *struct{ Deleted, Tracked int64 }
+	Restore                                *RestoreImpact
 }
 type LibraryView struct {
 	ID, Name, Worktree, Phase, Pending, Problem string
@@ -90,6 +90,7 @@ type Workspace struct {
 	problems                                  map[string]string
 	due                                       map[string]time.Time
 	delays                                    map[string]time.Duration
+	watches                                   map[string]*bindingWatch
 	review                                    *Review
 	selection                                 choice
 	selectionID                               string
@@ -133,6 +134,7 @@ func newWorkspace(root, cli, version, commit string) (*Workspace, error) {
 	return s, nil
 }
 func (s *Workspace) loadProfile() error {
+	s.stopWatches()
 	s.data = profile{Device: newUUID(), Names: map[string]string{}, Paused: map[string]bool{}, Intents: map[string]choice{}}
 	s.bound = map[string]library{}
 	s.states = map[string]status{}
@@ -396,6 +398,19 @@ func (s *Workspace) Refresh(more bool) error {
 		return err
 	}
 	return s.catalog(more)
+}
+func (s *Workspace) RetentionDefaults() (Policy, error) {
+	s.mu.Lock()
+	server, token := s.active.Server, s.token
+	allowed := !s.locked() && !s.catalogExpired && token != ""
+	s.mu.Unlock()
+	if !allowed {
+		return Policy{}, errSession
+	}
+	// Settings only need the defaults, not a refresh of the local catalog.
+	var r struct{ DefaultRetention Policy }
+	err := s.query(&r, token, "library", "list", "--server", server, "--page-size", "1", "--token-stdin")
+	return r.DefaultRetention, err
 }
 func (s *Workspace) catalog(more bool) error {
 	if s.token == "" {

@@ -20,6 +20,11 @@ import { bindLibrary, unbind } from "./flows.js";
 import { files } from "./files.js";
 import { history } from "./history.js";
 import { trash } from "./trash.js";
+import {
+  retentionDaysLabel,
+  retentionDefaultLabel,
+  showRetentionDefaults,
+} from "./retention.js";
 export const detailTabs = ["文件", "版本历史", "回收站", "设置"];
 export function libraryDetail(
   l: LibraryView,
@@ -85,10 +90,11 @@ export function libraryDetail(
   return root;
 }
 
-function period(label: string, days: number, defaults: number) {
+function period(label: string, days: number) {
   const select = n("select"),
     custom = field("自定义天数", "number"),
-    wrap = box("period");
+    wrap = box("period"),
+    hint = sub("");
   custom.input.min = "1";
   custom.input.max = "36500";
   custom.input.required = true;
@@ -116,14 +122,11 @@ function period(label: string, days: number, defaults: number) {
     custom.label.hidden = select.value !== "-2";
     if (!custom.label.hidden) custom.input.focus();
   };
-  wrap.append(
-    line(label, select),
-    custom.label,
-    sub(defaults < 0 ? "服务器默认：永久保留" : `服务器默认：${defaults} 天`),
-  );
+  wrap.append(line(label, select), custom.label, hint);
   return {
     wrap,
     select,
+    hint,
     value: () =>
       Number(select.value === "-2" ? custom.input.value : select.value),
     valid: () => select.value !== "-2" || custom.input.reportValidity(),
@@ -156,14 +159,9 @@ function retention(
     });
     remove.disabled = !idle;
     actions.append(remove);
-    binding.append(
-      actions,
-      sub(
-        idle
-          ? "解除同步后，本地文件和资料库都会保留。"
-          : "有未完成操作，请先完成当前任务，再解除同步。",
-      ),
-    );
+    binding.append(actions);
+    if (!idle)
+      binding.append(sub("有未完成操作，请先完成当前任务，再解除同步。"));
   } else
     binding.append(
       btn(
@@ -187,15 +185,20 @@ function retention(
         "WebDAV 应用密码",
         btn("在网页中管理", () => api.AppPasswords(l.ID), "", "external"),
       ),
-      sub("需要服务器启用网页控制台，并在浏览器中独立登录。"),
     ),
   );
   const form = box("");
   policy.append(form);
   const show = async () => {
     const p = await api.LibraryInfo(l.ID),
-      trash = period("回收站保留时间", p.TrashDays, v.DefaultTrashDays),
-      hist = period("历史版本保留时间", p.HistoryDays, v.DefaultHistoryDays);
+      trash = period("回收站保留时间", p.TrashDays),
+      hist = period("历史版本保留时间", p.HistoryDays);
+    let historyDefault = 0;
+    showRetentionDefaults(v, (defaults) => {
+      historyDefault = defaults.HistoryDays;
+      trash.hint.textContent = retentionDefaultLabel(defaults.TrashDays);
+      hist.hint.textContent = retentionDefaultLabel(historyDefault);
+    });
     const permanent = btn(
       "永久保留历史",
       () => {
@@ -214,7 +217,6 @@ function retention(
       trash.wrap,
       hist.wrap,
       line("永久保留历史", permanent),
-      sub("当前版本始终保留；回收站新设置只影响之后删除的项目。"),
       box(
         "actions end",
         btn(
@@ -230,9 +232,7 @@ function retention(
               },
               impact = await api.Retention(l.ID, next, false, "");
             const days = (d: number) =>
-              (d || v.DefaultHistoryDays) < 0
-                ? "永久"
-                : `${d || v.DefaultHistoryDays} 天`;
+              retentionDaysLabel(d || historyDefault);
             if (
               impact.Token &&
               !(await dialog(

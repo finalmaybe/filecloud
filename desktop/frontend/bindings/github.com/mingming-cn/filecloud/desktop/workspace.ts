@@ -145,6 +145,10 @@ export function Retention(id: string, p: $models.Policy, apply: boolean, confirm
     return $Call.ByName("main.Workspace.Retention", id, p, apply, confirm);
 }
 
+export function RetentionDefaults(): $CancellablePromise<$models.Policy> {
+    return $Call.ByName("main.Workspace.RetentionDefaults");
+}
+
 export function RetryBinding(id: string): $CancellablePromise<void> {
     return $Call.ByName("main.Workspace.RetryBinding", id);
 }
