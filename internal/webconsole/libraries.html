@@ -117,7 +117,7 @@
     {{else}}<a class="entry-link open-preview" aria-haspopup="dialog">{{template "icon" "file"}}<span class="entry-name"></span></a>{{end}}
       <details class="row-actions" name="row-actions">
         {{template "row-actions-toggle" .}}
-        <div class="action-list">{{if ne . "Directory"}}<a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a>{{end}}<button type="button" class="move-trash" aria-haspopup="dialog" aria-controls="delete-dialog">{{template "icon" "trash"}}删除</button></div>
+        <div class="action-list">{{if ne . "Directory"}}<a class="open-versions" aria-controls="version-sidebar">{{template "icon" "history"}}历史版本</a>{{end}}<button type="button" class="move-trash destructive" aria-haspopup="dialog" aria-controls="delete-dialog">{{template "icon" "trash"}}删除</button></div>
       </details>
     </div></td>
   <td class="entry-size"></td>

@@ -12,21 +12,20 @@
   <link rel="icon" type="image/svg+xml" href="/assets/atlas.svg">
 </head>
 <body{{if eq .View "file-preview"}} class="viewer-page"{{else if not .SignedIn}} class="standalone"{{end}}>
-  {{if eq .View "file-preview"}}
   {{template "symbols"}}
+  {{if eq .View "file-preview"}}
   <main class="viewer" aria-label="文件预览">{{template "viewer-toolbar" .Data}}<div class="viewer-body">{{template "viewer-stage" .Data}}</div></main>
   {{else}}
   {{$listView := eq .View "libraries" "library" "trash" "app-passwords" "accounts"}}
   {{if .SignedIn}}
   {{$adminView := eq .View "settings" "overview" "accounts"}}
   <a class="skip" href="#content">跳到主要内容</a>
-  {{template "symbols"}}
   <header class="topbar">
     <div class="app-name">
       <button type="button" id="nav-toggle" aria-label="主导航" aria-controls="sidebar" aria-expanded="false" hidden>{{template "icon" "menu"}}</button>
-      <a class="brand" href="/libraries">{{template "icon" "brand"}}Filecloud</a>
-      <span class="app-label">{{if $adminView}}管理设置{{else}}工作空间{{end}}</span>
+      <a class="brand" href="/libraries">{{template "icon" "folder"}}Filecloud</a>
     </div>
+    <span class="app-label">{{if $adminView}}管理设置{{else}}工作空间{{end}}</span>
     {{if $listView}}
     {{$label := "按名称筛选本页"}}{{if eq .View "library"}}{{$label = "筛选已加载的目录项"}}{{else if eq .View "trash"}}{{$label = "按名称或原路径筛选本页"}}{{else if eq .View "accounts"}}{{$label = "按用户名筛选"}}{{end}}
     <label class="page-filter" hidden>{{template "icon" "search"}}<input type="search" id="list-filter" aria-label="{{$label}}" placeholder="{{$label}}" autocomplete="off"{{if eq .View "trash"}} value="{{.Data.Filter}}" maxlength="512"{{end}}></label>
@@ -65,7 +64,7 @@
   {{end}}
   <main id="content" tabindex="-1" {{if $listView}}class="explorer"{{end}}>
     {{if eq .View "login"}}
-    <section class="panel notice"><p class="kicker" lang="en">FILECLOUD</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
+    <section class="panel login"><p class="brand">{{template "icon" "folder"}}Filecloud</p><h1>账号登录</h1>{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}<form method="post" action="/login" class="fields"><label>用户名<input name="username" autocomplete="username" required autofocus></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button class="action">登录</button></form></section>
     {{else if eq .View "libraries"}}{{template "libraries" .}}
     {{else if eq .View "library"}}{{template "library" .Data}}
     {{else if eq .View "file-history"}}{{if .Message}}<p role="status">{{.Message}}</p>{{end}}{{template "file-history" .Data}}
@@ -77,7 +76,7 @@
     {{else if eq .View "settings"}}{{template "settings" .}}
     {{else if eq .View "overview"}}{{template "overview" .Data}}
     {{else}}
-    <section class="panel notice"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或返回首页。</p><a class="action" href="/">返回首页 <span aria-hidden="true">→</span></a></section>
+    <section class="panel"><p class="kicker" lang="en">404 / NOT FOUND</p><h1>页面不存在</h1><p>请检查地址，或返回首页。</p><a class="action" href="/">返回首页 <span aria-hidden="true">→</span></a></section>
     {{end}}
   </main>
   {{if or (eq .View "library") (eq .View "file-history")}}{{template "version-confirm"}}{{end}}

@@ -2,7 +2,7 @@
 <header class="list-toolbar"><div class="location">
   <a href="/libraries">我的资料库</a><span aria-hidden="true">/</span>
   <a href="/libraries/{{.Data.LibraryID}}">{{.Data.LibraryName}}</a><span aria-hidden="true">/</span><h1>回收站</h1>
-</div>{{if .Data.Entries}}<button type="button" id="trash-delete-selected" aria-haspopup="dialog" aria-controls="trash-delete-dialog" hidden disabled>永久删除所选（0）</button>{{end}}</header>
+</div>{{if .Data.Entries}}<button type="button" id="trash-delete-selected" class="destructive" aria-haspopup="dialog" aria-controls="trash-delete-dialog" hidden disabled>永久删除所选（0）</button>{{end}}</header>
 {{if .Message}}<p class="list-footer" role="status">{{.Message}}</p>{{end}}
 {{if .Data.Entries}}
 <table class="entry-table trash-list">
@@ -62,4 +62,4 @@
 <form id="retention-form" class="fields" method="post"><label>回收站保留天数<input name="trash" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.TrashDays}} 天）" {{if gt .Data.Policy.TrashDays 0}}value="{{.Data.Policy.TrashDays}}"{{end}}></label>
 <label>历史快照保留天数<input name="history" type="number" min="1" max="36500" placeholder="跟随默认（{{.Data.Defaults.HistoryDays}} 天）" {{if eq .Data.Policy.HistoryDays -1}}disabled{{else if gt .Data.Policy.HistoryDays 0}}value="{{.Data.Policy.HistoryDays}}"{{end}}></label>
 <label><span><input type="checkbox" name="permanent" {{if eq .Data.Policy.HistoryDays -1}}checked{{end}}> 永久保留历史（优先于天数）</span></label><p>天数留空跟随全局设置。当前快照始终保留，已在回收站中的条目维持原到期日。</p>
-{{with .Data.Preview}}{{if .Token}}<p>将过期 {{.Count}} 份快照{{if .Count}}，发布时间 {{.First}} 至 {{.Last}}（UTC）{{end}}。{{if .RestoredRecords}}已放回的版本记录中有 {{.RestoredRecords}} 条将结束保留。{{end}}预计可回收 {{.Bytes}} 字节的独占内容块，在后续 GC 中释放。</p><input type="hidden" name="confirm" value="{{.Token}}"><button>确认修改保留期</button>{{else}}<button>保存设置</button>{{end}}{{end}}</form></section>{{end}}
+{{with .Data.Preview}}{{if .Token}}<p>将过期 {{.Count}} 份快照{{if .Count}}，发布时间 {{.First}} 至 {{.Last}}（UTC）{{end}}。{{if .RestoredRecords}}已放回的版本记录中有 {{.RestoredRecords}} 条将结束保留。{{end}}预计可回收 {{.Bytes}} 字节的独占内容块，在后续 GC 中释放。</p><input type="hidden" name="confirm" value="{{.Token}}"><button class="action">确认修改保留期</button>{{else}}<button class="action">保存设置</button>{{end}}{{end}}</form></section>{{end}}
