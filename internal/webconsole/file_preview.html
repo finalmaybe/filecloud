@@ -26,9 +26,13 @@
 {{$resource := printf "/libraries/%s/file-preview" .LibraryID}}
 {{if eq .Kind "image"}}
 <section class="viewer-picture" aria-label="图片预览">
-  <input class="sr viewer-zoom" type="checkbox" id="viewer-zoom" aria-label="显示原始尺寸">
-  <div class="picture-scroll" tabindex="0" role="region" aria-label="图片区域"><label class="picture-target" for="viewer-zoom"><img alt="{{.Name}}" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></label></div>
-  <label class="zoom-action" for="viewer-zoom">{{template "icon" "search"}}<span>原始尺寸</span><span>适应窗口</span></label>
+  <div class="picture-scroll" tabindex="0" role="region" aria-label="图片区域"><img draggable="false" alt="{{.Name}}" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></div>
+  <div class="picture-tools" role="group" aria-label="图片缩放">
+    <button type="button" class="picture-zoom-out" aria-label="缩小" title="缩小" disabled>−</button>
+    <button type="button" class="picture-zoom-in" aria-label="放大" title="放大" disabled>+</button>
+    <button type="button" class="picture-original" disabled>原始尺寸</button>
+    <button type="button" class="picture-fit" disabled>适应窗口</button>
+  </div>
 </section>
 {{else if eq .Kind "pdf"}}
 <iframe class="viewer-pdf" title="{{.Name}} 的 PDF 预览" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></iframe>

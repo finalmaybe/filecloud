@@ -96,6 +96,11 @@ func TestPublishedFilePreviews(t *testing.T) {
 		if (name == "image.png" || name == "doc.pdf") && !strings.Contains(markup, `/libraries/`+lib+`/file-preview?commit=`+head) {
 			t.Errorf("%s: fragment media link must resolve at the pinned preview, not at the listing URL", name)
 		}
+		for _, label := range []string{`aria-label="缩小"`, `aria-label="放大"`, `>原始尺寸</button>`, `>适应窗口</button>`} {
+			if strings.Contains(markup, label) != (name == "image.png") {
+				t.Errorf("%s: unexpected presence or absence of image zoom control %s", name, label)
+			}
+		}
 	}
 	listing := f.req("GET", "/libraries/"+lib, nil)
 	if !strings.Contains(listing.Body.String(), `<dialog class="viewer"`) || !strings.Contains(listing.Header().Get("Content-Security-Policy"), "frame-src 'self'") || listing.Header().Get("X-Frame-Options") != "DENY" {
@@ -103,7 +108,7 @@ func TestPublishedFilePreviews(t *testing.T) {
 	}
 	for name, media := range map[string]string{"image.JPEG": "image/jpeg", "image.webp": "image/webp", "image.gif": "image/gif", "image.png": "image/png", "doc.pdf": "application/pdf"} {
 		w := get(name, "")
-		marker := "显示原始尺寸"
+		marker := `aria-label="图片缩放"`
 		if media == "application/pdf" {
 			marker = "<iframe"
 		}

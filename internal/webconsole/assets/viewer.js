@@ -1,8 +1,5 @@
 const canvas = document.querySelector('.viewer-body');
-enablePictureZoom(canvas);
-canvas.addEventListener('error', event => {
-  if (event.target.matches('.picture-target img')) canvas.replaceChildren(message('图片无法显示，可下载原文件查看。'));
-}, true);
+enablePicture(canvas);
 checkPDFSupport(canvas);
 
 const dialog = document.querySelector('#file-viewer');
@@ -49,7 +46,7 @@ function enableViewer(viewer, body) {
   next.addEventListener('click', () => step(1));
   viewer.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (body.contains(event.target) && body.querySelector('.viewer-zoom:checked')) return;
+    if (body.contains(event.target) && body.querySelector('.picture-scroll.is-zoomed')) return;
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
     step(event.key === 'ArrowLeft' ? -1 : 1);
@@ -58,13 +55,17 @@ function enableViewer(viewer, body) {
   // Only a fitted picture owns horizontal swipes. Zoomed pictures keep native panning.
   let touchStart;
   body.addEventListener('touchstart', event => {
-    touchStart = event.touches.length === 1 && event.target.closest('.picture-scroll') && !body.querySelector('.viewer-zoom:checked') ? event.touches[0] : null;
+    const scroll = event.target.closest('.picture-scroll:not(.is-zoomed)');
+    touchStart = event.touches.length === 1 && scroll ? {scroll, point: event.touches[0]} : null;
   }, {passive: true});
+  body.addEventListener('touchcancel', () => { touchStart = null; });
   body.addEventListener('touchend', event => {
     if (!touchStart) return;
-    const dx = event.changedTouches[0].clientX - touchStart.clientX;
-    const dy = event.changedTouches[0].clientY - touchStart.clientY;
+    const {scroll, point} = touchStart;
     touchStart = null;
+    if (scroll !== event.target.closest('.picture-scroll:not(.is-zoomed)')) return;
+    const dx = event.changedTouches[0].clientX - point.clientX;
+    const dy = event.changedTouches[0].clientY - point.clientY;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       event.preventDefault();
       step(dx < 0 ? 1 : -1);
@@ -112,6 +113,7 @@ function enableViewer(viewer, body) {
       if (signal.aborted) return;
       checkPDFSupport(stage.content);
       body.replaceChildren(stage.content);
+      enablePicture(body);
     } catch {
       if (signal.aborted) return;
       const status = message('预览未能打开。');
@@ -128,26 +130,94 @@ function checkPDFSupport(stage) {
   if (navigator.pdfViewerEnabled === false) stage.querySelector('.viewer-pdf')?.replaceWith(message('此浏览器不能内嵌 PDF，可下载原文件查看。'));
 }
 
-function enablePictureZoom(body) {
-  let point;
-  body.addEventListener('click', event => {
-    if (!event.target.closest('.picture-target')) return;
-    const img = body.querySelector('img').getBoundingClientRect();
-    point = {x: event.clientX, y: event.clientY, rx: (event.clientX - img.left) / img.width, ry: (event.clientY - img.top) / img.height};
-  });
-  body.addEventListener('change', event => {
-    if (!event.target.matches('.viewer-zoom')) return;
-    if (event.target.checked) {
-      const scroll = body.querySelector('.picture-scroll');
-      if (point) {
-        // Keep the detail that was clicked under the pointer after switching to 1:1.
-        const img = scroll.querySelector('img').getBoundingClientRect();
-        scroll.scrollBy(img.left + img.width * point.rx - point.x, img.top + img.height * point.ry - point.y);
-      } else {
-        scroll.scrollTo((scroll.scrollWidth - scroll.clientWidth) / 2, (scroll.scrollHeight - scroll.clientHeight) / 2);
-      }
+function enablePicture(body) {
+  const picture = body.querySelector('.viewer-picture');
+  if (!picture) return;
+  const scroll = picture.querySelector('.picture-scroll');
+  const img = scroll.querySelector('img');
+  const zoomIn = picture.querySelector('.picture-zoom-in');
+  const zoomOut = picture.querySelector('.picture-zoom-out');
+  const original = picture.querySelector('.picture-original');
+  const fit = picture.querySelector('.picture-fit');
+  const zoomStep = 1.25;
+  let scale = 1, drag, dragged = false;
+
+  function ready() {
+    img.style.setProperty('--picture-natural-width', `${img.naturalWidth}px`);
+    img.style.setProperty('--picture-ratio', img.naturalWidth / img.naturalHeight);
+    zoomIn.disabled = original.disabled = false;
+  }
+  function unavailable() {
+    picture.replaceWith(message('图片无法显示，可下载原文件查看。'));
+  }
+  if (img.complete) {
+    if (!img.naturalWidth) { unavailable(); return; }
+    ready();
+  } else {
+    img.addEventListener('load', ready, {once: true});
+    img.addEventListener('error', unavailable, {once: true});
+  }
+
+  function originalScale() {
+    return Math.max(1, img.naturalWidth / picture.clientWidth, img.naturalHeight / picture.clientHeight);
+  }
+
+  function zoomTo(target, point) {
+    if (zoomIn.disabled) return;
+    const next = Math.min(Math.max(5, originalScale()), Math.max(1, target));
+    if (next === scale) return;
+    const before = img.getBoundingClientRect();
+    const viewport = scroll.getBoundingClientRect();
+    const x = point?.clientX ?? viewport.left + scroll.clientWidth / 2;
+    const y = point?.clientY ?? viewport.top + scroll.clientHeight / 2;
+    scale = next;
+    scroll.classList.toggle('is-zoomed', scale > 1);
+    img.style.setProperty('--picture-scale', scale);
+    zoomOut.disabled = fit.disabled = scale === 1;
+    if (scale === 1) {
+      scroll.scrollTo(0, 0);
+      return;
     }
-    point = null;
+    // Keep the same image point under the pointer (or the center for toolbar actions).
+    const after = img.getBoundingClientRect();
+    scroll.scrollBy(after.left + after.width * (x - before.left) / before.width - x,
+      after.top + after.height * (y - before.top) / before.height - y);
+  }
+
+  zoomIn.addEventListener('click', () => zoomTo(scale * zoomStep));
+  zoomOut.addEventListener('click', () => zoomTo(scale / zoomStep));
+  original.addEventListener('click', () => zoomTo(originalScale()));
+  fit.addEventListener('click', () => zoomTo(1));
+  scroll.addEventListener('wheel', event => {
+    if (zoomIn.disabled || event.ctrlKey || event.metaKey || event.shiftKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    zoomTo(event.deltaY < 0 ? scale * zoomStep : scale / zoomStep, event);
+  }, {passive: false});
+
+  img.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    dragged = false;
+    if (scale === 1 || event.pointerType === 'touch') return;
+    drag = {id: event.pointerId, x: event.clientX, y: event.clientY, left: scroll.scrollLeft, top: scroll.scrollTop};
+    img.setPointerCapture(event.pointerId);
+  });
+  img.addEventListener('pointermove', event => {
+    if (event.pointerId !== drag?.id) return;
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (!dragged && Math.hypot(dx, dy) < 4) return;
+    dragged = true;
+    scroll.classList.add('is-dragging');
+    scroll.scrollTo(drag.left - dx, drag.top - dy);
+  });
+  img.addEventListener('lostpointercapture', event => {
+    if (event.pointerId !== drag?.id) return;
+    drag = null;
+    scroll.classList.remove('is-dragging');
+  });
+  img.addEventListener('click', event => {
+    if (dragged || zoomIn.disabled) return;
+    const native = originalScale();
+    zoomTo(scale > 1 ? 1 : native > 1 ? native : zoomStep, event);
   });
 }
 
