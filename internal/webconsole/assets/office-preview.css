@@ -1,0 +1,12 @@
+.office-word { white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.75 system-ui, sans-serif; tab-size: 4; }
+.viewer-paper.office-book { width: 100%; }
+.office-sheet { min-width: 0; border-top: 1px solid var(--line); }
+.office-sheet summary { padding: 12px 4px; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.office-sheet p { padding: 8px; }
+.office-sheet :is(summary, .office-grid):focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.office-grid { max-width: 100%; max-height: 52vh; overflow: auto; overscroll-behavior: contain; margin-bottom: 12px; }
+.office-grid table { border-collapse: separate; border-spacing: 0; font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.office-grid :is(td, th) { min-width: 5ch; max-width: 48ch; padding: 4px 8px; border: solid var(--line); border-width: 0 1px 1px 0; text-align: start; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.office-grid th { position: sticky; background: var(--wash, var(--side)); }
+.office-grid thead th { top: 0; z-index: 1; }
+.office-grid tbody th { left: 0; }

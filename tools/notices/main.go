@@ -187,8 +187,8 @@ func collectTarget(target releaseTarget, root string, modules map[string]noticeM
 			return errors.Join(fmt.Errorf("decode go list for %s: %w", name, err), terminate(command))
 		}
 		module := info.Module
-		if module == nil || module.Main {
-			continue
+		if module == nil || module.Main || module.Path == "github.com/mingming-cn/filecloud" {
+			continue // The desktop binary also links Filecloud's shared preview package.
 		}
 		if module.Replace != nil {
 			module = module.Replace

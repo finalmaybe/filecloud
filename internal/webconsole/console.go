@@ -41,7 +41,7 @@ type page struct {
 // NewHandler builds the Web routes for one configured public origin.
 // The server itself speaks HTTP; remote HTTPS terminates at a local reverse proxy.
 func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error) {
-	shell, err := template.New("shell.html").Funcs(template.FuncMap{"byteSize": byteSize, "versionRow": versionRow, "pathBase": path.Base, "pathDir": path.Dir}).ParseFS(files, "*.html")
+	shell, err := template.New("shell.html").Funcs(template.FuncMap{"byteSize": byteSize, "versionRow": versionRow, "pathBase": path.Base, "pathDir": path.Dir, "rowNumber": func(i int) int { return i + 1 }}).ParseFS(files, "*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func NewHandler(origin *auth.BrowserOrigin, config Config) (http.Handler, error)
 	mux.HandleFunc("POST /accounts/create", c.admin(c.saveAccount))
 	mux.HandleFunc("POST /accounts/reset", c.admin(c.saveAccount))
 	mux.HandleFunc("POST /accounts/{account}/delete", c.admin(c.deleteAccount))
-	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/byte-size.js", "assets/file-icon.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css"} {
+	for _, name := range []string{"assets/console.css", "assets/atlas.svg", "assets/console.js", "assets/local-time.js", "assets/byte-size.js", "assets/file-icon.js", "assets/libraries.js", "assets/files.js", "assets/viewer.js", "assets/viewer.css", "assets/office-preview.css"} {
 		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, files, name)
 		})

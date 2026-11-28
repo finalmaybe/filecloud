@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/assets/console.css">
   <script type="module" src="/assets/console.js"></script>
   {{if eq .View "libraries"}}<script type="module" src="/assets/libraries.js"></script>{{else if eq .View "library"}}<script type="module" src="/assets/files.js"></script>{{end}}
-  {{if or (eq .View "file-preview") (eq .View "library")}}<link rel="stylesheet" href="/assets/viewer.css"><script type="module" src="/assets/viewer.js"></script>{{end}}
+  {{if or (eq .View "file-preview") (eq .View "library")}}<link rel="stylesheet" href="/assets/viewer.css"><link rel="stylesheet" href="/assets/office-preview.css"><script type="module" src="/assets/viewer.js"></script>{{end}}
   <link rel="icon" type="image/svg+xml" href="/assets/atlas.svg">
 </head>
 <body{{if eq .View "file-preview"}} class="viewer-page"{{else if not .SignedIn}} class="standalone"{{end}}>

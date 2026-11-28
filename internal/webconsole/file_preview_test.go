@@ -48,6 +48,12 @@ func TestPublishedFilePreviews(t *testing.T) {
 		"empty.txt": {}, "binary.txt": {0x00, 0x01}, "invalid.txt": {0xef},
 		"large.log": []byte(strings.Repeat("a", (256<<10)-1) + "界unshown"),
 	}
+	for _, name := range []string{"sample.docx", "sample.xlsx"} {
+		files[name], err = os.ReadFile("../officepreview/testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	var entries []object.DirectoryEntry
 	for name, data := range files {
 		blocks := []string{}
@@ -86,7 +92,7 @@ func TestPublishedFilePreviews(t *testing.T) {
 			t.Errorf("%s: allowed inline source", name)
 		}
 	}
-	for _, name := range []string{"A+B & C.HTML", "image.png", "doc.pdf", "notes.docx"} {
+	for _, name := range []string{"A+B & C.HTML", "image.png", "doc.pdf", "notes.docx", "sample.docx", "sample.xlsx"} {
 		stage := get(name, "stage")
 		markup := strings.TrimSpace(stage.Body.String())
 		page := get(name, "")
@@ -100,6 +106,23 @@ func TestPublishedFilePreviews(t *testing.T) {
 			if strings.Contains(markup, label) != (name == "image.png") {
 				t.Errorf("%s: unexpected presence or absence of image zoom control %s", name, label)
 			}
+		}
+	}
+	for name, markers := range map[string][]string{
+		"sample.docx": {`class="office-word"`, "季度摘要", "&lt;b&gt;原文&lt;/b&gt;"},
+		"sample.xlsx": {"<summary>预算</summary>", "<summary>汇总</summary>", "<td>&lt;b&gt;原文&lt;/b&gt;</td><td></td><td>42</td>"},
+	} {
+		stage := get(name, "stage").Body.String()
+		for _, marker := range markers {
+			if !strings.Contains(stage, marker) {
+				t.Errorf("%s: missing %q in preview", name, marker)
+			}
+		}
+		if w := get(name, "inline"); w.Code != 415 {
+			t.Errorf("%s: allowed raw inline Office content", name)
+		}
+		if w := get(name, "download"); w.Code != 200 || !bytes.Equal(w.Body.Bytes(), files[name]) {
+			t.Errorf("%s: download changed the original file", name)
 		}
 	}
 	listing := f.req("GET", "/libraries/"+lib, nil)

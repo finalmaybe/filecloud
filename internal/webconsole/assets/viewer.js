@@ -46,7 +46,7 @@ function enableViewer(viewer, body) {
   next.addEventListener('click', () => step(1));
   viewer.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (body.contains(event.target) && body.querySelector('.picture-scroll.is-zoomed')) return;
+    if (event.target.closest('.office-grid') || (body.contains(event.target) && body.querySelector('.picture-scroll.is-zoomed'))) return;
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
     step(event.key === 'ArrowLeft' ? -1 : 1);

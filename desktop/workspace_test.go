@@ -393,6 +393,20 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+func TestLocalOfficePreview(t *testing.T) {
+	root := "../internal/officepreview/testdata"
+	word, err := localPreview(root, "sample.docx")
+	must(t, err)
+	if !strings.Contains(word.Content, "<b>原文</b>") || word.ModifiedAt == "" {
+		t.Fatal("missing document text or local file metadata")
+	}
+	book, err := localPreview(root, "sample.xlsx")
+	must(t, err)
+	if len(book.Sheets) != 2 || book.Sheets[1].Name != "汇总" || book.Sheets[1].Rows[0][0] != "42" {
+		t.Fatal("missing worksheet or saved formula result")
+	}
+}
+
 func TestLocalDocumentAndReveal(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	must(t, err)

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mingming-cn/filecloud/internal/library"
+	"github.com/mingming-cn/filecloud/internal/officepreview"
 )
 
 const textPreviewLimit = 256 << 10
@@ -17,6 +18,7 @@ const textPreviewLimit = 256 << 10
 type filePreview struct {
 	library.VersionTarget
 	Name, Parent, Kind, Text, Notice string
+	Sheets                           []officepreview.Sheet
 }
 
 func (c *console) previewFile(w http.ResponseWriter, r *http.Request, who identity) {
@@ -40,7 +42,7 @@ func (c *console) previewFile(w http.ResponseWriter, r *http.Request, who identi
 		return
 	}
 	if mode == "inline" {
-		if media == "" || media == "text/plain" {
+		if !strings.HasPrefix(media, "image/") && media != "application/pdf" {
 			http.Error(w, "此文件不支持内嵌预览。", http.StatusUnsupportedMediaType)
 			return
 		}
@@ -49,6 +51,16 @@ func (c *console) previewFile(w http.ResponseWriter, r *http.Request, who identi
 	}
 	data := filePreview{VersionTarget: target, Name: name, Parent: path.Dir(target.Path)}
 	switch media {
+	case officepreview.Word, officepreview.Excel:
+		doc, err := officepreview.Read(content, media, file.Size)
+		if err != nil {
+			c.problem(w, r, who, err)
+			return
+		}
+		data.Text, data.Sheets, data.Notice = doc.Text, doc.Sheets, doc.Notice
+		if doc.Text != "" {
+			data.Kind = "word"
+		}
 	case "text/plain":
 		prefix, err := io.ReadAll(io.LimitReader(content, textPreviewLimit))
 		if err != nil {
@@ -109,7 +121,7 @@ func previewType(name string, content *io.SectionReader) (string, error) {
 		".sh", ".sql", ".c", ".h", ".cpp", ".hpp", ".java", ".rb", ".php":
 		return "text/plain", nil
 	default:
-		return "", nil
+		return officepreview.Media(name), nil
 	}
 	var prefix [512]byte
 	n, err := content.ReadAt(prefix[:], 0)

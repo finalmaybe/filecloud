@@ -36,6 +36,22 @@
 </section>
 {{else if eq .Kind "pdf"}}
 <iframe class="viewer-pdf" title="{{.Name}} 的 PDF 预览" src="{{$resource}}?commit={{.CommitID}}&amp;path={{.Path}}&amp;mode=inline"></iframe>
+{{else if eq .Kind "word"}}
+<section class="viewer-paper-scroll" tabindex="0" aria-label="Word 正文"><article class="viewer-paper">
+  {{if .Notice}}<p class="viewer-note">{{.Notice}}</p>{{end}}
+  <div class="office-word">{{.Text}}</div>
+</article></section>
+{{else if .Sheets}}
+<section class="viewer-paper-scroll" tabindex="0" aria-label="Excel 工作簿"><article class="viewer-paper office-book">
+  {{if .Notice}}<p class="viewer-note">{{.Notice}}</p>{{end}}
+  {{range $i, $sheet := .Sheets}}<details class="office-sheet" {{if eq $i 0}}open{{end}}>
+    <summary>{{.Name}}</summary>
+    {{if .Columns}}<div class="office-grid" tabindex="0" role="region" aria-label="{{.Name}} 表格区域"><table aria-label="{{.Name}}">
+      <thead><tr><th scope="col">行</th>{{range .Columns}}<th scope="col">{{.}}</th>{{end}}</tr></thead>
+      <tbody>{{range $r, $cells := .Rows}}<tr><th scope="row">{{rowNumber $r}}</th>{{range $cells}}<td>{{.}}</td>{{end}}</tr>{{end}}</tbody>
+    </table></div>{{else}}<p>此工作表的预览区域为空。</p>{{end}}
+  </details>{{end}}
+</article></section>
 {{else if .Text}}
 <section class="viewer-paper-scroll" tabindex="0" aria-label="文本内容"><article class="viewer-paper">
   {{if .Notice}}<p class="viewer-note">{{.Notice}}</p>{{end}}

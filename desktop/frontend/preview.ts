@@ -44,7 +44,7 @@ export function showPreview(items: PreviewItem[], start = 0) {
       if (!d.open || index !== next) return;
       const size = item.size ?? (v.ModifiedAt ? String(v.Size) : "");
       footer.textContent = [
-        v.Media === "text/plain" ? "文本预览" : "",
+        previewLabels[v.Media],
         v.Notice,
         size ? bytes(size) : "",
       ]
@@ -90,6 +90,14 @@ export function showPreview(items: PreviewItem[], start = 0) {
   return done;
 }
 
+const wordMedia =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const previewLabels: Record<string, string> = {
+  [wordMedia]: "Word 正文",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel 工作簿",
+  "text/plain": "文本预览",
+};
+
 export function previewBody(
   v: Preview,
   name: string,
@@ -97,7 +105,16 @@ export function previewBody(
   tools?: HTMLElement,
 ) {
   const el = box("preview");
-  if (v.Media === "text/plain") {
+  if (v.Sheets?.length) {
+    if (thumbnail && v.Notice) el.append(sub(v.Notice));
+    el.append(...v.Sheets.map(sheetPreview));
+  } else if (v.Media === wordMedia) {
+    el.tabIndex = 0;
+    el.setAttribute("role", "region");
+    el.setAttribute("aria-label", "Word 正文");
+    if (thumbnail && v.Notice) el.append(sub(v.Notice));
+    el.append(box("office-word", v.Content));
+  } else if (v.Media === "text/plain") {
     const text = v.Content || "（空文件）";
     const numbers = n(
       "pre",
@@ -124,6 +141,41 @@ export function previewBody(
     );
   return el;
 }
+
+function sheetPreview(
+  sheet: NonNullable<Preview["Sheets"]>[number],
+  index: number,
+) {
+  const section = n("details", "office-sheet", n("summary", "", sheet.Name));
+  section.open = index === 0;
+  if (!sheet.Columns?.length) {
+    section.append(sub("此工作表的预览区域为空。"));
+    return section;
+  }
+  const table = n("table");
+  table.setAttribute("aria-label", sheet.Name);
+  const head = table.createTHead().insertRow();
+  for (const label of ["行", ...sheet.Columns]) {
+    const th = n("th", "", label);
+    th.scope = "col";
+    head.append(th);
+  }
+  const rows = table.createTBody();
+  for (const [i, cells] of (sheet.Rows ?? []).entries()) {
+    const row = rows.insertRow(),
+      th = n("th", "", String(i + 1));
+    th.scope = "row";
+    row.append(th);
+    for (const value of cells ?? []) row.insertCell().textContent = value;
+  }
+  const grid = box("office-grid", table);
+  grid.tabIndex = 0;
+  grid.setAttribute("role", "region");
+  grid.setAttribute("aria-label", sheet.Name + " 表格区域");
+  section.append(grid);
+  return section;
+}
+
 async function renderPDF(
   el: HTMLElement,
   content: string,

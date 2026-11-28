@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/mingming-cn/filecloud/internal/officepreview"
 )
 
 type FileEntry struct{ Name, Type, ModifiedAt, Size string }
@@ -53,6 +55,7 @@ type LibraryInfo struct {
 type Preview struct {
 	Media, Content, Notice, ModifiedAt string
 	Size                               int64
+	Sheets                             []officepreview.Sheet
 }
 type LibraryStats struct {
 	Size, Items string
@@ -253,6 +256,16 @@ func (s *Workspace) PreviewFile(id, commit, file string) (Preview, error) {
 }
 func readPreview(r io.Reader, name string, size int64) (Preview, error) {
 	const textLimit = 256 << 10
+	if media := officepreview.Media(name); media != "" {
+		doc, err := officepreview.Read(r, media, size)
+		if err != nil {
+			return Preview{}, errors.New("读取文件失败。")
+		}
+		if doc.Text == "" && len(doc.Sheets) == 0 {
+			return Preview{Notice: doc.Notice}, nil
+		}
+		return Preview{Media: media, Content: doc.Text, Sheets: doc.Sheets, Notice: doc.Notice}, nil
+	}
 	ext := strings.ToLower(path.Ext(name))
 	media := map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf"}[ext]
 	limit := textLimit
